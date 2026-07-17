@@ -219,6 +219,7 @@ dependencies = [
  "env_logger",
  "log",
  "rdkafka",
+ "ring",
  "rumqttc",
  "serde",
  "serde_json",

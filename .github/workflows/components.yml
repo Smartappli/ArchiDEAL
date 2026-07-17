@@ -41,6 +41,7 @@ jobs:
       - run: python -m unittest -v tests/integration/test_platform_integration.py
       - run: python -m pip install PyYAML && python -m unittest -v tests/deployment/test_deployment_readiness.py
       - run: python -m unittest -v tests/test_application_smoke.py
+      - run: cargo test --locked -p dealiot-event-contracts -p dealiot-mqtt-kafka-bridge
 
   dealhost:
     name: DEALHost

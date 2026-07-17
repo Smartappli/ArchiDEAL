@@ -368,7 +368,10 @@ pub fn build_event(msg: &MqttMessage, config: &BridgeConfig) -> BuiltEvent {
             .cloned()
             .map_or_else(|| json!({ "value": decoded }), Value::Object);
         event.insert("device_id".to_string(), Value::String(device_id));
-        event.insert("timestamp".to_string(), Value::String(timestamp));
+        event.insert(
+            "timestamp".to_string(),
+            Value::String(timestamp.clone()),
+        );
         event.insert("ingested_at".to_string(), Value::String(ingested_at));
         event.insert("payload".to_string(), payload);
     } else if kafka_topic == RAW_GPS_TOPIC {
@@ -410,7 +413,7 @@ pub fn build_event(msg: &MqttMessage, config: &BridgeConfig) -> BuiltEvent {
             .or_insert_with(|| Value::String(device_id));
         event
             .entry("timestamp".to_string())
-            .or_insert_with(|| Value::String(timestamp));
+            .or_insert_with(|| Value::String(timestamp.clone()));
         event.insert("ingested_at".to_string(), Value::String(ingested_at));
     }
 
