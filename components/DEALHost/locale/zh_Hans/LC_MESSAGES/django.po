@@ -1,0 +1,127 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: DEALHost\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "DEALHost - Tools/Apps Management"
+msgstr "DEALHost - 工具/应用管理"
+
+msgid "Language"
+msgstr "语言"
+
+msgid "Apply"
+msgstr "应用"
+
+msgid "Management interface for modules, tools and applications"
+msgstr "模块、工具和应用管理界面"
+
+msgid "Autodiscover tools and applications"
+msgstr "自动发现工具和应用"
+
+msgid "Modules"
+msgstr "模块"
+
+msgid "Name"
+msgstr "名称"
+
+msgid "Slug"
+msgstr "标识"
+
+msgid "Branch"
+msgstr "分支"
+
+msgid "Enabled"
+msgstr "启用"
+
+msgid "No modules"
+msgstr "暂无模块"
+
+msgid "Tools"
+msgstr "工具"
+
+msgid "Current version"
+msgstr "当前版本"
+
+msgid "No tools"
+msgstr "暂无工具"
+
+msgid "Applications"
+msgstr "应用"
+
+msgid "No applications"
+msgstr "暂无应用"
+
+msgid "Autodiscovery completed: "
+msgstr "自动发现完成："
+
+msgid "tools created=%(tools_created)s, tools updated=%(tools_updated)s, apps created=%(apps_created)s, apps updated=%(apps_updated)s, tool versions created=%(tool_versions_created)s, application versions created=%(application_versions_created)s."
+msgstr "已创建工具=%(tools_created)s，已更新工具=%(tools_updated)s，已创建应用=%(apps_created)s，已更新应用=%(apps_updated)s，已创建工具版本=%(tool_versions_created)s，已创建应用版本=%(application_versions_created)s。"
+
+msgid "Modular Hosting"
+msgstr "模块化托管"
+
+msgid "Version must follow semantic versioning (example: 1.2.3 or v1.2.3)."
+msgstr "版本必须遵循语义化版本规范（例如：1.2.3 或 v1.2.3）。"
+
+msgid "module_slug is required."
+msgstr "module_slug 为必填项。"
+
+msgid "Invalid GitHub signature."
+msgstr "无效的 GitHub 签名。"
+
+msgid "%(path)s: missing required field '%(field)s'"
+msgstr "%(path)s: 缺少必填字段“%(field)s”"
+
+msgid "%(path)s: invalid version '%(version)s', expected semantic version"
+msgstr "%(path)s: 版本“%(version)s”无效，应为语义化版本"
+
+msgid "%(path)s: unknown module slugs: %(slugs)s"
+msgstr "%(path)s: 未知模块 slug：%(slugs)s"
+
+msgid "Yes"
+msgstr "是"
+
+msgid "No"
+msgstr "否"
+
+msgid "Arabic"
+msgstr "阿拉伯语"
+
+msgid "Chinese (Simplified)"
+msgstr "中文（简体）"
+
+msgid "English"
+msgstr "英语"
+
+msgid "French"
+msgstr "法语"
+
+msgid "Russian"
+msgstr "俄语"
+
+msgid "Spanish"
+msgstr "西班牙语"
+
+msgid "Module"
+msgstr "模块"
+
+msgid "Tool"
+msgstr "工具"
+
+msgid "Tool version"
+msgstr "工具版本"
+
+msgid "Tool versions"
+msgstr "工具版本"
+
+msgid "Application"
+msgstr "应用"
+
+msgid "Application version"
+msgstr "应用版本"
+
+msgid "Application versions"
+msgstr "应用版本"

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Europe/Brussels",
+  "labels": ["dependencies", "renovate"],
+  "prConcurrentLimit": 3,
+  "dependencyDashboard": true,
+  "enabledManagers": ["custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^manifests/modules/.*\\.json$/"],
+      "matchStrings": [
+        "\"image\"\\s*:\\s*\"(?<depName>[^\":]+(?:/[^\":]+)+):(?<currentValue>[^\"@]+)\""
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["custom.regex"],
+      "groupName": "hosting manifest images",
+      "labels": ["dependencies", "renovate", "hosting-manifest"]
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["ghcr.io/smartappli/**"],
+      "labels": [
+        "dependencies",
+        "renovate",
+        "hosting-manifest",
+        "smartappli-ghcr"
+      ]
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": [
+        "apicurio/apicurio-registry",
+        "prom/prometheus",
+        "ghcr.io/dealiot/**"
+      ],
+      "labels": [
+        "dependencies",
+        "renovate",
+        "hosting-manifest",
+        "public-image"
+      ]
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "labels": ["dependencies", "renovate", "major-update"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}

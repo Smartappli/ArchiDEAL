@@ -1,0 +1,17 @@
+{
+  "artifactId": "dataact.legal_basis.checks",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DataActLegalBasisCheck\",\"type\":\"object\",\"required\":[\"check_id\",\"request_id\",\"personal_data_in_scope\",\"decision\",\"checked_at\"],\"properties\":{\"check_id\":{\"type\":\"string\"},\"request_id\":{\"type\":\"string\"},\"user_is_data_subject\":{\"type\":\"boolean\"},\"personal_data_in_scope\":{\"type\":\"boolean\"},\"gdpr_legal_basis\":{\"type\":\"string\"},\"data_categories\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"recipient_id\":{\"type\":\"string\"},\"decision\":{\"type\":\"string\",\"enum\":[\"approved\",\"requires_gdpr_basis\",\"requires_minimisation\",\"rejected\"]},\"reviewer\":{\"type\":\"string\"},\"checked_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "dataact",
+    "topic": "dataact.legal_basis.checks",
+    "regulation": "Data Act,GDPR"
+  },
+  "name": "Data Act Legal Basis Check"
+}

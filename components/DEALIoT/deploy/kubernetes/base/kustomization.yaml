@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dealiot
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - mqtt-kafka-bridge.yaml
+  - apicurio-registry.yaml
+  - airflow.yaml
+  - management-console.yaml
+
+images:
+  - name: ghcr.io/smartappli/dealiot-mqtt-kafka-bridge
+    newTag: local-placeholder
+  - name: ghcr.io/smartappli/dealiot-stream-normalizer
+    newTag: local-placeholder
+  - name: ghcr.io/smartappli/dealiot-management-console
+    newTag: local-placeholder
+  - name: ghcr.io/smartappli/dealiot-flink-pyflink
+    newTag: local-placeholder
+  - name: ghcr.io/smartappli/dealiot-orchestration
+    newTag: local-placeholder

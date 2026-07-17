@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dealiot-runtime-config
+  labels:
+    app.kubernetes.io/part-of: dealiot
+data:
+  AWS_DEFAULT_REGION: "us-east-1"
+  AWS_REGION: "us-east-1"
+  DEFAULT_KAFKA_TOPIC: "raw.sensor"
+  FLINK_PARALLELISM: "4"
+  FLINK_TASK_SLOTS: "4"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+  LOG_LEVEL: "INFO"
+  FEATURES_TOPIC: "features.events"
+  MQTT_HOST: "mqtt-broker.ingest.svc.cluster.local"
+  MQTT_PORT: "1883"
+  MQTT_TOPICS: "$share/ingestors/devices/#,$share/ingestors/wildfi/#"
+  MQTT_USERNAME: "admin"
+  S3_ENDPOINT_URL: "https://s3.example.net"
+  STATE_TOPIC: "state.latest"
+  STREAM_NORMALIZER_CONSUMER_GROUP: "stream-normalizer-v1"
+  STREAM_NORMALIZER_SOURCE_TOPICS: "raw.sensor,raw.gps,raw.image2d.meta,raw.image3d.meta,raw.video2d.meta,raw.video3d.meta"
+  WILDFI_DECODER_REPOSITORY: "https://github.com/wildlab/WildFiDecoder"
+  WILDFI_FIRMWARE_REPOSITORY: "https://github.com/trichl/WildFiOpenSource"
+  WILDFI_TOPIC_PREFIXES: "wildfi,wild-fi"
+  APICURIO_KAFKASQL_TOPIC: "kafkasql-journal-v3"
+  APICURIO_KAFKASQL_SNAPSHOTS_TOPIC: "kafkasql-snapshots-v3"
+  APICURIO_EVENTS_KAFKA_TOPIC: "registry-events-v3"

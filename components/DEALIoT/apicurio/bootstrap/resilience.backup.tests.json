@@ -1,0 +1,17 @@
+{
+  "artifactId": "resilience.backup.tests",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"ResilienceBackupTest\",\"type\":\"object\",\"required\":[\"test_id\",\"system\",\"tested_at\",\"result\",\"rpo_minutes\",\"rto_minutes\"],\"properties\":{\"test_id\":{\"type\":\"string\"},\"system\":{\"type\":\"string\"},\"tested_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"result\":{\"type\":\"string\",\"enum\":[\"passed\",\"failed\",\"partial\"]},\"rpo_minutes\":{\"type\":\"integer\",\"minimum\":0},\"rto_minutes\":{\"type\":\"integer\",\"minimum\":0},\"restore_scope\":{\"type\":\"string\"},\"evidence_uri\":{\"type\":\"string\"},\"findings\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"next_test_due_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "resilience",
+    "topic": "resilience.backup.tests",
+    "regulation": "NIS2,DORA"
+  },
+  "name": "Resilience Backup Test"
+}

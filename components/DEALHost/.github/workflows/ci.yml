@@ -1,0 +1,69 @@
+name: CI Django DEALHost
+
+on:
+  push:
+    branches: ["main", "work"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
+
+      - name: Install requirements with uv
+        run: uv pip install --system -r requirements.txt
+
+      - name: Install project package with uv
+        run: uv pip install --system -e .
+
+      - name: Install coverage tooling
+        run: uv pip install --system coverage
+
+      - name: Run migrations check
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: Run unit tests with coverage
+        env:
+          DJANGO_SETTINGS_MODULE: dealhost.settings.test
+          GITHUB_TOKEN: test-token
+          GITHUB_WEBHOOK_SECRET: test-secret
+          APISIX_ADMIN_KEY: test-key
+        run: >-
+          uv run coverage run
+          manage.py test tests --verbosity 2
+
+      - name: Enforce minimum coverage (80%)
+        run: uv run coverage report --fail-under=80
+
+      - name: Export coverage XML
+        run: uv run coverage xml -o coverage.xml
+
+      - name: Upload coverage artifact
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: error
+
+      - name: Compile check
+        run: uv run python -m compileall dealhost apps tests

@@ -1,0 +1,127 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: DEALHost\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "DEALHost - Tools/Apps Management"
+msgstr "DEALHost - Tools/Apps Management"
+
+msgid "Language"
+msgstr "Language"
+
+msgid "Apply"
+msgstr "Apply"
+
+msgid "Management interface for modules, tools and applications"
+msgstr "Management interface for modules, tools and applications"
+
+msgid "Autodiscover tools and applications"
+msgstr "Autodiscover tools and applications"
+
+msgid "Modules"
+msgstr "Modules"
+
+msgid "Name"
+msgstr "Name"
+
+msgid "Slug"
+msgstr "Slug"
+
+msgid "Branch"
+msgstr "Branch"
+
+msgid "Enabled"
+msgstr "Enabled"
+
+msgid "No modules"
+msgstr "No modules"
+
+msgid "Tools"
+msgstr "Tools"
+
+msgid "Current version"
+msgstr "Current version"
+
+msgid "No tools"
+msgstr "No tools"
+
+msgid "Applications"
+msgstr "Applications"
+
+msgid "No applications"
+msgstr "No applications"
+
+msgid "Autodiscovery completed: "
+msgstr "Autodiscovery completed: "
+
+msgid "tools created=%(tools_created)s, tools updated=%(tools_updated)s, apps created=%(apps_created)s, apps updated=%(apps_updated)s, tool versions created=%(tool_versions_created)s, application versions created=%(application_versions_created)s."
+msgstr "tools created=%(tools_created)s, tools updated=%(tools_updated)s, apps created=%(apps_created)s, apps updated=%(apps_updated)s, tool versions created=%(tool_versions_created)s, application versions created=%(application_versions_created)s."
+
+msgid "Modular Hosting"
+msgstr "Modular Hosting"
+
+msgid "Version must follow semantic versioning (example: 1.2.3 or v1.2.3)."
+msgstr "Version must follow semantic versioning (example: 1.2.3 or v1.2.3)."
+
+msgid "module_slug is required."
+msgstr "module_slug is required."
+
+msgid "Invalid GitHub signature."
+msgstr "Invalid GitHub signature."
+
+msgid "%(path)s: missing required field '%(field)s'"
+msgstr "%(path)s: missing required field '%(field)s'"
+
+msgid "%(path)s: invalid version '%(version)s', expected semantic version"
+msgstr "%(path)s: invalid version '%(version)s', expected semantic version"
+
+msgid "%(path)s: unknown module slugs: %(slugs)s"
+msgstr "%(path)s: unknown module slugs: %(slugs)s"
+
+msgid "Yes"
+msgstr "Yes"
+
+msgid "No"
+msgstr "No"
+
+msgid "Arabic"
+msgstr "Arabic"
+
+msgid "Chinese (Simplified)"
+msgstr "Chinese (Simplified)"
+
+msgid "English"
+msgstr "English"
+
+msgid "French"
+msgstr "French"
+
+msgid "Russian"
+msgstr "Russian"
+
+msgid "Spanish"
+msgstr "Spanish"
+
+msgid "Module"
+msgstr "Module"
+
+msgid "Tool"
+msgstr "Tool"
+
+msgid "Tool version"
+msgstr "Tool version"
+
+msgid "Tool versions"
+msgstr "Tool versions"
+
+msgid "Application"
+msgstr "Application"
+
+msgid "Application version"
+msgstr "Application version"
+
+msgid "Application versions"
+msgstr "Application versions"

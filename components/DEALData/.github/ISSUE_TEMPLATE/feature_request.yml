@@ -1,0 +1,48 @@
+﻿name: Feature or integration request
+description: Propose a data service, ingestion, deployment, or governance improvement.
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Explain the adoption, operational, or data-value problem.
+    validations:
+      required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Request type
+      options:
+        - Core data model or API
+        - GPS data model or API
+        - Sensor data model or API
+        - WildFi ingestion behavior
+        - DEALIoT Kafka integration
+        - Data product or export
+        - Observability or runbook improvement
+        - Security or compliance workflow
+        - Documentation or onboarding
+        - Deployment profile
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include affected endpoints, models, topics, contracts, manifests, or docs when known.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation approach
+      description: Describe the test, fixture, demo, scorecard, or evidence that would prove this works.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Operational or security risks
+      description: Note secrets, migrations, production impact, support boundaries, or compliance concerns.

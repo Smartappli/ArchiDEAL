@@ -1,0 +1,41 @@
+apiVersion: policies.kyverno.io/v1
+kind: NamespacedImageValidatingPolicy
+metadata:
+  name: verify-dealiot-release-images
+spec:
+  validationActions:
+    - Deny
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 20
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+  matchImageReferences:
+    - glob: ghcr.io/smartappli/dealiot-*
+  attestors:
+    - name: githubActions
+      cosign:
+        keyless:
+          identities:
+            - subjectRegExp: "https://github\\.com/Smartappli/DEALIoT/\\.github/workflows/build-and-push-images\\.yml@refs/(heads/main|tags/.+)"
+              issuer: https://token.actions.githubusercontent.com
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validationConfigurations:
+    mutateDigest: true
+    required: true
+    verifyDigest: true
+  validations:
+    - expression: >-
+        images.containers.map(image,
+        verifyImageSignatures(image, [attestors.githubActions])).all(result, result > 0)
+      message: DEALIoT images must be signed by the protected build workflow

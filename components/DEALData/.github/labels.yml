@@ -1,0 +1,36 @@
+﻿- name: adoption
+  color: "0E8A16"
+  description: User adoption, pilots, or community growth work.
+- name: user-feedback
+  color: "1D76DB"
+  description: User friction or evaluation feedback that is not yet a confirmed bug.
+- name: integration
+  color: "FBCA04"
+  description: DEALIoT, DealHost, data export, or partner integration.
+- name: use-case
+  color: "B60205"
+  description: Concrete scenario proposed for pilots, documentation, demos, or launch material.
+- name: contributor
+  color: "0E8A16"
+  description: Contributor onboarding, scoping, mentoring, or community development work.
+- name: good first issue
+  color: "7057FF"
+  description: Small, well-scoped contribution suitable for a new contributor.
+- name: help wanted
+  color: "008672"
+  description: Scoped work where external contribution is welcome.
+- name: mentored
+  color: "C2E0C6"
+  description: Contribution where a maintainer can provide explicit guidance.
+- name: community
+  color: "BFD4F2"
+  description: Community operations, governance, recognition, or discussion work.
+- name: question
+  color: "D4C5F9"
+  description: Usage question or evaluation blocker.
+- name: idea
+  color: "C5DEF5"
+  description: Product or integration idea before it becomes scoped work.
+- name: show-and-tell
+  color: "BFDADC"
+  description: Approved demo result, lesson learned, or adopter story.

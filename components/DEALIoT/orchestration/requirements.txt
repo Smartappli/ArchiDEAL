@@ -1,0 +1,12 @@
+apache-airflow-providers-amazon
+apache-airflow-providers-apache-beam[common.compat]
+apache-airflow-providers-apache-flink
+apache-airflow-providers-apache-kafka
+apache-airflow-providers-fab
+apache-airflow-providers-postgres
+apache-airflow-providers-redis
+boto3
+cachetools
+kafka-python
+psycopg[binary]
+requests

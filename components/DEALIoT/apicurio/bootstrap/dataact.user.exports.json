@@ -1,0 +1,17 @@
+{
+  "artifactId": "dataact.user.exports",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DataActUserExport\",\"type\":\"object\",\"required\":[\"export_id\",\"request_id\",\"user_id\",\"data_product_id\",\"format\",\"delivery_channel\",\"created_at\",\"status\"],\"properties\":{\"export_id\":{\"type\":\"string\"},\"request_id\":{\"type\":\"string\"},\"user_id\":{\"type\":\"string\"},\"third_party_id\":{\"type\":\"string\"},\"data_product_id\":{\"type\":\"string\"},\"format\":{\"type\":\"string\"},\"schema_uri\":{\"type\":\"string\"},\"delivery_channel\":{\"type\":\"string\",\"enum\":[\"api\",\"file_export\",\"stream\",\"controlled_workspace\"]},\"export_uri\":{\"type\":\"string\"},\"record_count\":{\"type\":\"integer\",\"minimum\":0},\"size_bytes\":{\"type\":\"integer\",\"minimum\":0},\"created_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"expires_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"status\":{\"type\":\"string\",\"enum\":[\"created\",\"delivered\",\"expired\",\"revoked\",\"failed\"]}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "dataact",
+    "topic": "dataact.user.exports",
+    "regulation": "Data Act"
+  },
+  "name": "Data Act User Export"
+}

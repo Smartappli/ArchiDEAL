@@ -1,0 +1,10 @@
+# syntax=docker/dockerfile:1.7
+
+ARG BEAM_VERSION=2.73.0
+
+FROM apache/beam_python3.13_sdk:${BEAM_VERSION}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+CMD ["--worker_pool"]

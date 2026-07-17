@@ -1,0 +1,17 @@
+{
+  "artifactId": "dataact.third_party.sharing",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DataActThirdPartySharing\",\"type\":\"object\",\"required\":[\"sharing_id\",\"user_id\",\"third_party_id\",\"connected_product_id\",\"scope\",\"purpose\",\"requested_at\",\"status\"],\"properties\":{\"sharing_id\":{\"type\":\"string\"},\"user_id\":{\"type\":\"string\"},\"third_party_id\":{\"type\":\"string\"},\"third_party_type\":{\"type\":\"string\",\"enum\":[\"application_provider\",\"research_organisation\",\"service_provider\",\"other\"]},\"connected_product_id\":{\"type\":\"string\"},\"scope\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"purpose\":{\"type\":\"string\"},\"format\":{\"type\":\"string\"},\"delivery_channel\":{\"type\":\"string\",\"enum\":[\"api\",\"file_export\",\"stream\",\"controlled_workspace\"]},\"dma_gatekeeper_excluded\":{\"type\":\"boolean\"},\"third_country_jurisdiction\":{\"type\":\"string\"},\"requested_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"fulfilled_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"status\":{\"type\":\"string\",\"enum\":[\"submitted\",\"approved\",\"fulfilled\",\"rejected\",\"withdrawn\",\"expired\"]},\"decision_reason\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "dataact",
+    "topic": "dataact.third_party.sharing",
+    "regulation": "Data Act"
+  },
+  "name": "Data Act Third Party Sharing"
+}

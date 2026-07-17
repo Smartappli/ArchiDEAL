@@ -1,0 +1,349 @@
+version: "3.9"
+
+x-default-deploy: &default-deploy
+  update_config:
+    order: start-first
+    parallelism: 1
+    failure_action: rollback
+  rollback_config:
+    order: stop-first
+    parallelism: 1
+  restart_policy:
+    condition: any
+    delay: 5s
+    max_attempts: 5
+    window: 2m
+
+x-airflow-env: &airflow-env
+  AIRFLOW__CORE__EXECUTOR: "CeleryExecutor"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__DEFAULT_TIMEZONE: "Europe/Brussels"
+  AIRFLOW__CORE__FERNET_KEY: "${AIRFLOW__CORE__FERNET_KEY:?set AIRFLOW__CORE__FERNET_KEY}"
+  AIRFLOW__CORE__AUTH_MANAGER: "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:?set AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}"
+  AIRFLOW__CELERY__RESULT_BACKEND: "${AIRFLOW__CELERY__RESULT_BACKEND:?set AIRFLOW__CELERY__RESULT_BACKEND}"
+  AIRFLOW__CELERY__BROKER_URL: "${AIRFLOW__CELERY__BROKER_URL:?set AIRFLOW__CELERY__BROKER_URL}"
+  AIRFLOW__CELERY__WORKER_ENABLE_REMOTE_CONTROL: "true"
+  AIRFLOW__FAB__AUTH_BACKENDS: "airflow.providers.fab.auth_manager.api.auth.backend.session"
+  AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
+  AIRFLOW__API__SECRET_KEY: "${AIRFLOW__API__SECRET_KEY:?set AIRFLOW__API__SECRET_KEY}"
+  AIRFLOW__API_AUTH__JWT_SECRET: "${AIRFLOW__API_AUTH__JWT_SECRET:?set AIRFLOW__API_AUTH__JWT_SECRET}"
+  AIRFLOW__API_AUTH__JWT_ISSUER: "airflow"
+  KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}"
+  KAFKA_SECURITY_PROTOCOL: "${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}"
+  KAFKA_SASL_MECHANISM: "${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}"
+  KAFKA_SASL_USERNAME: "${KAFKA_SASL_USERNAME:?set KAFKA_SASL_USERNAME}"
+  KAFKA_SASL_PASSWORD: "${KAFKA_SASL_PASSWORD:?set KAFKA_SASL_PASSWORD}"
+  AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}"
+  AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}"
+  AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
+  AWS_REGION: "${AWS_REGION:-us-east-1}"
+  S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?set S3_ENDPOINT_URL}"
+  APICURIO_REGISTRY_V3_URL: "http://apicurio-registry:8080/apis/registry/v3"
+
+x-flink-env: &flink-env
+  ENABLE_BUILT_IN_PLUGINS: "flink-s3-fs-hadoop-2.2.1.jar;flink-metrics-prometheus-2.2.1.jar"
+  FLINK_PYTHON: "/opt/flink/venv/bin/python"
+  PYFLINK_CLIENT_EXECUTABLE: "/opt/flink/venv/bin/python"
+  KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}"
+  KAFKA_SECURITY_PROTOCOL: "${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}"
+  KAFKA_SASL_MECHANISM: "${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}"
+  KAFKA_SASL_USERNAME: "${KAFKA_SASL_USERNAME:?set KAFKA_SASL_USERNAME}"
+  KAFKA_SASL_PASSWORD: "${KAFKA_SASL_PASSWORD:?set KAFKA_SASL_PASSWORD}"
+  S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?set S3_ENDPOINT_URL}"
+  AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}"
+  AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}"
+
+services:
+  mqtt-kafka-bridge:
+    image: "${DEALIOT_MQTT_KAFKA_BRIDGE_IMAGE:?set DEALIOT_MQTT_KAFKA_BRIDGE_IMAGE}"
+    environment:
+      MQTT_HOST: "${MQTT_HOST:?set MQTT_HOST}"
+      MQTT_PORT: "${MQTT_PORT:-8883}"
+      MQTT_CLIENT_ID: "dealiot-bridge-{{.Task.Slot}}"
+      MQTT_CLEAN_SESSION: "false"
+      MQTT_TLS_ENABLED: "${MQTT_TLS_ENABLED:-true}"
+      MQTT_USERNAME: "${MQTT_USERNAME:-dealiot_ingestor}"
+      MQTT_PASSWORD_FILE: "/run/secrets/mqtt_password"
+      MQTT_TOPICS: "${MQTT_TOPICS:-$$share/ingestors/devices/#,$$share/ingestors/wildfi/#}"
+      WILDFI_TOPIC_PREFIXES: "${WILDFI_TOPIC_PREFIXES:-wildfi,wild-fi}"
+      KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}"
+      KAFKA_SECURITY_PROTOCOL: "${KAFKA_SECURITY_PROTOCOL:-SASL_SSL}"
+      KAFKA_SASL_MECHANISM: "${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}"
+      KAFKA_SASL_USERNAME: "${KAFKA_SASL_USERNAME:?set KAFKA_SASL_USERNAME}"
+      KAFKA_SASL_PASSWORD_FILE: "/run/secrets/kafka_sasl_password"
+      DEFAULT_KAFKA_TOPIC: "raw.sensor"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    secrets:
+      - source: mqtt_password
+        target: mqtt_password
+        mode: 0400
+      - source: kafka_sasl_password
+        target: kafka_sasl_password
+        mode: 0400
+    networks:
+      - ingest
+      - backbone
+    deploy:
+      <<: *default-deploy
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  apicurio-registry:
+    image: "apicurio/apicurio-registry:3.2.4"
+    environment:
+      APICURIO_STORAGE_KIND: "kafkasql"
+      APICURIO_KAFKASQL_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}"
+      APICURIO_KAFKASQL_TOPIC: "kafkasql-journal-v3"
+      APICURIO_KAFKASQL_SNAPSHOTS_TOPIC: "kafkasql-snapshots-v3"
+      APICURIO_EVENTS_KAFKA_TOPIC: "registry-events-v3"
+      APICURIO_STORAGE_ENABLE_AUTOMATIC_GROUP_CREATION: "true"
+    networks:
+      - backbone
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  flink-jobmanager:
+    image: "${DEALIOT_FLINK_PYFLINK_IMAGE:?set DEALIOT_FLINK_PYFLINK_IMAGE}"
+    command: "jobmanager"
+    environment:
+      <<: *flink-env
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        rest.address: flink-jobmanager
+        rest.port: 8081
+        parallelism.default: ${FLINK_PARALLELISM:-4}
+        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS:-4}
+        state.backend.type: rocksdb
+        state.checkpoints.dir: s3://flink-checkpoints/streaming
+        execution.checkpointing.savepoint-dir: s3://flink-savepoints/streaming
+        execution.checkpointing.interval: 10s
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.timeout: 5min
+        restart-strategy.type: exponential-delay
+        restart-strategy.exponential-delay.initial-backoff: 2 s
+        restart-strategy.exponential-delay.max-backoff: 30 s
+        s3.endpoint: ${S3_ENDPOINT_URL:?set S3_ENDPOINT_URL}
+        s3.path.style.access: true
+        s3.access-key: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
+        s3.secret-key: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+    networks:
+      - backbone
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 1
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+
+  flink-taskmanager:
+    image: "${DEALIOT_FLINK_PYFLINK_IMAGE:?set DEALIOT_FLINK_PYFLINK_IMAGE}"
+    command: "taskmanager"
+    environment:
+      <<: *flink-env
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        rest.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: ${FLINK_TASK_SLOTS:-4}
+        parallelism.default: ${FLINK_PARALLELISM:-4}
+        state.backend.type: rocksdb
+        state.checkpoints.dir: s3://flink-checkpoints/streaming
+        execution.checkpointing.savepoint-dir: s3://flink-savepoints/streaming
+        execution.checkpointing.interval: 10s
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.timeout: 5min
+        s3.endpoint: ${S3_ENDPOINT_URL:?set S3_ENDPOINT_URL}
+        s3.path.style.access: true
+        s3.access-key: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
+        s3.secret-key: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+    networks:
+      - backbone
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+
+  airflow-migrate:
+    image: "${DEALIOT_ORCHESTRATION_IMAGE:?set DEALIOT_ORCHESTRATION_IMAGE}"
+    command:
+      - bash
+      - -lc
+      - >
+        airflow db migrate &&
+        airflow users create
+        --username "${AIRFLOW_ADMIN_USER:-admin}"
+        --password "${AIRFLOW_ADMIN_PASSWORD:?set AIRFLOW_ADMIN_PASSWORD}"
+        --firstname Air
+        --lastname Flow
+        --role Admin
+        --email "${AIRFLOW_ADMIN_EMAIL:-admin@example.com}" || true
+    environment:
+      <<: *airflow-env
+    networks:
+      - backbone
+      - control
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+  airflow-apiserver:
+    image: "${DEALIOT_ORCHESTRATION_IMAGE:?set DEALIOT_ORCHESTRATION_IMAGE}"
+    command: "api-server"
+    environment:
+      <<: *airflow-env
+    networks:
+      - backbone
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+
+  management-console:
+    image: "${DEALIOT_MANAGEMENT_CONSOLE_IMAGE:?set DEALIOT_MANAGEMENT_CONSOLE_IMAGE}"
+    environment:
+      MANAGEMENT_CONSOLE_PORT: "8080"
+      MANAGEMENT_CONSOLE_PROBE_TIMEOUT_SECONDS: "2"
+      KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS:?set KAFKA_BOOTSTRAP_SERVERS}"
+      MQTT_HOST: "${MQTT_HOST:?set MQTT_HOST}"
+      MQTT_PORT: "${MQTT_PORT:-1883}"
+      S3_ENDPOINT_URL: "${S3_ENDPOINT_URL:?set S3_ENDPOINT_URL}"
+      AIRFLOW_API_URL: "http://airflow-apiserver:8080/api/v2"
+      APICURIO_REGISTRY_URL: "http://apicurio-registry:8080/apis/registry/v3"
+      FLINK_REST_URL: "http://flink-jobmanager:8081"
+    networks:
+      - ingest
+      - backbone
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+  airflow-scheduler:
+    image: "${DEALIOT_ORCHESTRATION_IMAGE:?set DEALIOT_ORCHESTRATION_IMAGE}"
+    command: "scheduler"
+    environment:
+      <<: *airflow-env
+    networks:
+      - backbone
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 1
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+
+  airflow-worker:
+    image: "${DEALIOT_ORCHESTRATION_IMAGE:?set DEALIOT_ORCHESTRATION_IMAGE}"
+    command: "celery worker"
+    environment:
+      <<: *airflow-env
+      DUMB_INIT_SETSID: "0"
+    networks:
+      - backbone
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+
+  airflow-triggerer:
+    image: "${DEALIOT_ORCHESTRATION_IMAGE:?set DEALIOT_ORCHESTRATION_IMAGE}"
+    command: "triggerer"
+    environment:
+      <<: *airflow-env
+    networks:
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  airflow-dag-processor:
+    image: "${DEALIOT_ORCHESTRATION_IMAGE:?set DEALIOT_ORCHESTRATION_IMAGE}"
+    command: "dag-processor"
+    environment:
+      <<: *airflow-env
+    networks:
+      - control
+    deploy:
+      <<: *default-deploy
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  ingest:
+    driver: overlay
+    attachable: true
+  backbone:
+    driver: overlay
+    attachable: true
+  control:
+    driver: overlay
+    attachable: true
+
+secrets:
+  mqtt_password:
+    external: true
+  kafka_sasl_password:
+    external: true

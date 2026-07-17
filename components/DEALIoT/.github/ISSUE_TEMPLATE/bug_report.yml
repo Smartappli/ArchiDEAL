@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible platform, deployment, documentation, or website defect.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the defect and the expected behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Local development
+        - MQTT ingestion
+        - Kafka or schema registry
+        - Flink, Beam, or Airflow processing
+        - Management Console
+        - Kubernetes deployment
+        - Docker Swarm deployment
+        - Website or documentation
+        - Compliance or governance workflow
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include commands, sanitized config, and fixture data when possible.
+      placeholder: |
+        1. Run ...
+        2. Observe ...
+        3. Expected ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      render: shell
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA
+      description: Run `git rev-parse HEAD` when possible.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I have removed secrets, private endpoint values, and customer data from this report.
+          required: true

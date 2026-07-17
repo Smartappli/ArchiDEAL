@@ -1,0 +1,76 @@
+{
+  "Servers": {
+    "1": {
+      "Group": "Patroni",
+      "Host": "haproxy",
+      "MaintenanceDB": "postgres",
+      "Name": "Patroni RW - HAProxy",
+      "Port": 5432,
+      "SSLMode": "prefer",
+      "Username": "postgres"
+    },
+    "2": {
+      "Group": "Patroni",
+      "Host": "haproxy",
+      "MaintenanceDB": "postgres",
+      "Name": "Patroni RO - HAProxy",
+      "Port": 5433,
+      "SSLMode": "prefer",
+      "Username": "postgres"
+    },
+    "3": {
+      "Group": "Patroni",
+      "Host": "pgbouncer-rw",
+      "MaintenanceDB": "appdb",
+      "Name": "PgBouncer RW",
+      "Port": 5432,
+      "SSLMode": "prefer",
+      "Username": "app_user"
+    },
+    "4": {
+      "Group": "Patroni",
+      "Host": "pgbouncer-ro",
+      "MaintenanceDB": "appdb",
+      "Name": "PgBouncer RO",
+      "Port": 5432,
+      "SSLMode": "prefer",
+      "Username": "app_user"
+    },
+    "5": {
+      "Group": "Patroni Direct",
+      "Host": "pg1",
+      "MaintenanceDB": "postgres",
+      "Name": "PG1 direct",
+      "Port": 5432,
+      "SSLMode": "prefer",
+      "Username": "postgres"
+    },
+    "6": {
+      "Group": "Patroni Direct",
+      "Host": "pg2",
+      "MaintenanceDB": "postgres",
+      "Name": "PG2 direct",
+      "Port": 5432,
+      "SSLMode": "prefer",
+      "Username": "postgres"
+    },
+    "7": {
+      "Group": "Patroni Direct",
+      "Host": "pg3",
+      "MaintenanceDB": "postgres",
+      "Name": "PG3 direct",
+      "Port": 5432,
+      "SSLMode": "prefer",
+      "Username": "postgres"
+    },
+    "8": {
+      "Group": "Airflow",
+      "Host": "airflow-postgres",
+      "MaintenanceDB": "airflow",
+      "Name": "Airflow Postgres",
+      "Port": 5432,
+      "SSLMode": "prefer",
+      "Username": "airflow"
+    }
+  }
+}

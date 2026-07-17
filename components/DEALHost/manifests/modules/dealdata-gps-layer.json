@@ -1,0 +1,20 @@
+{
+  "name": "DEALData GPS Layer",
+  "slug": "dealdata-gps-layer",
+  "image": "ghcr.io/smartappli/dealdata-gps-layer:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALData/gps_layer",
+  "deployment_target": "compose",
+  "public_path": "/dealdata/gps",
+  "upstream_host": "dealdata-gps",
+  "upstream_port": 7001,
+  "contract_topics": [
+    "gps_sensors",
+    "gps_raw_data",
+    "processed_gps_data"
+  ],
+  "production_ready": false,
+  "enabled": true
+}

@@ -1,0 +1,78 @@
+name: Compose Deployment Smoke Test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "docker-compose.yml"
+      - "scripts/**"
+      - ".github/workflows/compose-deployment-test.yml"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  compose-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      AIRFLOW_FERNET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-fernet
+      AIRFLOW_API_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-api
+      AIRFLOW_JWT_SECRET: ${{ github.run_id }}-${{ github.run_attempt }}-jwt
+      AIRFLOW_ADMIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-airflow-admin
+      AIRFLOW_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-airflow-db
+      VERNEMQ_ADMIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-vernemq-admin
+      VERNEMQ_DISTRIBUTED_COOKIE: ${{ github.run_id }}-${{ github.run_attempt }}-vernemq-cookie
+      SEAWEEDFS_S3_ACCESS_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-s3-access
+      SEAWEEDFS_S3_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-seaweedfs-s3
+      GRAFANA_ADMIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-grafana-admin
+      ACME_EMAIL: "ci@example.com"
+      STORAGE_BASE_DOMAIN: "local.test"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Prepare local secret files
+        run: |
+          mkdir -p secrets
+          app_password="$(openssl rand -hex 24)"
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/postgres_superuser_password.txt
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/patroni_repl_password.txt
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/patroni_rewind_password.txt
+          printf '%s\n' "$app_password" > secrets/app_user_password.txt
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/pgadmin_default_password.txt
+          printf '%s\n' "\"app_user\" \"$app_password\"" > secrets/pgbouncer_rw_userlist.txt
+          printf '%s\n' "\"app_user\" \"$app_password\"" > secrets/pgbouncer_ro_userlist.txt
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/postgres_exporter_password.txt
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/debezium_password.txt
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/seaweedfs_pg_password.txt
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/seaweedfs_s3_access_key.txt
+          printf '%s\n' "$(openssl rand -hex 24)" > secrets/seaweedfs_s3_secret_key.txt
+
+      - name: Validate compose rendering
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: Start SeaweedFS stack
+        run: |
+          docker compose -f docker-compose.yml up -d --wait --wait-timeout 600 \
+            seaweedfs-master1 seaweedfs-master2 seaweedfs-master3 \
+            seaweedfs-volume1 seaweedfs-volume2 seaweedfs-volume3 \
+            seaweedfs-filer seaweedfs-s3
+
+      - name: Check containers status
+        run: docker compose -f docker-compose.yml ps
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --no-color --timestamps
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yml down -v --remove-orphans

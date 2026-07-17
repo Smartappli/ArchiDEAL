@@ -1,0 +1,359 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-migrate
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: migrate
+    app.kubernetes.io/part-of: dealiot
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airflow
+        app.kubernetes.io/component: migrate
+        app.kubernetes.io/part-of: dealiot
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airflow-migrate
+          image: ghcr.io/smartappli/dealiot-orchestration:local-placeholder
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -lc
+            - >
+              airflow db migrate &&
+              airflow users create
+              --username "${AIRFLOW_ADMIN_USER:-admin}"
+              --password "${AIRFLOW_ADMIN_PASSWORD}"
+              --firstname Air
+              --lastname Flow
+              --role Admin
+              --email "${AIRFLOW_ADMIN_EMAIL:-admin@example.com}" || true
+          envFrom:
+            - configMapRef:
+                name: dealiot-runtime-config
+            - secretRef:
+                name: dealiot-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-apiserver
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: apiserver
+    app.kubernetes.io/part-of: dealiot
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: apiserver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airflow
+        app.kubernetes.io/component: apiserver
+        app.kubernetes.io/part-of: dealiot
+    spec:
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airflow
+          image: ghcr.io/smartappli/dealiot-orchestration:local-placeholder
+          imagePullPolicy: IfNotPresent
+          args: ["api-server"]
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: dealiot-runtime-config
+            - secretRef:
+                name: dealiot-secrets
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: CeleryExecutor
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "false"
+            - name: AIRFLOW__CORE__DEFAULT_TIMEZONE
+              value: Europe/Brussels
+            - name: AIRFLOW__CORE__AUTH_MANAGER
+              value: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+            - name: AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK
+              value: "true"
+            - name: AIRFLOW__WEBSERVER__EXPOSE_CONFIG
+              value: "false"
+            - name: AIRFLOW__CORE__EXECUTION_API_SERVER_URL
+              value: http://airflow-apiserver:8080/execution/
+            - name: AIRFLOW__API_AUTH__JWT_ISSUER
+              value: airflow
+          readinessProbe:
+            httpGet:
+              path: /api/v2/version
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 20
+          livenessProbe:
+            httpGet:
+              path: /api/v2/version
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-apiserver
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: apiserver
+    app.kubernetes.io/part-of: dealiot
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: apiserver
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: scheduler
+    app.kubernetes.io/part-of: dealiot
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: scheduler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airflow
+        app.kubernetes.io/component: scheduler
+        app.kubernetes.io/part-of: dealiot
+    spec:
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airflow
+          image: ghcr.io/smartappli/dealiot-orchestration:local-placeholder
+          imagePullPolicy: IfNotPresent
+          args: ["scheduler"]
+          envFrom:
+            - configMapRef:
+                name: dealiot-runtime-config
+            - secretRef:
+                name: dealiot-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-worker
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: dealiot
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airflow
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: dealiot
+    spec:
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airflow
+          image: ghcr.io/smartappli/dealiot-orchestration:local-placeholder
+          imagePullPolicy: IfNotPresent
+          args: ["celery", "worker"]
+          envFrom:
+            - configMapRef:
+                name: dealiot-runtime-config
+            - secretRef:
+                name: dealiot-secrets
+          env:
+            - name: DUMB_INIT_SETSID
+              value: "0"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-triggerer
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: triggerer
+    app.kubernetes.io/part-of: dealiot
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: triggerer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airflow
+        app.kubernetes.io/component: triggerer
+        app.kubernetes.io/part-of: dealiot
+    spec:
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airflow
+          image: ghcr.io/smartappli/dealiot-orchestration:local-placeholder
+          imagePullPolicy: IfNotPresent
+          args: ["triggerer"]
+          envFrom:
+            - configMapRef:
+                name: dealiot-runtime-config
+            - secretRef:
+                name: dealiot-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-dag-processor
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: dag-processor
+    app.kubernetes.io/part-of: dealiot
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: dag-processor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: airflow
+        app.kubernetes.io/component: dag-processor
+        app.kubernetes.io/part-of: dealiot
+    spec:
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: airflow
+          image: ghcr.io/smartappli/dealiot-orchestration:local-placeholder
+          imagePullPolicy: IfNotPresent
+          args: ["dag-processor"]
+          envFrom:
+            - configMapRef:
+                name: dealiot-runtime-config
+            - secretRef:
+                name: dealiot-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true

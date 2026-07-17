@@ -1,0 +1,13 @@
+{
+  "name": "DEALData Management",
+  "slug": "dealdata-management",
+  "description": "Gestion des projets, objets observes, capteurs GPS et capteurs generiques DEALData.",
+  "module_slugs": [
+    "dealdata-core-layer",
+    "dealdata-gps-layer",
+    "dealdata-sensor-layer"
+  ],
+  "version": "0.1.0",
+  "version_notes": "Initial DEALData hosting integration contract",
+  "enabled": true
+}

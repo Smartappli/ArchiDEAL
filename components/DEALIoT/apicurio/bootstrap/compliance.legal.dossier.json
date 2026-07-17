@@ -1,0 +1,17 @@
+{
+  "artifactId": "compliance.legal.dossier",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"ComplianceLegalDossier\",\"type\":\"object\",\"required\":[\"artifact_id\",\"artifact_type\",\"regulations\",\"owner\",\"status\",\"evidence_uri\",\"updated_at\"],\"properties\":{\"artifact_id\":{\"type\":\"string\"},\"artifact_type\":{\"type\":\"string\",\"enum\":[\"ropa\",\"dpia\",\"privacy_notice\",\"data_subject_rights\",\"processor_dpa\",\"data_act_notice\",\"data_sharing_agreement\",\"dga_notification\",\"nis2_classification\",\"dora_scope\",\"cra_conformity\",\"ai_inventory\",\"eprivacy_assessment\",\"retention_schedule\",\"incident_playbook\",\"zenodo_approval\",\"openaire_approval\"]},\"regulations\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"enum\":[\"GDPR\",\"DGA\",\"Data Act\",\"NIS2\",\"DORA\",\"CRA\",\"AI Act\",\"ePrivacy\",\"Trade Secrets Directive\",\"Open Data Directive\"]},\"minItems\":1},\"owner\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"draft\",\"approved\",\"active\",\"needs_review\",\"retired\",\"blocked\"]},\"evidence_uri\":{\"type\":\"string\"},\"jurisdictions\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"related_dataset_ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"related_dmp_ids\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"release_gate\":{\"type\":\"string\"},\"review_due_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"approver\":{\"type\":\"string\"},\"notes\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "compliance",
+    "topic": "compliance.legal.dossier",
+    "regulation": "GDPR,DGA,DataAct,NIS2,DORA,CRA,AIAct,ePrivacy"
+  },
+  "name": "Compliance Legal Dossier"
+}

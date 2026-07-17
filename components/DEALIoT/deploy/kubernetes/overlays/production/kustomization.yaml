@@ -1,0 +1,229 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dealiot
+
+resources:
+  - ../../base
+  - ../../processing/flink-operator
+  - network-policies.yaml
+  - external-dependency-contract.yaml
+  - autoscaling.yaml
+  - availability.yaml
+  - wildfi-decoder-config.yaml
+  - wildfi-decoder-job.yaml
+
+configMapGenerator:
+  - name: dealiot-runtime-config
+    behavior: replace
+    envs:
+      - runtime-config.production.example.env
+
+labels:
+  - includeSelectors: true
+    pairs:
+      dealiot.io/environment: production
+
+images:
+  - name: ghcr.io/smartappli/dealiot-mqtt-kafka-bridge
+    newTag: sha-REPLACE_WITH_RELEASE_SHA
+  - name: ghcr.io/smartappli/dealiot-stream-normalizer
+    newTag: sha-REPLACE_WITH_RELEASE_SHA
+  - name: ghcr.io/smartappli/dealiot-management-console
+    newTag: sha-REPLACE_WITH_RELEASE_SHA
+  - name: ghcr.io/smartappli/dealiot-flink-pyflink
+    newTag: sha-REPLACE_WITH_RELEASE_SHA
+  - name: ghcr.io/smartappli/dealiot-orchestration
+    newTag: sha-REPLACE_WITH_RELEASE_SHA
+  - name: ghcr.io/smartappli/dealiot-wildfi-decoder
+    newTag: sha-REPLACE_WITH_RELEASE_SHA
+
+replicas:
+  - name: mqtt-kafka-bridge
+    count: 3
+  - name: apicurio-registry
+    count: 3
+  - name: airflow-apiserver
+    count: 2
+  - name: airflow-worker
+    count: 3
+  - name: airflow-scheduler
+    count: 2
+  - name: airflow-triggerer
+    count: 2
+  - name: airflow-dag-processor
+    count: 2
+  - name: management-console
+    count: 2
+
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: app.kubernetes.io/part-of=dealiot
+    patch: |-
+      - op: add
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 120
+  - target:
+      kind: StatefulSet
+      labelSelector: app.kubernetes.io/part-of=dealiot
+    patch: |-
+      - op: add
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 60
+  - target:
+      kind: Deployment
+      name: apicurio-registry
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: apicurio-registry
+      spec:
+        template:
+          spec:
+            containers:
+              - name: registry
+                env:
+                  - name: QUARKUS_OIDC_TENANT_ENABLED
+                    value: "true"
+                  - name: QUARKUS_OIDC_AUTH_SERVER_URL
+                    valueFrom:
+                      configMapKeyRef:
+                        name: dealiot-runtime-config
+                        key: APICURIO_OIDC_AUTH_SERVER_URL
+                  - name: QUARKUS_OIDC_CLIENT_ID
+                    valueFrom:
+                      configMapKeyRef:
+                        name: dealiot-runtime-config
+                        key: APICURIO_OIDC_API_CLIENT_ID
+                  - name: APICURIO_AUTH_TYPE
+                    value: oidc
+                  - name: APICURIO_AUTH_URL
+                    valueFrom:
+                      configMapKeyRef:
+                        name: dealiot-runtime-config
+                        key: APICURIO_OIDC_AUTH_SERVER_URL
+                  - name: APICURIO_AUTH_CLIENT_ID
+                    valueFrom:
+                      configMapKeyRef:
+                        name: dealiot-runtime-config
+                        key: APICURIO_OIDC_UI_CLIENT_ID
+                  - name: APICURIO_AUTH_ROLE_BASED_AUTHORIZATION
+                    value: "true"
+                  - name: APICURIO_AUTH_ROLE_SOURCE
+                    value: token
+                  - name: APICURIO_AUTH_AUTHENTICATED_READ_ACCESS_ENABLED
+                    value: "true"
+                  - name: APICURIO_AUTH_OWNER_ONLY_AUTHORIZATION
+                    value: "true"
+                  - name: APICURIO_AUTH_OWNER_ONLY_AUTHORIZATION_LIMIT_GROUP_ACCESS
+                    value: "true"
+  - target:
+      kind: StatefulSet
+      name: mqtt-kafka-bridge
+    patch: |-
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: mqtt-kafka-bridge
+      spec:
+        template:
+          spec:
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: mqtt-kafka-bridge
+  - target:
+      kind: Deployment
+      name: management-console
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: management-console
+      spec:
+        template:
+          spec:
+            containers:
+              - name: management-console
+                env:
+                  - name: FLINK_REST_URL
+                    value: http://dealiot-streaming-rest:8081
+  - target:
+      kind: Deployment
+      name: apicurio-registry
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: apicurio-registry
+      spec:
+        template:
+          spec:
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: apicurio-registry
+  - target:
+      kind: Deployment
+      name: airflow-apiserver
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: airflow-apiserver
+      spec:
+        template:
+          spec:
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: airflow
+                    app.kubernetes.io/component: apiserver
+  - target:
+      kind: Deployment
+      name: airflow-worker
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: airflow-worker
+      spec:
+        template:
+          spec:
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: airflow
+                    app.kubernetes.io/component: worker
+  - target:
+      kind: Deployment
+      name: management-console
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: management-console
+      spec:
+        template:
+          spec:
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: management-console

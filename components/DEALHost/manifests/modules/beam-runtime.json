@@ -1,0 +1,19 @@
+{
+  "name": "DEALIoT Beam Runtime",
+  "slug": "beam-runtime",
+  "image": "ghcr.io/smartappli/dealiot-beam-python-runtime:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALIoT/beam",
+  "deployment_target": "kubernetes",
+  "production_ready": false,
+  "contract_topics": [
+    "raw.sensor",
+    "raw.gps",
+    "features.events",
+    "alerts.events",
+    "dlq.events"
+  ],
+  "enabled": true
+}

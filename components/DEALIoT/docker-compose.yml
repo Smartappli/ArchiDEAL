@@ -1,0 +1,2082 @@
+x-vernemq-env: &vernemq-env
+  DOCKER_VERNEMQ_ACCEPT_EULA: "yes"
+  DOCKER_VERNEMQ_ALLOW_ANONYMOUS: "off"
+  DOCKER_VERNEMQ_LISTENER__TCP__DEFAULT: "0.0.0.0:1883"
+  DOCKER_VERNEMQ_LISTENER__WS__DEFAULT: "0.0.0.0:8080"
+  DOCKER_VERNEMQ_LISTENER__VMQ__CLUSTERING: "0.0.0.0:44053"
+  DOCKER_VERNEMQ_DISTRIBUTED_COOKIE: "${VERNEMQ_DISTRIBUTED_COOKIE:?define VERNEMQ_DISTRIBUTED_COOKIE in .env}"
+  DOCKER_VERNEMQ_USER_admin: "${VERNEMQ_ADMIN_PASSWORD:?define VERNEMQ_ADMIN_PASSWORD in .env}"
+  DOCKER_VERNEMQ_SHARED_SUBSCRIPTION_POLICY: "prefer_local"
+  DOCKER_VERNEMQ_COMPOSE: "1"
+  DOCKER_VERNEMQ_LOG__CONSOLE: "both"
+  WAIT_FOR_ERLANG: "60"
+
+x-kafka-env: &kafka-env
+  KAFKA_PROCESS_ROLES: "broker,controller"
+  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+  KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+  CLUSTER_ID: "${KAFKA_CLUSTER_ID:-5L6g3nShT-eMCtK--X86sw}"
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka1:9093,2@kafka2:9093,3@kafka3:9093"
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_NUM_PARTITIONS: "12"
+  KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
+  KAFKA_MIN_INSYNC_REPLICAS: "2"
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+
+x-airflow-env: &airflow-env
+  AIRFLOW__CORE__EXECUTOR: "CeleryExecutor"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__DEFAULT_TIMEZONE: "Europe/Brussels"
+  AIRFLOW__CORE__FERNET_KEY: "${AIRFLOW_FERNET_KEY:?define AIRFLOW_FERNET_KEY in .env}"
+  AIRFLOW__CORE__AUTH_MANAGER: "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg://airflow:${AIRFLOW_DB_PASSWORD:?define AIRFLOW_DB_PASSWORD in .env}@airflow-postgres:5432/airflow"
+  AIRFLOW__CELERY__RESULT_BACKEND: "db+postgresql://airflow:${AIRFLOW_DB_PASSWORD:?define AIRFLOW_DB_PASSWORD in .env}@airflow-postgres:5432/airflow"
+  AIRFLOW__CELERY__BROKER_URL: "redis://airflow-redis:6379/0"
+  AIRFLOW__CELERY__WORKER_ENABLE_REMOTE_CONTROL: "true"
+  AIRFLOW__FAB__AUTH_BACKENDS: "airflow.providers.fab.auth_manager.api.auth.backend.session"
+  AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
+  AIRFLOW__API__SECRET_KEY: "${AIRFLOW_API_SECRET_KEY:?define AIRFLOW_API_SECRET_KEY in .env}"
+  AIRFLOW__API_AUTH__JWT_SECRET: "${AIRFLOW_JWT_SECRET:?define AIRFLOW_JWT_SECRET in .env}"
+  AIRFLOW__API_AUTH__JWT_ISSUER: "airflow"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka1:9092,kafka2:9092,kafka3:9092"
+  AWS_ACCESS_KEY_ID: "${SEAWEEDFS_S3_ACCESS_KEY:?define SEAWEEDFS_S3_ACCESS_KEY in .env}"
+  AWS_SECRET_ACCESS_KEY: "${SEAWEEDFS_S3_SECRET_KEY:?define SEAWEEDFS_S3_SECRET_KEY in .env}"
+  AWS_DEFAULT_REGION: "us-east-1"
+  AWS_REGION: "us-east-1"
+  S3_ENDPOINT_URL: "http://seaweedfs-s3:8333"
+  AIRFLOW__METRICS__STATSD_ON: "true"
+  AIRFLOW__METRICS__STATSD_HOST: "statsd-exporter"
+  AIRFLOW__METRICS__STATSD_PORT: "9125"
+  AIRFLOW__METRICS__STATSD_PREFIX: "airflow"
+  APICURIO_REGISTRY_V3_URL: "http://apicurio-registry:8080/apis/registry/v3"
+  APICURIO_REGISTRY_V2_URL: "http://apicurio-registry:8080/apis/registry/v2"
+  APICURIO_REGISTRY_CCOMPAT_URL: "http://apicurio-registry:8080/apis/ccompat/v7"
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: orchestration/Dockerfile
+  environment:
+    <<: *airflow-env
+  user: "${AIRFLOW_UID:-50000}:0"
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./dealiot_contracts:/opt/airflow/dealiot_contracts:ro
+    - ./pipelines:/opt/pipelines
+  depends_on:
+    airflow-postgres:
+      condition: service_healthy
+    airflow-redis:
+      condition: service_started
+  restart: unless-stopped
+  networks:
+    - orchestration_net
+    - kafka_net
+    - patroni_frontend
+
+x-beam-env: &beam-env
+  BEAM_VERSION: "2.72.0"
+  BEAM_JOB_ENDPOINT: "beam-jobserver:8099"
+  BEAM_ARTIFACT_ENDPOINT: "beam-jobserver:8098"
+  BEAM_EXPANSION_SERVICE: "beam-jobserver:8097"
+  BEAM_WORKER_POOL: "beam-python-harness:50000"
+  BEAM_ENVIRONMENT_TYPE: "EXTERNAL"
+  BEAM_ENVIRONMENT_CONFIG: "beam-python-harness:50000"
+  BEAM_SDK_WORKER_PARALLELISM: "2"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka1:9092,kafka2:9092,kafka3:9092"
+  APICURIO_REGISTRY_V3_URL: "http://apicurio-registry:8080/apis/registry/v3"
+  APICURIO_REGISTRY_V2_URL: "http://apicurio-registry:8080/apis/registry/v2"
+  APICURIO_REGISTRY_CCOMPAT_URL: "http://apicurio-registry:8080/apis/ccompat/v7"
+  AWS_ACCESS_KEY_ID: "${SEAWEEDFS_S3_ACCESS_KEY:?define SEAWEEDFS_S3_ACCESS_KEY in .env}"
+  AWS_SECRET_ACCESS_KEY: "${SEAWEEDFS_S3_SECRET_KEY:?define SEAWEEDFS_S3_SECRET_KEY in .env}"
+  AWS_DEFAULT_REGION: "us-east-1"
+  AWS_REGION: "us-east-1"
+  S3_ENDPOINT_URL: "http://seaweedfs-s3:8333"
+  PYTHONPATH: "/opt/pipelines:/opt/dealiot_contracts"
+
+x-flink-py-build: &flink-py-build
+  context: .
+  dockerfile: flink/Dockerfile.pyflink
+  args:
+    FLINK_BASE_IMAGE: "apache/flink:2.2.1-scala_2.12-java17"
+    FLINK_KAFKA_CONNECTOR_VERSION: "5.0.0-2.2"
+
+x-etcd-health: &etcd-health
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "/usr/local/bin/etcdctl",
+        "--endpoints=http://127.0.0.1:2379",
+        "endpoint",
+        "health"
+      ]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+    start_period: 20s
+
+x-apicurio-env: &apicurio-env
+  APICURIO_STORAGE_KIND: "kafkasql"
+  APICURIO_KAFKASQL_BOOTSTRAP_SERVERS: "kafka1:9092,kafka2:9092,kafka3:9092"
+  APICURIO_KAFKASQL_TOPIC: "kafkasql-journal-v3"
+  APICURIO_KAFKASQL_SNAPSHOTS_TOPIC: "kafkasql-snapshots-v3"
+  APICURIO_EVENTS_KAFKA_TOPIC: "registry-events-v3"
+  APICURIO_KAFKASQL_TOPIC_AUTO_CREATE: "false"
+  APICURIO_STORAGE_ENABLE_AUTOMATIC_GROUP_CREATION: "true"
+
+services:
+  etcd1:
+    image: registry.k8s.io/etcd:v3.7.0
+    container_name: etcd1
+    hostname: etcd1
+    restart: unless-stopped
+    environment:
+      ETCDCTL_API: "3"
+    networks:
+      - patroni_backend
+    volumes:
+      - etcd1_data:/etcd-data
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=patroni-etcd-cluster
+    <<: *etcd-health
+
+  etcd2:
+    image: registry.k8s.io/etcd:v3.7.0
+    container_name: etcd2
+    hostname: etcd2
+    restart: unless-stopped
+    environment:
+      ETCDCTL_API: "3"
+    networks:
+      - patroni_backend
+    volumes:
+      - etcd2_data:/etcd-data
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd2
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd2:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd2:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=patroni-etcd-cluster
+    <<: *etcd-health
+
+  etcd3:
+    image: registry.k8s.io/etcd:v3.7.0
+    container_name: etcd3
+    hostname: etcd3
+    restart: unless-stopped
+    environment:
+      ETCDCTL_API: "3"
+    networks:
+      - patroni_backend
+    volumes:
+      - etcd3_data:/etcd-data
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd3
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd3:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=patroni-etcd-cluster
+    <<: *etcd-health
+
+  pg1:
+    image: timescale/timescaledb-ha:pg18.3-ts2.25.2
+    container_name: pg1
+    hostname: pg1
+    restart: unless-stopped
+    shm_size: "1gb"
+    depends_on:
+      etcd1:
+        condition: service_healthy
+      etcd2:
+        condition: service_healthy
+      etcd3:
+        condition: service_healthy
+    networks:
+      - patroni_backend
+    volumes:
+      - pg1_data:/home/postgres/pgdata
+      - ./patroni/pg1.yml.tmpl:/home/postgres/postgres.yml.tmpl:ro
+      - ./scripts/start-patroni.sh:/scripts/start-patroni.sh:ro
+      - ./scripts/post-bootstrap.sh:/scripts/post-bootstrap.sh:ro
+    secrets:
+      - postgres_superuser_password
+      - patroni_repl_password
+      - patroni_rewind_password
+      - app_user_password
+      - postgres_exporter_password
+      - debezium_password
+    entrypoint: ["/bin/sh", "/scripts/start-patroni.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -p 5432 -d postgres || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  pg2:
+    image: timescale/timescaledb-ha:pg18.3-ts2.25.2
+    container_name: pg2
+    hostname: pg2
+    restart: unless-stopped
+    shm_size: "1gb"
+    depends_on:
+      etcd1:
+        condition: service_healthy
+      etcd2:
+        condition: service_healthy
+      etcd3:
+        condition: service_healthy
+    networks:
+      - patroni_backend
+    volumes:
+      - pg2_data:/home/postgres/pgdata
+      - ./patroni/pg2.yml.tmpl:/home/postgres/postgres.yml.tmpl:ro
+      - ./scripts/start-patroni.sh:/scripts/start-patroni.sh:ro
+      - ./scripts/post-bootstrap.sh:/scripts/post-bootstrap.sh:ro
+    secrets:
+      - postgres_superuser_password
+      - patroni_repl_password
+      - patroni_rewind_password
+      - app_user_password
+      - postgres_exporter_password
+      - debezium_password
+    entrypoint: ["/bin/sh", "/scripts/start-patroni.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -p 5432 -d postgres || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  pg3:
+    image: timescale/timescaledb-ha:pg18.3-ts2.25.2
+    container_name: pg3
+    hostname: pg3
+    restart: unless-stopped
+    shm_size: "1gb"
+    depends_on:
+      etcd1:
+        condition: service_healthy
+      etcd2:
+        condition: service_healthy
+      etcd3:
+        condition: service_healthy
+    networks:
+      - patroni_backend
+    volumes:
+      - pg3_data:/home/postgres/pgdata
+      - ./patroni/pg3.yml.tmpl:/home/postgres/postgres.yml.tmpl:ro
+      - ./scripts/start-patroni.sh:/scripts/start-patroni.sh:ro
+      - ./scripts/post-bootstrap.sh:/scripts/post-bootstrap.sh:ro
+    secrets:
+      - postgres_superuser_password
+      - patroni_repl_password
+      - patroni_rewind_password
+      - app_user_password
+      - postgres_exporter_password
+      - debezium_password
+    entrypoint: ["/bin/sh", "/scripts/start-patroni.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -p 5432 -d postgres || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
+
+  haproxy:
+    image: haproxy:lts
+    container_name: haproxy-patroni
+    hostname: haproxy
+    restart: unless-stopped
+    depends_on:
+      pg1:
+        condition: service_healthy
+      pg2:
+        condition: service_healthy
+      pg3:
+        condition: service_healthy
+    networks:
+      - patroni_backend
+      - patroni_frontend
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    command: ["haproxy", "-W", "-db", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+
+  pgbouncer-rw:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    container_name: pgbouncer-rw
+    hostname: pgbouncer-rw
+    restart: unless-stopped
+    depends_on:
+      haproxy:
+        condition: service_started
+        restart: true
+    networks:
+      - patroni_backend
+      - patroni_frontend
+    environment:
+      DB_HOST: haproxy
+      DB_PORT: "5432"
+      DB_NAME: appdb
+      DB_USER: app_user
+      AUTH_TYPE: plain
+      POOL_MODE: session
+      MAX_CLIENT_CONN: "500"
+      DEFAULT_POOL_SIZE: "50"
+    secrets:
+      - app_user_password
+      - source: pgbouncer_rw_userlist
+        target: userlist.txt
+    volumes:
+      - ./pgbouncer/rw.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./scripts/start-pgbouncer-rw.sh:/scripts/start-pgbouncer-rw.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/start-pgbouncer-rw.sh"]
+
+  pgbouncer-ro:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    container_name: pgbouncer-ro
+    hostname: pgbouncer-ro
+    restart: unless-stopped
+    depends_on:
+      haproxy:
+        condition: service_started
+        restart: true
+    networks:
+      - patroni_backend
+      - patroni_frontend
+    environment:
+      DB_HOST: haproxy
+      DB_PORT: "5433"
+      DB_NAME: appdb
+      DB_USER: app_user
+      AUTH_TYPE: plain
+      POOL_MODE: session
+      MAX_CLIENT_CONN: "500"
+      DEFAULT_POOL_SIZE: "50"
+    secrets:
+      - app_user_password
+      - source: pgbouncer_ro_userlist
+        target: userlist.txt
+    volumes:
+      - ./pgbouncer/ro.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./scripts/start-pgbouncer-ro.sh:/scripts/start-pgbouncer-ro.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/start-pgbouncer-ro.sh"]
+
+  vernemq1:
+    image: vernemq/vernemq:2.1.2
+    container_name: vernemq1
+    restart: unless-stopped
+    environment:
+      <<: *vernemq-env
+    volumes:
+      - vernemq1_data:/vernemq/data
+    networks:
+      - ingest_net
+    healthcheck:
+      test: ["CMD-SHELL", "vernemq ping | grep -q pong"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  vernemq2:
+    image: vernemq/vernemq:2.1.2
+    container_name: vernemq2
+    restart: unless-stopped
+    depends_on:
+      vernemq1:
+        condition: service_healthy
+    environment:
+      <<: *vernemq-env
+      DOCKER_VERNEMQ_DISCOVERY_NODE: "vernemq1"
+    volumes:
+      - vernemq2_data:/vernemq/data
+    networks:
+      - ingest_net
+    healthcheck:
+      test: ["CMD-SHELL", "vernemq ping | grep -q pong"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  vernemq3:
+    image: vernemq/vernemq:2.1.2
+    container_name: vernemq3
+    restart: unless-stopped
+    depends_on:
+      vernemq1:
+        condition: service_healthy
+    environment:
+      <<: *vernemq-env
+      DOCKER_VERNEMQ_DISCOVERY_NODE: "vernemq1"
+    volumes:
+      - vernemq3_data:/vernemq/data
+    networks:
+      - ingest_net
+    healthcheck:
+      test: ["CMD-SHELL", "vernemq ping | grep -q pong"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  kafka1:
+    image: apache/kafka:4.3.1
+    container_name: kafka1
+    hostname: kafka1
+    restart: unless-stopped
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: "1"
+      KAFKA_LISTENERS: "INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:19092"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka1:9092,EXTERNAL://${KAFKA_EXTERNAL_HOST:-localhost}:19092"
+    volumes:
+      - kafka1_data:/var/lib/kafka/data
+    networks:
+      - kafka_net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  kafka2:
+    image: apache/kafka:4.3.1
+    container_name: kafka2
+    hostname: kafka2
+    restart: unless-stopped
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: "2"
+      KAFKA_LISTENERS: "INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:19093"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka2:9092,EXTERNAL://${KAFKA_EXTERNAL_HOST:-localhost}:19093"
+    volumes:
+      - kafka2_data:/var/lib/kafka/data
+    networks:
+      - kafka_net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  kafka3:
+    image: apache/kafka:4.3.1
+    container_name: kafka3
+    hostname: kafka3
+    restart: unless-stopped
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: "3"
+      KAFKA_LISTENERS: "INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:19094"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka3:9092,EXTERNAL://${KAFKA_EXTERNAL_HOST:-localhost}:19094"
+    volumes:
+      - kafka3_data:/var/lib/kafka/data
+    networks:
+      - kafka_net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  kafka-init:
+    image: apache/kafka:4.3.1
+    container_name: kafka-init
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - >
+        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka1:9092 --list >/dev/null 2>&1;
+        do
+          echo "Waiting for Kafka...";
+          sleep 3;
+        done;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic raw.gps --partitions 24 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic raw.sensor --partitions 24 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic raw.image2d.meta --partitions 12 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic raw.image3d.meta --partitions 12 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic raw.video2d.meta --partitions 12 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic raw.video3d.meta --partitions 12 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic media.object.events --partitions 12 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic features.events --partitions 24 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic alerts.events --partitions 12 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic dlq.events --partitions 12 --replication-factor 3;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.data.products --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.access.requests --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.permission.events --partitions 6 --replication-factor 3 --config cleanup.policy=compact --config delete.retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.intermediation.log --partitions 12 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.transfer.notices --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.research.projects --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.research.outputs --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.dataset.catalog --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.data_management_plans --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic governance.repository.exports --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic dataact.product.catalog --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic dataact.user.access.requests --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic dataact.third_party.sharing --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic dataact.user.exports --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic dataact.safeguards --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic dataact.legal_basis.checks --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic security.asset.inventory --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic security.incident.events --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic security.vulnerability.findings --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic security.sbom.attestations --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic security.patch.events --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic resilience.backup.tests --partitions 3 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic resilience.operational.risk --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic resilience.third_party.risk --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic compliance.scope.decisions --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic compliance.control.assessments --partitions 6 --replication-factor 3 --config retention.ms=31536000000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic compliance.reporting.channels --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic compliance.legal.dossier --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic cra.product.lifecycle --partitions 3 --replication-factor 3 --config cleanup.policy=compact --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic kafkasql-journal-v3 --partitions 1 --replication-factor 3 --config cleanup.policy=delete --config retention.ms=-1 --config retention.bytes=-1;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic kafkasql-snapshots-v3 --partitions 1 --replication-factor 3 --config cleanup.policy=delete --config retention.ms=-1 --config retention.bytes=-1;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic registry-events-v3 --partitions 1 --replication-factor 3 --config cleanup.policy=delete --config retention.ms=-1 --config retention.bytes=-1;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic __connect-configs --partitions 1 --replication-factor 3 --config cleanup.policy=compact;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic __connect-offsets --partitions 12 --replication-factor 3 --config cleanup.policy=compact;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic __connect-status --partitions 6 --replication-factor 3 --config cleanup.policy=compact;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic __debezium-heartbeat.appdb --partitions 1 --replication-factor 3 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --bootstrap-server kafka1:9092 --topic state.latest --partitions 12 --replication-factor 3 --config cleanup.policy=compact --config min.cleanable.dirty.ratio=0.1 --config delete.retention.ms=86400000 --config min.insync.replicas=2;
+        /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka1:9092 --alter --entity-type topics --entity-name state.latest --add-config cleanup.policy=compact,min.cleanable.dirty.ratio=0.1,delete.retention.ms=86400000,min.insync.replicas=2;
+        echo "Kafka topics created."
+    networks:
+      - kafka_net
+
+  kafka-connect:
+    image: quay.io/debezium/connect:3.6
+    container_name: kafka-connect
+    hostname: kafka-connect
+    restart: unless-stopped
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      apicurio-registry:
+        condition: service_started
+    environment:
+      BOOTSTRAP_SERVERS: "kafka1:9092,kafka2:9092,kafka3:9092"
+      GROUP_ID: "connect-cluster-1"
+      CONFIG_STORAGE_TOPIC: "__connect-configs"
+      OFFSET_STORAGE_TOPIC: "__connect-offsets"
+      STATUS_STORAGE_TOPIC: "__connect-status"
+      CONFIG_STORAGE_REPLICATION_FACTOR: "3"
+      OFFSET_STORAGE_REPLICATION_FACTOR: "3"
+      STATUS_STORAGE_REPLICATION_FACTOR: "3"
+      ENABLE_APICURIO_CONVERTERS: "true"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
+      CONNECT_REST_PORT: "8083"
+    networks:
+      - kafka_net
+      - patroni_frontend
+      - orchestration_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8083/connectors >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+  kafka-connect-init:
+    image: curlimages/curl:8.21.0
+    container_name: kafka-connect-init
+    restart: "no"
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+      haproxy:
+        condition: service_started
+    volumes:
+      - ./kafka-connect/connectors:/connectors:ro
+    secrets:
+      - debezium_password
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+        DEBEZIUM_PASSWORD="$$(tr -d '\r\n' </run/secrets/debezium_password)"
+        ESCAPED_DEBEZIUM_PASSWORD="$$(printf '%s' "$$DEBEZIUM_PASSWORD" | sed -e 's/[\/&]/\\&/g')"
+
+        sed "s/__INJECT_AT_RUNTIME__/$$ESCAPED_DEBEZIUM_PASSWORD/g" \
+          /connectors/timescaledb-source.json >/tmp/timescaledb-source.json
+
+        until curl -fsS http://kafka-connect:8083/connectors >/dev/null; do
+          echo "Waiting for Kafka Connect..."
+          sleep 3
+        done
+
+        until curl -fsS http://haproxy:7000/ >/dev/null 2>&1; do
+          echo "Waiting for HAProxy / Patroni frontend..."
+          sleep 3
+        done
+
+        if curl -fsS http://kafka-connect:8083/connectors/timescaledb-source >/dev/null 2>&1; then
+          echo "Connector timescaledb-source already exists."
+        else
+          http_code="$$(curl -sS -o /tmp/connect-response.json -w '%{http_code}' \
+            -X POST http://kafka-connect:8083/connectors \
+            -H "Content-Type: application/json" \
+            --data @/tmp/timescaledb-source.json || true)"
+          cat /tmp/connect-response.json || true
+          test "$$http_code" = "201"
+        fi
+    networks:
+      - kafka_net
+      - patroni_frontend
+      - orchestration_net
+
+  seaweedfs-master1:
+    image: chrislusf/seaweedfs:4.39
+    container_name: seaweedfs-master1
+    hostname: seaweedfs-master1
+    restart: unless-stopped
+    entrypoint: ["weed"]
+    command:
+      - master
+      - -ip=seaweedfs-master1
+      - -ip.bind=0.0.0.0
+      - -port=9333
+      - -port.grpc=19333
+      - -mdir=/data
+      - -peers=seaweedfs-master1:9333,seaweedfs-master2:9333,seaweedfs-master3:9333
+      - -defaultReplication=020
+      - -volumeSizeLimitMB=4096
+      - -metricsPort=9327
+    volumes:
+      - seaweed_master1_data:/data
+    networks:
+      - orchestration_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9333/cluster/status >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  seaweedfs-master2:
+    image: chrislusf/seaweedfs:4.39
+    container_name: seaweedfs-master2
+    hostname: seaweedfs-master2
+    restart: unless-stopped
+    entrypoint: ["weed"]
+    command:
+      - master
+      - -ip=seaweedfs-master2
+      - -ip.bind=0.0.0.0
+      - -port=9333
+      - -port.grpc=19333
+      - -mdir=/data
+      - -peers=seaweedfs-master1:9333,seaweedfs-master2:9333,seaweedfs-master3:9333
+      - -defaultReplication=020
+      - -volumeSizeLimitMB=4096
+      - -metricsPort=9327
+    volumes:
+      - seaweed_master2_data:/data
+    networks:
+      - orchestration_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9333/cluster/status >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  seaweedfs-master3:
+    image: chrislusf/seaweedfs:4.39
+    container_name: seaweedfs-master3
+    hostname: seaweedfs-master3
+    restart: unless-stopped
+    entrypoint: ["weed"]
+    command:
+      - master
+      - -ip=seaweedfs-master3
+      - -ip.bind=0.0.0.0
+      - -port=9333
+      - -port.grpc=19333
+      - -mdir=/data
+      - -peers=seaweedfs-master1:9333,seaweedfs-master2:9333,seaweedfs-master3:9333
+      - -defaultReplication=020
+      - -volumeSizeLimitMB=4096
+      - -metricsPort=9327
+    volumes:
+      - seaweed_master3_data:/data
+    networks:
+      - orchestration_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9333/cluster/status >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  seaweedfs-volume1:
+    image: chrislusf/seaweedfs:4.39
+    container_name: seaweedfs-volume1
+    hostname: seaweedfs-volume1
+    restart: unless-stopped
+    depends_on:
+      seaweedfs-master1:
+        condition: service_healthy
+      seaweedfs-master2:
+        condition: service_healthy
+      seaweedfs-master3:
+        condition: service_healthy
+    entrypoint: ["weed"]
+    command:
+      - volume
+      - -ip=seaweedfs-volume1
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -port.grpc=18080
+      - -mserver=seaweedfs-master1:9333,seaweedfs-master2:9333,seaweedfs-master3:9333
+      - -dir=/data
+      - -max=0
+      - -dataCenter=dc1
+      - -rack=r1
+      - -readMode=proxy
+      - -metricsPort=9327
+    volumes:
+      - seaweed_volume1_data:/data
+    networks:
+      - orchestration_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  seaweedfs-volume2:
+    image: chrislusf/seaweedfs:4.39
+    container_name: seaweedfs-volume2
+    hostname: seaweedfs-volume2
+    restart: unless-stopped
+    depends_on:
+      seaweedfs-master1:
+        condition: service_healthy
+      seaweedfs-master2:
+        condition: service_healthy
+      seaweedfs-master3:
+        condition: service_healthy
+    entrypoint: ["weed"]
+    command:
+      - volume
+      - -ip=seaweedfs-volume2
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -port.grpc=18080
+      - -mserver=seaweedfs-master1:9333,seaweedfs-master2:9333,seaweedfs-master3:9333
+      - -dir=/data
+      - -max=0
+      - -dataCenter=dc1
+      - -rack=r2
+      - -readMode=proxy
+      - -metricsPort=9327
+    volumes:
+      - seaweed_volume2_data:/data
+    networks:
+      - orchestration_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  seaweedfs-volume3:
+    image: chrislusf/seaweedfs:4.39
+    container_name: seaweedfs-volume3
+    hostname: seaweedfs-volume3
+    restart: unless-stopped
+    depends_on:
+      seaweedfs-master1:
+        condition: service_healthy
+      seaweedfs-master2:
+        condition: service_healthy
+      seaweedfs-master3:
+        condition: service_healthy
+    entrypoint: ["weed"]
+    command:
+      - volume
+      - -ip=seaweedfs-volume3
+      - -ip.bind=0.0.0.0
+      - -port=8080
+      - -port.grpc=18080
+      - -mserver=seaweedfs-master1:9333,seaweedfs-master2:9333,seaweedfs-master3:9333
+      - -dir=/data
+      - -max=0
+      - -dataCenter=dc1
+      - -rack=r3
+      - -readMode=proxy
+      - -metricsPort=9327
+    volumes:
+      - seaweed_volume3_data:/data
+    networks:
+      - orchestration_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
+
+  seaweedfs-pg-init:
+    image: postgres:18-alpine
+    container_name: seaweedfs-pg-init
+    restart: "no"
+    depends_on:
+      haproxy:
+        condition: service_started
+    secrets:
+      - postgres_superuser_password
+      - seaweedfs_pg_password
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+
+        export PGPASSWORD="$$(tr -d '\r\n' </run/secrets/postgres_superuser_password)"
+        SEAWEEDFS_PG_PASSWORD="$$(tr -d '\r\n' </run/secrets/seaweedfs_pg_password)"
+
+        until pg_isready -h haproxy -p 5432 -U postgres >/dev/null 2>&1; do
+          echo "Waiting for PostgreSQL RW endpoint..."
+          sleep 3
+        done
+
+        until psql -h haproxy -p 5432 -U postgres -d postgres -tAc "SELECT CASE WHEN pg_is_in_recovery() OR current_setting('transaction_read_only') = 'on' THEN 0 ELSE 1 END" | grep -q 1; do
+          echo "Waiting for writable PostgreSQL leader endpoint..."
+          sleep 3
+        done
+
+        echo "Testing postgres login..."
+        psql -h haproxy -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT current_user;"
+
+        psql -h haproxy -p 5432 -U postgres -d postgres \
+          -v ON_ERROR_STOP=1 \
+          -v seaweedfs_pg_password="$$SEAWEEDFS_PG_PASSWORD" <<'SQL'
+        SELECT format(
+          'CREATE ROLE seaweedfs_filer WITH LOGIN PASSWORD %L',
+          :'seaweedfs_pg_password'
+        )
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pg_roles WHERE rolname = 'seaweedfs_filer'
+        ) \gexec
+
+        SELECT format(
+          'ALTER ROLE seaweedfs_filer WITH LOGIN PASSWORD %L',
+          :'seaweedfs_pg_password'
+        ) \gexec
+
+        SELECT 'CREATE DATABASE seaweedfs OWNER seaweedfs_filer'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pg_database WHERE datname = 'seaweedfs'
+        ) \gexec
+
+        ALTER DATABASE seaweedfs OWNER TO seaweedfs_filer;
+        GRANT ALL PRIVILEGES ON DATABASE seaweedfs TO seaweedfs_filer;
+        SQL
+
+        echo "SeaweedFS PostgreSQL bootstrap done."
+    networks:
+      - patroni_frontend
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:4.39
+    container_name: seaweedfs-filer
+    hostname: seaweedfs-filer
+    restart: unless-stopped
+    depends_on:
+      seaweedfs-master1:
+        condition: service_healthy
+      seaweedfs-master2:
+        condition: service_healthy
+      seaweedfs-master3:
+        condition: service_healthy
+      seaweedfs-volume1:
+        condition: service_healthy
+      seaweedfs-volume2:
+        condition: service_healthy
+      seaweedfs-volume3:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      seaweedfs-pg-init:
+        condition: service_completed_successfully
+    secrets:
+      - seaweedfs_pg_password
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+
+        mkdir -p /etc/seaweedfs /var/lib/seaweedfs
+        SEAWEEDFS_PG_PASSWORD="$$(tr -d '\r\n' </run/secrets/seaweedfs_pg_password)"
+        ESCAPED_PG_PASSWORD="$$(printf '%s' "$$SEAWEEDFS_PG_PASSWORD" | sed 's/[\/&]/\\&/g')"
+
+        cat >/tmp/filer.toml <<'EOF'
+        [filer.options]
+        buckets_folder = "/buckets"
+
+        [postgres2]
+        enabled = true
+        createTable = """
+          CREATE TABLE IF NOT EXISTS "%s" (
+            dirhash   BIGINT,
+            name      VARCHAR(65535),
+            directory VARCHAR(65535),
+            meta      bytea,
+            PRIMARY KEY (dirhash, name)
+          ) WITH (
+            fillfactor = 90,
+            autovacuum_vacuum_threshold = 100,
+            autovacuum_vacuum_scale_factor = 0,
+            autovacuum_analyze_threshold = 100,
+            autovacuum_analyze_scale_factor = 0,
+            autovacuum_vacuum_cost_limit = 2000
+          );
+        """
+        hostname = "haproxy"
+        port = 5432
+        username = "seaweedfs_filer"
+        password = "__SEAWEEDFS_PG_PASSWORD__"
+        database = "seaweedfs"
+        schema = ""
+        sslmode = "disable"
+        connection_max_idle = 10
+        connection_max_open = 50
+        connection_max_lifetime_seconds = 600
+        enableUpsert = true
+        upsertQuery = """INSERT INTO "%[1]s" (dirhash,name,directory,meta) VALUES($1,$2,$3,$4) ON CONFLICT (dirhash,name) DO UPDATE SET meta = EXCLUDED.meta WHERE "%[1]s".meta != EXCLUDED.meta"""
+
+        [notification.kafka]
+        enabled = true
+        hosts = ["kafka1:9092", "kafka2:9092", "kafka3:9092"]
+        topic = "media.object.events"
+        offsetFile = "/var/lib/seaweedfs/seaweedfs-notification.offset"
+        offsetSaveIntervalSeconds = 10
+        EOF
+
+        sed "s/__SEAWEEDFS_PG_PASSWORD__/$$ESCAPED_PG_PASSWORD/g" /tmp/filer.toml > /etc/seaweedfs/filer.toml
+
+        exec weed filer \
+          -ip=seaweedfs-filer \
+          -ip.bind=0.0.0.0 \
+          -port=8888 \
+          -port.grpc=18888 \
+          -master=seaweedfs-master1:9333,seaweedfs-master2:9333,seaweedfs-master3:9333 \
+          -defaultReplicaPlacement=020 \
+          -metricsPort=9327
+    volumes:
+      - seaweed_filer_offsets:/var/lib/seaweedfs
+    networks:
+      - orchestration_net
+      - kafka_net
+      - patroni_frontend
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O - http://127.0.0.1:8888/ >/dev/null 2>&1"
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:4.39
+    container_name: seaweedfs-s3
+    hostname: seaweedfs-s3
+    restart: unless-stopped
+    depends_on:
+      seaweedfs-filer:
+        condition: service_healthy
+    secrets:
+      - source: seaweedfs_s3_access_key
+        target: seaweedfs_s3_access_key
+      - source: seaweedfs_s3_secret_key
+        target: seaweedfs_s3_secret_key
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+
+        ACCESS_KEY="$$(tr -d '\r\n' </run/secrets/seaweedfs_s3_access_key)"
+        SECRET_KEY="$$(tr -d '\r\n' </run/secrets/seaweedfs_s3_secret_key)"
+
+        mkdir -p /etc/seaweedfs
+
+        cat <<EOF | tr -d '\r' > /etc/seaweedfs/s3.json
+        {
+          "identities": [
+            {
+              "name": "app",
+              "credentials": [
+                {
+                  "accessKey": "$$ACCESS_KEY",
+                  "secretKey": "$$SECRET_KEY"
+                }
+              ],
+              "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+            }
+          ]
+        }
+        EOF
+
+        exec weed s3 \
+          -filer=seaweedfs-filer:8888 \
+          -ip.bind=0.0.0.0 \
+          -port=8333 \
+          -port.iceberg=0 \
+          -metricsPort=9327 \
+          -config=/etc/seaweedfs/s3.json
+    networks:
+      - orchestration_net
+      - ingest_net
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -S --spider http://127.0.0.1:8333/ 2>&1 | grep -Eq 'HTTP/[0-9.]+ (200|403|405)'"
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 40s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  seaweedfs-init:
+    image: amazon/aws-cli:2.36.1
+    container_name: seaweedfs-init
+    restart: "no"
+    depends_on:
+      seaweedfs-s3:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    secrets:
+      - source: seaweedfs_s3_access_key
+        target: seaweedfs_s3_access_key
+      - source: seaweedfs_s3_secret_key
+        target: seaweedfs_s3_secret_key
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+
+        export AWS_ACCESS_KEY_ID="$$(tr -d '\r\n' </run/secrets/seaweedfs_s3_access_key)"
+        export AWS_SECRET_ACCESS_KEY="$$(tr -d '\r\n' </run/secrets/seaweedfs_s3_secret_key)"
+        export AWS_DEFAULT_REGION="us-east-1"
+        export AWS_REGION="us-east-1"
+        export AWS_EC2_METADATA_DISABLED="true"
+
+        until aws --endpoint-url http://seaweedfs-s3:8333 s3api list-buckets >/dev/null 2>&1; do
+          echo "Waiting for SeaweedFS S3..."
+          sleep 3
+        done
+
+        create_bucket_if_missing() {
+          bucket="$$1"
+          if ! aws --endpoint-url http://seaweedfs-s3:8333 s3api head-bucket --bucket "$$bucket" >/dev/null 2>&1; then
+            aws --endpoint-url http://seaweedfs-s3:8333 s3api create-bucket --bucket "$$bucket"
+          else
+            echo "Bucket $$bucket already exists."
+          fi
+        }
+
+        enable_versioning() {
+          bucket="$$1"
+          aws --endpoint-url http://seaweedfs-s3:8333 s3api put-bucket-versioning \
+            --bucket "$$bucket" \
+            --versioning-configuration Status=Enabled
+        }
+
+        for bucket in \
+          media-raw-2d-images \
+          media-raw-3d-images \
+          media-raw-2d-videos \
+          media-raw-3d-videos \
+          media-processed \
+          media-derived \
+          flink-checkpoints \
+          flink-savepoints
+        do
+          create_bucket_if_missing "$$bucket"
+        done
+
+        for bucket in \
+          media-raw-2d-images \
+          media-raw-3d-images \
+          media-raw-2d-videos \
+          media-raw-3d-videos \
+          media-processed \
+          media-derived
+        do
+          enable_versioning "$$bucket"
+        done
+
+        echo "SeaweedFS buckets configured."
+    networks:
+      - orchestration_net
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  seaweedfs-edge:
+    image: caddy:2.11
+    container_name: seaweedfs-edge
+    hostname: seaweedfs-edge
+    restart: unless-stopped
+    depends_on:
+      seaweedfs-s3:
+        condition: service_healthy
+    environment:
+      ACME_EMAIL: "${ACME_EMAIL:?define ACME_EMAIL in .env}"
+      STORAGE_BASE_DOMAIN: "${STORAGE_BASE_DOMAIN:?define STORAGE_BASE_DOMAIN in .env}"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    networks:
+      - orchestration_net
+
+  mqtt-kafka-bridge:
+    build:
+      context: .
+      dockerfile: mqtt-kafka-bridge/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      vernemq1:
+        condition: service_healthy
+    environment:
+      MQTT_HOST: "vernemq1"
+      MQTT_PORT: "1883"
+      MQTT_CLIENT_ID: "mqtt-kafka-bridge"
+      MQTT_CLEAN_SESSION: "false"
+      MQTT_USERNAME: "admin"
+      MQTT_PASSWORD: "${VERNEMQ_ADMIN_PASSWORD:?define VERNEMQ_ADMIN_PASSWORD in .env}"
+      MQTT_TOPICS: "${MQTT_TOPICS:-$$share/ingestors/devices/#,$$share/ingestors/wildfi/#}"
+      WILDFI_TOPIC_PREFIXES: "${WILDFI_TOPIC_PREFIXES:-wildfi,wild-fi}"
+      KAFKA_BOOTSTRAP_SERVERS: "kafka1:9092,kafka2:9092,kafka3:9092"
+      DEFAULT_KAFKA_TOPIC: "raw.sensor"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - ingest_net
+      - kafka_net
+
+  stream-normalizer:
+    profiles: ["rust-normalizer"]
+    build:
+      context: .
+      dockerfile: stream-normalizer/Dockerfile
+    image: dealiot-stream-normalizer:local
+    container_name: stream-normalizer
+    hostname: stream-normalizer
+    restart: unless-stopped
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka1:9092,kafka2:9092,kafka3:9092"
+      STREAM_NORMALIZER_CONSUMER_GROUP: "stream-normalizer-v1"
+      STREAM_NORMALIZER_SOURCE_TOPICS: "raw.sensor,raw.gps,raw.image2d.meta,raw.image3d.meta,raw.video2d.meta,raw.video3d.meta"
+      FEATURES_TOPIC: "features.events"
+      STATE_TOPIC: "state.latest"
+      STREAM_NORMALIZER_STATE_OUTPUT_ENABLED: "false"
+      KAFKA_AUTO_OFFSET_RESET: "earliest"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - kafka_net
+
+  flink-jobmanager:
+    build: *flink-py-build
+    image: custom-flink-py:2.2.1
+    container_name: flink-jobmanager
+    hostname: flink-jobmanager
+    restart: unless-stopped
+    command: "jobmanager"
+    secrets:
+      - source: seaweedfs_s3_access_key
+        target: seaweedfs_s3_access_key
+      - source: seaweedfs_s3_secret_key
+        target: seaweedfs_s3_secret_key
+    environment:
+      ENABLE_BUILT_IN_PLUGINS: "flink-s3-fs-hadoop-2.2.1.jar;flink-metrics-prometheus-2.2.1.jar"
+      FLINK_PYTHON: "/opt/flink/venv/bin/python"
+      PYFLINK_CLIENT_EXECUTABLE: "/opt/flink/venv/bin/python"
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.bind-host: 0.0.0.0
+        rest.address: flink-jobmanager
+        rest.bind-address: 0.0.0.0
+        rest.port: 8081
+        parallelism.default: 4
+        taskmanager.numberOfTaskSlots: 4
+        state.backend.type: rocksdb
+        state.checkpoints.dir: s3://flink-checkpoints/streaming
+        execution.checkpointing.savepoint-dir: s3://flink-savepoints/streaming
+        execution.checkpointing.interval: 10s
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.timeout: 5min
+        restart-strategy.type: exponential-delay
+        restart-strategy.exponential-delay.initial-backoff: 2 s
+        restart-strategy.exponential-delay.max-backoff: 30 s
+        web.submit.enable: true
+        s3.endpoint: http://seaweedfs-s3:8333
+        s3.path.style.access: true
+        s3.access-key: ${SEAWEEDFS_S3_ACCESS_KEY:?define SEAWEEDFS_S3_ACCESS_KEY in .env}
+        s3.secret-key: ${SEAWEEDFS_S3_SECRET_KEY:?define SEAWEEDFS_S3_SECRET_KEY in .env}
+        metrics.reporters: prom
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+        metrics.reporter.prom.filterLabelValueCharacters: true
+    volumes:
+      - ./flink/jobs:/opt/flink/usrlib
+      - ./pipelines:/opt/pipelines:ro
+    networks:
+      - kafka_net
+      - orchestration_net
+    depends_on:
+      seaweedfs-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8081/overview >/dev/null 2>&1"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 45s
+
+  flink-taskmanager-1:
+    image: custom-flink-py:2.2.1
+    pull_policy: never
+    container_name: flink-taskmanager-1
+    hostname: flink-taskmanager-1
+    restart: unless-stopped
+    command: "taskmanager"
+    secrets:
+      - source: seaweedfs_s3_access_key
+        target: seaweedfs_s3_access_key
+      - source: seaweedfs_s3_secret_key
+        target: seaweedfs_s3_secret_key
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+        restart: true
+      seaweedfs-init:
+        condition: service_completed_successfully
+    environment:
+      ENABLE_BUILT_IN_PLUGINS: "flink-s3-fs-hadoop-2.2.1.jar;flink-metrics-prometheus-2.2.1.jar"
+      FLINK_PYTHON: "/opt/flink/venv/bin/python"
+      PYFLINK_CLIENT_EXECUTABLE: "/opt/flink/venv/bin/python"
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.host: flink-taskmanager-1
+        taskmanager.bind-host: 0.0.0.0
+        rest.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 4
+        state.backend.type: rocksdb
+        state.checkpoints.dir: s3://flink-checkpoints/streaming
+        execution.checkpointing.savepoint-dir: s3://flink-savepoints/streaming
+        execution.checkpointing.interval: 10s
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.timeout: 5min
+        s3.endpoint: http://seaweedfs-s3:8333
+        s3.path.style.access: true
+        s3.access-key: ${SEAWEEDFS_S3_ACCESS_KEY:?define SEAWEEDFS_S3_ACCESS_KEY in .env}
+        s3.secret-key: ${SEAWEEDFS_S3_SECRET_KEY:?define SEAWEEDFS_S3_SECRET_KEY in .env}
+        metrics.reporters: prom
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+        metrics.reporter.prom.filterLabelValueCharacters: true
+    volumes:
+      - ./flink/jobs:/opt/flink/usrlib
+      - ./pipelines:/opt/pipelines:ro
+    networks:
+      - kafka_net
+      - orchestration_net
+
+  flink-taskmanager-2:
+    image: custom-flink-py:2.2.1
+    pull_policy: never
+    container_name: flink-taskmanager-2
+    hostname: flink-taskmanager-2
+    restart: unless-stopped
+    command: "taskmanager"
+    secrets:
+      - source: seaweedfs_s3_access_key
+        target: seaweedfs_s3_access_key
+      - source: seaweedfs_s3_secret_key
+        target: seaweedfs_s3_secret_key
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+        restart: true
+      seaweedfs-init:
+        condition: service_completed_successfully
+    environment:
+      ENABLE_BUILT_IN_PLUGINS: "flink-s3-fs-hadoop-2.2.1.jar;flink-metrics-prometheus-2.2.1.jar"
+      FLINK_PYTHON: "/opt/flink/venv/bin/python"
+      PYFLINK_CLIENT_EXECUTABLE: "/opt/flink/venv/bin/python"
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.host: flink-taskmanager-2
+        taskmanager.bind-host: 0.0.0.0
+        rest.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 4
+        state.backend.type: rocksdb
+        state.checkpoints.dir: s3://flink-checkpoints/streaming
+        execution.checkpointing.savepoint-dir: s3://flink-savepoints/streaming
+        execution.checkpointing.interval: 10s
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.timeout: 5min
+        s3.endpoint: http://seaweedfs-s3:8333
+        s3.path.style.access: true
+        s3.access-key: ${SEAWEEDFS_S3_ACCESS_KEY:?define SEAWEEDFS_S3_ACCESS_KEY in .env}
+        s3.secret-key: ${SEAWEEDFS_S3_SECRET_KEY:?define SEAWEEDFS_S3_SECRET_KEY in .env}
+        metrics.reporters: prom
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+        metrics.reporter.prom.filterLabelValueCharacters: true
+    volumes:
+      - ./flink/jobs:/opt/flink/usrlib
+      - ./pipelines:/opt/pipelines:ro
+    networks:
+      - kafka_net
+      - orchestration_net
+
+  flink-cli:
+    build: *flink-py-build
+    image: custom-flink-py:2.2.1
+    container_name: flink-cli
+    hostname: flink-cli
+    profiles: ["tools"]
+    command: ["bash", "-lc", "sleep infinity"]
+    secrets:
+      - source: seaweedfs_s3_access_key
+        target: seaweedfs_s3_access_key
+      - source: seaweedfs_s3_secret_key
+        target: seaweedfs_s3_secret_key
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    volumes:
+      - ./flink/jobs:/opt/flink/usrlib
+      - ./pipelines:/opt/pipelines:ro
+    networks:
+      - kafka_net
+      - orchestration_net
+
+  beam-jobserver:
+    image: apache/beam_flink_job_server:2.75.0-flink2.0
+    container_name: beam-jobserver
+    hostname: beam-jobserver
+    restart: unless-stopped
+    command:
+      - "--flink-master=flink-jobmanager:8081"
+      - "--job-port=8099"
+      - "--artifact-port=8098"
+      - "--expansion-port=8097"
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+        restart: true
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'exec 3<>/dev/tcp/127.0.0.1/8099'"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - orchestration_net
+      - kafka_net
+
+  beam-python-harness:
+    image: apache/beam_python3.13_sdk:2.75.0
+    container_name: beam-python-harness
+    hostname: beam-python-harness
+    restart: unless-stopped
+    command: ["--worker_pool"]
+    environment:
+      <<: *beam-env
+      PYTHONPATH: "/opt/pipelines:/opt/dealiot_contracts"
+    expose:
+      - "50000"
+    volumes:
+      - ./dealiot_contracts:/opt/dealiot_contracts/dealiot_contracts:ro
+      - ./pipelines:/opt/pipelines:ro
+    networks:
+      - orchestration_net
+      - kafka_net
+      - patroni_frontend
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import socket; s=socket.create_connection(('127.0.0.1',50000),5); s.close()\""
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  beam-cli:
+    image: apache/beam_python3.13_sdk:2.75.0
+    container_name: beam-cli
+    hostname: beam-cli
+    profiles: ["tools"]
+    depends_on:
+      beam-jobserver:
+        condition: service_started
+      beam-python-harness:
+        condition: service_healthy
+    command: ["bash", "-lc", "sleep infinity"]
+    environment:
+      <<: *beam-env
+    volumes:
+      - ./dealiot_contracts:/opt/dealiot_contracts/dealiot_contracts:ro
+      - ./pipelines:/opt/pipelines
+    networks:
+      - orchestration_net
+      - kafka_net
+      - patroni_frontend
+
+  airflow-postgres:
+    image: postgres:18-alpine
+    container_name: airflow-postgres
+    hostname: airflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: "${AIRFLOW_DB_PASSWORD:?define AIRFLOW_DB_PASSWORD in .env}"
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - orchestration_net
+
+  airflow-redis:
+    image: redis:8-alpine
+    container_name: airflow-redis
+    hostname: airflow-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - orchestration_net
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    restart: "no"
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: "${AIRFLOW_ADMIN_USER:-admin}"
+      _AIRFLOW_WWW_USER_PASSWORD: "${AIRFLOW_ADMIN_PASSWORD:?define AIRFLOW_ADMIN_PASSWORD in .env}"
+      _AIRFLOW_WWW_USER_FIRSTNAME: "Air"
+      _AIRFLOW_WWW_USER_LASTNAME: "Flow"
+      _AIRFLOW_WWW_USER_ROLE: "Admin"
+      _AIRFLOW_WWW_USER_EMAIL: "admin@example.com"
+    entrypoint: ["/entrypoint"]
+    command: []
+
+  airflow-apiserver:
+    <<: *airflow-common
+    container_name: airflow-apiserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: "api-server"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v2/version', timeout=5)\""
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: "scheduler"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8974/health', timeout=5)\""
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  airflow-worker:
+    <<: *airflow-common
+    container_name: airflow-worker
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-env
+      DUMB_INIT_SETSID: "0"
+    command: "celery worker"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d celery@$$HOSTNAME"
+        ]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: airflow-triggerer
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: "triggerer"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "airflow jobs check --job-type TriggererJob --local"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    container_name: airflow-dag-processor
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: "dag-processor"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "airflow jobs check --job-type DagProcessorJob --local"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    hostname: pgadmin
+    restart: unless-stopped
+    depends_on:
+      haproxy:
+        condition: service_started
+        restart: true
+      airflow-postgres:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_DEFAULT_EMAIL:-admin@example.com}"
+      PGADMIN_DEFAULT_PASSWORD_FILE: "/run/secrets/pgadmin_default_password"
+      PGADMIN_DISABLE_POSTFIX: "1"
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
+    secrets:
+      - pgadmin_default_password
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    networks:
+      - patroni_backend
+      - patroni_frontend
+      - orchestration_net
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      cadvisor:
+        condition: service_started
+      statsd-exporter:
+        condition: service_started
+      postgres-exporter-rw:
+        condition: service_started
+    networks:
+      - orchestration_net
+      - kafka_net
+      - patroni_frontend
+      - ingest_net
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    hostname: grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_started
+        restart: true
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?define GRAFANA_ADMIN_PASSWORD in .env}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - orchestration_net
+
+  management-console:
+    build:
+      context: .
+      dockerfile: management-console/Dockerfile
+    image: dealiot-management-console:local
+    container_name: management-console
+    hostname: management-console
+    restart: unless-stopped
+    depends_on:
+      airflow-apiserver:
+        condition: service_started
+      apicurio-registry:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      grafana:
+        condition: service_started
+    environment:
+      MANAGEMENT_CONSOLE_PORT: "8080"
+      MANAGEMENT_CONSOLE_PROBE_TIMEOUT_SECONDS: "2"
+      AIRFLOW_API_URL: "http://airflow-apiserver:8080/api/v2"
+      APICURIO_REGISTRY_URL: "http://apicurio-registry:8080/apis/registry/v3"
+      FLINK_REST_URL: "http://flink-jobmanager:8081"
+      PROMETHEUS_URL: "http://prometheus:9090"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)\""
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - orchestration_net
+      - kafka_net
+      - ingest_net
+      - patroni_frontend
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.5
+    container_name: cadvisor
+    hostname: cadvisor
+    restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    devices:
+      - /dev/kmsg
+    networks:
+      - orchestration_net
+
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.29.0
+    container_name: statsd-exporter
+    hostname: statsd-exporter
+    restart: unless-stopped
+    command:
+      - --web.listen-address=:9102
+      - --statsd.listen-udp=:9125
+      - --statsd.listen-tcp=:9125
+    networks:
+      - orchestration_net
+
+  postgres-exporter-rw:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
+    container_name: postgres-exporter-rw
+    hostname: postgres-exporter-rw
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_URI: "haproxy:5432/postgres?sslmode=disable"
+      DATA_SOURCE_USER: "postgres_exporter"
+      DATA_SOURCE_PASS_FILE: "/run/secrets/postgres_exporter_password"
+    secrets:
+      - postgres_exporter_password
+    depends_on:
+      haproxy:
+        condition: service_started
+        restart: true
+    networks:
+      - patroni_frontend
+
+  apicurio-registry:
+    image: apicurio/apicurio-registry:3.3.0
+    container_name: apicurio-registry
+    hostname: apicurio-registry
+    restart: unless-stopped
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *apicurio-env
+    networks:
+      - kafka_net
+      - orchestration_net
+
+  apicurio-registry-ui:
+    image: apicurio/apicurio-registry-ui:3.3.0
+    container_name: apicurio-registry-ui
+    hostname: apicurio-registry-ui
+    restart: unless-stopped
+    depends_on:
+      apicurio-registry:
+        condition: service_started
+    environment:
+      REGISTRY_API_URL: "${APICURIO_PUBLIC_URL:-http://localhost:8082}/apis/registry/v3"
+    networks:
+      - orchestration_net
+
+  apicurio-init:
+    image: curlimages/curl:8.21.0
+    container_name: apicurio-init
+    restart: "no"
+    depends_on:
+      apicurio-registry:
+        condition: service_started
+    volumes:
+      - ./apicurio/bootstrap:/bootstrap:ro
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+
+        base="http://apicurio-registry:8080/apis/registry/v3"
+        ready_url="http://apicurio-registry:9000/health/ready"
+        ready_attempt=1
+        ready_attempts=120
+
+        until curl --connect-timeout 5 --max-time 10 -fsS "$$ready_url" >/dev/null 2>&1; do
+          if [ "$$ready_attempt" -ge "$$ready_attempts" ]; then
+            echo "Apicurio Registry did not become ready at $$ready_url"
+            exit 1
+          fi
+          echo "Waiting for Apicurio Registry at $$ready_url..."
+          ready_attempt=$$((ready_attempt + 1))
+          sleep 3
+        done
+
+        post_artifact() {
+          group="$$1"
+          artifact="$$2"
+          file="$$3"
+          artifact_url="$$base/groups/$$group/artifacts/$$artifact"
+
+          if [ ! -f "$$file" ]; then
+            echo "Missing schema file: $$file"
+            ls -la /bootstrap || true
+            exit 1
+          fi
+
+          if curl --connect-timeout 5 --max-time 20 -fsS "$$artifact_url" >/dev/null 2>&1; then
+            echo "Artifact $$group/$$artifact already exists."
+            return 0
+          fi
+
+          curl --connect-timeout 5 --max-time 30 -fsS -X POST "$$base/groups/$$group/artifacts" \
+            -H "Content-Type: application/json" \
+            --data @"$$file"
+
+          echo "Artifact created: $$group/$$artifact"
+        }
+
+        post_artifact telemetry raw.sensor /bootstrap/raw.sensor.json
+        post_artifact telemetry raw.gps /bootstrap/raw.gps.json
+        post_artifact media raw.image2d.meta /bootstrap/raw.image2d.meta.json
+        post_artifact media raw.image3d.meta /bootstrap/raw.image3d.meta.json
+        post_artifact media raw.video2d.meta /bootstrap/raw.video2d.meta.json
+        post_artifact media raw.video3d.meta /bootstrap/raw.video3d.meta.json
+        post_artifact media media.object.events /bootstrap/media.object.events.json
+        post_artifact platform dlq.events /bootstrap/dlq.events.json
+        post_artifact governance governance.data.products /bootstrap/governance.data.products.json
+        post_artifact governance governance.access.requests /bootstrap/governance.access.requests.json
+        post_artifact governance governance.permission.events /bootstrap/governance.permission.events.json
+        post_artifact governance governance.intermediation.log /bootstrap/governance.intermediation.log.json
+        post_artifact governance governance.transfer.notices /bootstrap/governance.transfer.notices.json
+        post_artifact governance governance.research.projects /bootstrap/governance.research.projects.json
+        post_artifact governance governance.research.outputs /bootstrap/governance.research.outputs.json
+        post_artifact governance governance.dataset.catalog /bootstrap/governance.dataset.catalog.json
+        post_artifact governance governance.data_management_plans /bootstrap/governance.data_management_plans.json
+        post_artifact governance governance.repository.exports /bootstrap/governance.repository.exports.json
+        post_artifact dataact dataact.product.catalog /bootstrap/dataact.product.catalog.json
+        post_artifact dataact dataact.user.access.requests /bootstrap/dataact.user.access.requests.json
+        post_artifact dataact dataact.third_party.sharing /bootstrap/dataact.third_party.sharing.json
+        post_artifact dataact dataact.user.exports /bootstrap/dataact.user.exports.json
+        post_artifact dataact dataact.safeguards /bootstrap/dataact.safeguards.json
+        post_artifact dataact dataact.legal_basis.checks /bootstrap/dataact.legal_basis.checks.json
+        post_artifact security security.asset.inventory /bootstrap/security.asset.inventory.json
+        post_artifact security security.incident.events /bootstrap/security.incident.events.json
+        post_artifact security security.vulnerability.findings /bootstrap/security.vulnerability.findings.json
+        post_artifact security security.sbom.attestations /bootstrap/security.sbom.attestations.json
+        post_artifact security security.patch.events /bootstrap/security.patch.events.json
+        post_artifact resilience resilience.backup.tests /bootstrap/resilience.backup.tests.json
+        post_artifact resilience resilience.operational.risk /bootstrap/resilience.operational.risk.json
+        post_artifact resilience resilience.third_party.risk /bootstrap/resilience.third_party.risk.json
+        post_artifact compliance compliance.scope.decisions /bootstrap/compliance.scope.decisions.json
+        post_artifact compliance compliance.control.assessments /bootstrap/compliance.control.assessments.json
+        post_artifact compliance compliance.reporting.channels /bootstrap/compliance.reporting.channels.json
+        post_artifact compliance compliance.legal.dossier /bootstrap/compliance.legal.dossier.json
+        post_artifact cra cra.product.lifecycle /bootstrap/cra.product.lifecycle.json
+
+        echo "Apicurio bootstrap done."
+    networks:
+      - orchestration_net
+
+  debezium-init:
+    image: postgres:18-alpine
+    container_name: debezium-init
+    restart: "no"
+    depends_on:
+      haproxy:
+        condition: service_started
+    secrets:
+      - postgres_superuser_password
+      - debezium_password
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        set -eu
+
+        export PGPASSWORD="$$(tr -d '\r\n' </run/secrets/postgres_superuser_password)"
+        DEBEZIUM_PASSWORD="$$(tr -d '\r\n' </run/secrets/debezium_password)"
+
+        until pg_isready -h haproxy -p 5432 -U postgres >/dev/null 2>&1; do
+          echo "Waiting for PostgreSQL RW endpoint..."
+          sleep 3
+        done
+
+        psql -h haproxy -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 <<SQL
+        DO
+        \$\$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_roles WHERE rolname = 'debezium'
+            ) THEN
+                CREATE ROLE debezium WITH LOGIN REPLICATION PASSWORD '$$DEBEZIUM_PASSWORD';
+            ELSE
+                ALTER ROLE debezium WITH LOGIN REPLICATION PASSWORD '$$DEBEZIUM_PASSWORD';
+            END IF;
+        END
+        \$\$;
+
+        GRANT CONNECT ON DATABASE appdb TO debezium;
+        SQL
+
+        psql -h haproxy -p 5432 -U postgres -d appdb -v ON_ERROR_STOP=1 <<SQL
+        GRANT USAGE ON SCHEMA public TO debezium;
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO debezium;
+        GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO debezium;
+
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT SELECT ON TABLES TO debezium;
+
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT SELECT ON SEQUENCES TO debezium;
+
+        DROP PUBLICATION IF EXISTS dbz_publication;
+        CREATE PUBLICATION dbz_publication FOR ALL TABLES;
+        SQL
+
+        echo "Debezium bootstrap done."
+    networks:
+      - patroni_frontend
+
+networks:
+  patroni_backend:
+    driver: bridge
+    internal: true
+  patroni_frontend:
+    driver: bridge
+  ingest_net:
+    driver: bridge
+    internal: true
+  kafka_net:
+    driver: bridge
+    internal: true
+  orchestration_net:
+    driver: bridge
+
+volumes:
+  etcd1_data:
+  etcd2_data:
+  etcd3_data:
+  pg1_data:
+  pg2_data:
+  pg3_data:
+  vernemq1_data:
+  vernemq2_data:
+  vernemq3_data:
+  kafka1_data:
+  kafka2_data:
+  kafka3_data:
+  seaweed_master1_data:
+  seaweed_master2_data:
+  seaweed_master3_data:
+  seaweed_volume1_data:
+  seaweed_volume2_data:
+  seaweed_volume3_data:
+  seaweed_filer_offsets:
+  caddy_data:
+  caddy_config:
+  airflow_postgres_data:
+  pgadmin_data:
+  prometheus_data:
+  grafana_data:
+
+secrets:
+  postgres_superuser_password:
+    file: secrets/postgres_superuser_password.txt
+  patroni_repl_password:
+    file: secrets/patroni_repl_password.txt
+  patroni_rewind_password:
+    file: secrets/patroni_rewind_password.txt
+  app_user_password:
+    file: secrets/app_user_password.txt
+  pgadmin_default_password:
+    file: secrets/pgadmin_default_password.txt
+  pgbouncer_rw_userlist:
+    file: secrets/pgbouncer_rw_userlist.txt
+  pgbouncer_ro_userlist:
+    file: secrets/pgbouncer_ro_userlist.txt
+  postgres_exporter_password:
+    file: secrets/postgres_exporter_password.txt
+  debezium_password:
+    file: secrets/debezium_password.txt
+  seaweedfs_pg_password:
+    file: secrets/seaweedfs_pg_password.txt
+  seaweedfs_s3_access_key:
+    file: secrets/seaweedfs_s3_access_key.txt
+  seaweedfs_s3_secret_key:
+    file: secrets/seaweedfs_s3_secret_key.txt

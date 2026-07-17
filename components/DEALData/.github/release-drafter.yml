@@ -1,0 +1,86 @@
+name-template: "$RESOLVED_VERSION"
+tag-template: "$RESOLVED_VERSION"
+
+categories:
+  - title: "Breaking Changes"
+    labels:
+      - "breaking-change"
+      - "major"
+  - title: "Features"
+    labels:
+      - "feature"
+      - "minor"
+  - title: "Fixes"
+    labels:
+      - "bug"
+      - "fix"
+      - "patch"
+  - title: "Documentation"
+    labels:
+      - "documentation"
+  - title: "Maintenance"
+    labels:
+      - "maintenance"
+      - "test"
+      - "refactor"
+  - title: "Dependencies"
+    labels:
+      - "dependencies"
+
+change-template: "- $TITLE (#$NUMBER)"
+change-title-escapes: "\\<*_&"
+
+exclude-contributors:
+  - dependabot
+  - dependabot[bot]
+
+version-resolver:
+  major:
+    labels:
+      - "major"
+      - "breaking-change"
+  minor:
+    labels:
+      - "minor"
+      - "feature"
+  patch:
+    labels:
+      - "patch"
+      - "bug"
+      - "fix"
+      - "documentation"
+      - "maintenance"
+      - "dependencies"
+  default: patch
+
+template: |
+  $CHANGES
+
+  ## Docker Images
+  - `ghcr.io/$OWNER/dealdata-core-layer:$RESOLVED_VERSION`
+  - `ghcr.io/$OWNER/dealdata-gps-layer:$RESOLVED_VERSION`
+  - `ghcr.io/$OWNER/dealdata-sensor-layer:$RESOLVED_VERSION`
+
+  **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...$RESOLVED_VERSION
+
+  Thanks to $CONTRIBUTORS for making this release possible.
+
+autolabeler:
+  - label: "documentation"
+    files:
+      - "*.md"
+      - "docs/**/*"
+    title:
+      - "/(docs|doc:|documentation|readme)/i"
+  - label: "bug"
+    title:
+      - "/(fix|bug|missing|correct|regression)/i"
+  - label: "maintenance"
+    title:
+      - "/(improve|update|refactor|remove|test|ci|workflow)/i"
+  - label: "dependencies"
+    title:
+      - "/(bump|dependencies|dependabot|renovate)/i"
+  - label: "feature"
+    title:
+      - "/(feature|feat|create|implement|add)/i"

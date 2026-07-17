@@ -1,0 +1,57 @@
+﻿name: Bug report
+description: Report a reproducible data service, ingestion, deployment, or documentation defect.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the defect and the expected behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Core layer
+        - GPS layer
+        - Sensor layer
+        - Shared DEALData common code
+        - WildFi HTTP ingestion
+        - DEALIoT Kafka ingestion
+        - Docker Compose deployment
+        - CI or dependency workflow
+        - Documentation
+        - Security or data governance
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include commands, sanitized config, and fixture data when possible.
+      placeholder: |
+        1. Run ...
+        2. Observe ...
+        3. Expected ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      render: shell
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA
+      description: Run `git rev-parse HEAD` when possible.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I have removed secrets, private endpoint values, customer data, and raw personal data from this report.
+          required: true

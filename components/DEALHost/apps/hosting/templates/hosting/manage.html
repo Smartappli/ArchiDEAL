@@ -1,0 +1,116 @@
+{% load i18n %}
+<!doctype html>
+<html lang="{{ LANGUAGE_CODE }}">
+  <head>
+    <meta charset="UTF-8" />
+    <title>{% trans "DEALHost - Tools/Apps Management" %}</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; }
+      h1, h2 { margin-bottom: 0.5rem; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+      th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+      th { background: #f4f4f4; }
+      .messages { margin-bottom: 1rem; padding: 0; list-style: none; }
+      .messages li { padding: 0.5rem; border-radius: 4px; margin-bottom: 0.4rem; }
+      .messages .success { background: #e8f7e8; }
+      .messages .error { background: #fdeaea; }
+    </style>
+  </head>
+  <body>
+    <form method="post" action="{% url 'set_language' %}">
+      {% csrf_token %}
+      <label for="language">{% trans "Language" %}</label>
+      <select id="language" name="language">
+        {% get_current_language as CURRENT_LANGUAGE %}
+        {% get_available_languages as AVAILABLE_LANGUAGES %}
+        {% for lang_code, lang_name in AVAILABLE_LANGUAGES %}
+          <option value="{{ lang_code }}"{% if lang_code == CURRENT_LANGUAGE %} selected{% endif %}>{{ lang_name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">{% trans "Apply" %}</button>
+    </form>
+
+    <h1>{% trans "Management interface for modules, tools and applications" %}</h1>
+    {% if user.is_staff %}
+      <form method="post" action="{% url 'hosting-management-autodiscover' %}">
+        {% csrf_token %}
+        <button type="submit">{% trans "Autodiscover tools and applications" %}</button>
+      </form>
+    {% endif %}
+
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}
+          <li class="{{ message.tags }}">{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <h2>{% trans "Modules" %}</h2>
+    <table>
+      <thead>
+        <tr><th>{% trans "Name" %}</th><th>{% trans "Slug" %}</th><th>{% trans "Branch" %}</th><th>{% trans "Target" %}</th><th>{% trans "Route" %}</th><th>{% trans "Enabled" %}</th></tr>
+      </thead>
+      <tbody>
+        {% for module in modules %}
+          <tr><td>{{ module.name }}</td><td>{{ module.slug }}</td><td>{{ module.branch }}</td><td>{{ module.deployment_target }}</td><td>{{ module.public_path|default:"-" }}</td><td>{% if module.enabled %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td></tr>
+        {% empty %}
+          <tr><td colspan="6">{% trans "No modules" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>{% trans "Tools" %}</h2>
+    <table>
+      <thead>
+        <tr><th>{% trans "Name" %}</th><th>{% trans "Slug" %}</th><th>{% trans "Current version" %}</th><th>{% trans "Modules" %}</th><th>{% trans "Enabled" %}</th></tr>
+      </thead>
+      <tbody>
+        {% for tool in tools %}
+          <tr><td>{{ tool.name }}</td><td>{{ tool.slug }}</td><td>{{ tool.current_version }}</td><td>{% for module in tool.modules.all %}{{ module.slug }}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}</td><td>{% if tool.enabled %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td></tr>
+        {% empty %}
+          <tr><td colspan="5">{% trans "No tools" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+
+    <h2>{% trans "Accessible datasets (logged user)" %}</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>{% trans "Name" %}</th>
+          <th>{% trans "Slug" %}</th>
+          <th>{% trans "Description" %}</th>
+          <th>{% trans "Modules" %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for dataset in datasets %}
+          <tr>
+            <td>{{ dataset.name }}</td>
+            <td>{{ dataset.slug }}</td>
+            <td>{{ dataset.description|default:"-" }}</td>
+            <td>{% for module in dataset.modules.all %}{{ module.slug }}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4">{% trans "No accessible datasets" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>{% trans "Applications" %}</h2>
+    <table>
+      <thead>
+        <tr><th>{% trans "Name" %}</th><th>{% trans "Slug" %}</th><th>{% trans "Current version" %}</th><th>{% trans "Modules" %}</th><th>{% trans "Enabled" %}</th></tr>
+      </thead>
+      <tbody>
+        {% for application in applications %}
+          <tr><td>{{ application.name }}</td><td>{{ application.slug }}</td><td>{{ application.current_version }}</td><td>{% for module in application.modules.all %}{{ module.slug }}{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}</td><td>{% if application.enabled %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td></tr>
+        {% empty %}
+          <tr><td colspan="5">{% trans "No applications" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </body>
+</html>

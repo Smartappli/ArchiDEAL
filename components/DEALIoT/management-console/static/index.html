@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="keywords"
+          content="DEALIoT, IoT, gouvernance des donnees, Data Act, DGA, NIS2, DORA, CRA, RGPD" />
+    <title>DEALIoT Management Console</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">D</span>
+        <div>
+          <strong>DEALIoT</strong>
+          <small>Management Console</small>
+        </div>
+      </div>
+      <nav aria-label="Sections">
+        <a href="#overview">Vue</a>
+        <a href="#topology">Architecture</a>
+        <a href="#topics">Data</a>
+        <a href="#datasets">Datasets</a>
+        <a href="#intermediation">Intermediation</a>
+        <a href="#data-act">Data Act</a>
+        <a href="#research">Recherche</a>
+        <a href="#dga">DGA</a>
+        <a href="#security-resilience">Securite</a>
+        <a href="#operations">Operations</a>
+        <a href="#compliance">Conformite</a>
+      </nav>
+    </aside>
+    <main>
+      <header class="topbar">
+        <div>
+          <h1>Console de gestion</h1>
+          <p>Supervision et pilotage interne de la plateforme IoT.</p>
+        </div>
+        <button id="refresh-health" type="button">Actualiser</button>
+      </header>
+      <section id="overview" class="metric-grid" aria-label="Synthese">
+        <article class="metric">
+          <span>Services</span>
+          <strong id="metric-services">0</strong>
+        </article>
+        <article class="metric">
+          <span>Healthy</span>
+          <strong id="metric-healthy">0</strong>
+        </article>
+        <article class="metric">
+          <span>Unreachable</span>
+          <strong id="metric-unreachable">0</strong>
+        </article>
+        <article class="metric">
+          <span>Topics</span>
+          <strong id="metric-topics">0</strong>
+        </article>
+      </section>
+      <section id="topology" class="panel">
+        <div class="section-head">
+          <h2>Architecture</h2>
+          <select id="plane-filter" aria-label="Filtrer par plan">
+            <option value="all">Tous les plans</option>
+          </select>
+        </div>
+        <div id="component-grid" class="component-grid"></div>
+      </section>
+      <section id="topics" class="panel">
+        <div class="section-head">
+          <h2>Catalogue data</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Topic</th>
+                <th>Plan</th>
+                <th>Classification</th>
+                <th>Retention</th>
+              </tr>
+            </thead>
+            <tbody id="topic-table">
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section id="datasets" class="panel">
+        <div class="section-head">
+          <h2>Datasets et DMP</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Dataset</th>
+                <th>Type</th>
+                <th>Classification</th>
+                <th>Acces</th>
+                <th>DMP</th>
+                <th>Zenodo</th>
+                <th>OpenAIRE</th>
+              </tr>
+            </thead>
+            <tbody id="dataset-table">
+            </tbody>
+          </table>
+        </div>
+        <div id="zenodo-export-policy" class="principles"></div>
+        <div id="zenodo-export-result" class="status-line" role="status"></div>
+        <div id="openaire-export-policy" class="principles"></div>
+        <div id="openaire-export-result" class="status-line" role="status"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>DMP</th>
+                <th>Projet</th>
+                <th>Statut</th>
+                <th>Acces</th>
+                <th>Conservation</th>
+              </tr>
+            </thead>
+            <tbody id="dmp-table">
+            </tbody>
+          </table>
+        </div>
+        <div id="dmp-control-list" class="compliance-grid"></div>
+      </section>
+      <section id="intermediation" class="panel">
+        <div class="section-head">
+          <h2>Intermediation</h2>
+        </div>
+        <div id="intermediation-flow" class="flow-grid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Consommateur</th>
+                <th>Type</th>
+                <th>Acces par defaut</th>
+                <th>Raw access</th>
+              </tr>
+            </thead>
+            <tbody id="consumer-profile-table">
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section id="data-act" class="panel">
+        <div class="section-head">
+          <h2>Data Act</h2>
+        </div>
+        <div id="data-act-journey" class="flow-grid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Produit connecte</th>
+                <th>Donnees generees</th>
+                <th>Acces</th>
+                <th>Partage tiers</th>
+              </tr>
+            </thead>
+            <tbody id="data-act-product-table">
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Canal</th>
+                <th>Consommateur</th>
+                <th>Livraison</th>
+                <th>Preuves</th>
+              </tr>
+            </thead>
+            <tbody id="data-act-channel-table">
+            </tbody>
+          </table>
+        </div>
+        <div id="data-act-obligation-list" class="compliance-grid"></div>
+      </section>
+      <section id="research" class="panel">
+        <div class="section-head">
+          <h2>Recherche</h2>
+        </div>
+        <div id="research-context" class="research-context"></div>
+        <div id="research-project-list" class="component-grid"></div>
+        <div id="research-control-list" class="compliance-grid"></div>
+      </section>
+      <section id="dga" class="panel">
+        <div class="section-head">
+          <h2>Data Governance Act</h2>
+        </div>
+        <div id="dga-principles" class="principles"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data product</th>
+                <th>Categorie</th>
+                <th>Acces</th>
+                <th>Controle</th>
+              </tr>
+            </thead>
+            <tbody id="data-product-table">
+            </tbody>
+          </table>
+        </div>
+        <div id="dga-obligation-list" class="compliance-grid"></div>
+      </section>
+      <section id="security-resilience" class="panel">
+        <div class="section-head">
+          <h2>Securite et resilience</h2>
+        </div>
+        <div id="security-scope-list" class="principles"></div>
+        <div id="security-gate-list" class="flow-grid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Controle</th>
+                <th>Reglement</th>
+                <th>Domaine</th>
+                <th>Preuve</th>
+              </tr>
+            </thead>
+            <tbody id="security-control-table">
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Topic de preuve</th>
+                <th>Plan</th>
+                <th>Classification</th>
+                <th>Retention</th>
+              </tr>
+            </thead>
+            <tbody id="security-topic-table">
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section id="operations" class="panel two-col">
+        <div>
+          <div class="section-head">
+            <h2>Operations</h2>
+          </div>
+          <div id="operations-list" class="stack"></div>
+        </div>
+        <div>
+          <div class="section-head">
+            <h2>Runbooks</h2>
+          </div>
+          <div id="runbook-list" class="stack"></div>
+        </div>
+      </section>
+      <section id="compliance" class="panel">
+        <div class="section-head">
+          <h2>Conformite</h2>
+        </div>
+        <div class="section-head subhead">
+          <h2>Finalisation</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Element</th>
+                <th>Statut</th>
+                <th>Responsable</th>
+                <th>Decision</th>
+                <th>Preuve</th>
+              </tr>
+            </thead>
+            <tbody id="legal-finalization-table">
+            </tbody>
+          </table>
+        </div>
+        <div class="section-head subhead">
+          <h2>Dossier juridique</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Artefact</th>
+                <th>Texte</th>
+                <th>Statut</th>
+                <th>Preuve</th>
+                <th>Obligatoire avant</th>
+              </tr>
+            </thead>
+            <tbody id="legal-dossier-table">
+            </tbody>
+          </table>
+        </div>
+        <div id="legal-release-gate-list" class="compliance-grid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Modele</th>
+                <th>Texte</th>
+                <th>Usage</th>
+                <th>Chemin</th>
+              </tr>
+            </thead>
+            <tbody id="legal-template-table">
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Reglement</th>
+                <th>Etat</th>
+                <th>Blocage</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="compliance-readiness-table">
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Perimetre</th>
+                <th>Statut</th>
+                <th>Responsable</th>
+                <th>Preuve</th>
+              </tr>
+            </thead>
+            <tbody id="compliance-scope-table">
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Signalement</th>
+                <th>Declencheur</th>
+                <th>Statut</th>
+                <th>Preuve</th>
+              </tr>
+            </thead>
+            <tbody id="compliance-reporting-table">
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Texte</th>
+                <th>Applicabilite</th>
+                <th>Motif</th>
+                <th>Action architecture</th>
+              </tr>
+            </thead>
+            <tbody id="additional-legislation-table">
+            </tbody>
+          </table>
+        </div>
+        <div id="compliance-list" class="compliance-grid"></div>
+      </section>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

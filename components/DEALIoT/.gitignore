@@ -1,0 +1,53 @@
+# Editor and local workspace files
+.idea/
+.vscode/
+*.iml
+
+# Python cache
+__pycache__/
+*.py[cod]
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+coverage.xml
+
+# Rust build output
+target/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+secrets/*
+!secrets/.gitkeep
+!secrets/*.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Local export and staging artifacts
+zenodo-staging/
+openaire-exports/
+
+# Airflow runtime artifacts
+airflow/logs/
+
+# Runtime logs, databases, dumps, and backups
+*.log
+*.sqlite
+*.db
+*.bak
+*.backup
+*.dump
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z

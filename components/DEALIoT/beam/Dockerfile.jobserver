@@ -1,0 +1,85 @@
+# syntax=docker/dockerfile:1.7
+
+ARG BEAM_GIT_REF=master
+ARG JAVA_BUILD_IMAGE=eclipse-temurin:21-jdk
+ARG JAVA_RUN_IMAGE=eclipse-temurin:21-jre
+ARG GRADLE_OPTS=-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g
+
+FROM ${JAVA_BUILD_IMAGE} AS builder
+
+ARG BEAM_GIT_REF
+ARG FLINK_JOBSERVER_GRADLE_TASK
+ARG GRADLE_OPTS
+ENV GRADLE_OPTS="${GRADLE_OPTS}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    libltdl7 \
+    unzip \
+    zip \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git clone https://github.com/apache/beam.git beam
+WORKDIR /src/beam
+RUN git checkout "${BEAM_GIT_REF}"
+
+RUN if [ -z "${FLINK_JOBSERVER_GRADLE_TASK}" ]; then \
+      if [ -d runners/flink/2.0/job-server ]; then \
+        FLINK_JOBSERVER_GRADLE_TASK=":runners:flink:2.0:job-server:shadowJar"; \
+      elif [ -d runners/flink/1.20/job-server ]; then \
+        FLINK_JOBSERVER_GRADLE_TASK=":runners:flink:1.20:job-server:shadowJar"; \
+      elif [ -d runners/flink/1.19/job-server ]; then \
+        FLINK_JOBSERVER_GRADLE_TASK=":runners:flink:1.19:job-server:shadowJar"; \
+      elif [ -d runners/flink/job-server ]; then \
+        FLINK_JOBSERVER_GRADLE_TASK=":runners:flink:job-server:shadowJar"; \
+      else \
+        echo "Unable to infer FLINK_JOBSERVER_GRADLE_TASK from Beam source tree" >&2; \
+        exit 1; \
+      fi; \
+    fi \
+ && ./gradlew --no-daemon "${FLINK_JOBSERVER_GRADLE_TASK}"
+
+RUN mkdir -p /out/jars /out/meta \
+ && JAR_PATH="$(find /src/beam -type f \
+      \( -path '*/build/libs/beam-runners-flink*-job-server-*.jar' -o \
+         -path '*/build/libs/beam-runners-flink-job-server-*.jar' \) \
+      ! -name '*-sources.jar' \
+      ! -name '*-javadoc.jar' | head -n 1)" \
+ && test -n "$JAR_PATH" \
+ && cp "$JAR_PATH" /out/jars/beam-runners-flink-job-server.jar
+
+RUN find /src/beam -type f -name LICENSE | head -n 1 | xargs -r -I{} cp "{}" /out/meta/LICENSE \
+ && find /src/beam -type f -name NOTICE  | head -n 1 | xargs -r -I{} cp "{}" /out/meta/NOTICE
+
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'java -cp "jars/*" org.apache.beam.runners.flink.FlinkJobServerDriver "$@" &' \
+  'wait' \
+  > /out/flink-job-server.sh \
+ && chmod +x /out/flink-job-server.sh
+
+FROM ${JAVA_RUN_IMAGE} AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    libltdl7 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --create-home --shell /bin/bash appuser
+
+WORKDIR /opt/apache/beam
+
+RUN mkdir -p /opt/apache/beam/jars
+COPY --from=builder --chown=root:root --chmod=0444 /out/jars/beam-runners-flink-job-server.jar /opt/apache/beam/jars/
+COPY --from=builder --chown=root:root --chmod=0555 /out/flink-job-server.sh /opt/apache/beam/flink-job-server.sh
+COPY --from=builder --chown=root:root --chmod=0444 /out/meta/LICENSE /opt/apache/beam/LICENSE
+COPY --from=builder --chown=root:root --chmod=0444 /out/meta/NOTICE /opt/apache/beam/NOTICE
+
+USER appuser
+
+ENTRYPOINT ["./flink-job-server.sh"]

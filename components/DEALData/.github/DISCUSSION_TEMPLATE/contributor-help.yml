@@ -1,0 +1,45 @@
+﻿title: "Contributor help: "
+labels: ["contributor", "question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when you want to contribute but need help choosing scope, validation, or the right repository area.
+  - type: dropdown
+    id: contribution_track
+    attributes:
+      label: Contribution track
+      options:
+        - Documentation
+        - Tests
+        - Core data service
+        - GPS data service
+        - Sensor data service
+        - WildFi or Kafka ingestion
+        - Deployment
+        - Data governance
+        - Community operations
+        - Not sure yet
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What do you want to improve?
+      description: Describe the user, operator, adoption, or contributor problem you want to help with.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Current context
+      description: Link the issue, doc, command output, failing test, or discussion if one exists. Sanitize logs.
+    validations:
+      required: false
+  - type: textarea
+    id: help_needed
+    attributes:
+      label: Help needed
+      description: State whether you need scoping, validation guidance, architecture context, or review direction.
+    validations:
+      required: true

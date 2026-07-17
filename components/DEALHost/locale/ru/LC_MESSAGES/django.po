@@ -1,0 +1,127 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: DEALHost\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "DEALHost - Tools/Apps Management"
+msgstr "DEALHost — Управление tools/apps"
+
+msgid "Language"
+msgstr "Язык"
+
+msgid "Apply"
+msgstr "Применить"
+
+msgid "Management interface for modules, tools and applications"
+msgstr "Интерфейс управления модулями, tools и приложениями"
+
+msgid "Autodiscover tools and applications"
+msgstr "Автообнаружение tools и приложений"
+
+msgid "Modules"
+msgstr "Модули"
+
+msgid "Name"
+msgstr "Имя"
+
+msgid "Slug"
+msgstr "Slug"
+
+msgid "Branch"
+msgstr "Ветка"
+
+msgid "Enabled"
+msgstr "Активно"
+
+msgid "No modules"
+msgstr "Нет модулей"
+
+msgid "Tools"
+msgstr "Tools"
+
+msgid "Current version"
+msgstr "Текущая версия"
+
+msgid "No tools"
+msgstr "Нет tools"
+
+msgid "Applications"
+msgstr "Приложения"
+
+msgid "No applications"
+msgstr "Нет приложений"
+
+msgid "Autodiscovery completed: "
+msgstr "Автообнаружение завершено: "
+
+msgid "tools created=%(tools_created)s, tools updated=%(tools_updated)s, apps created=%(apps_created)s, apps updated=%(apps_updated)s, tool versions created=%(tool_versions_created)s, application versions created=%(application_versions_created)s."
+msgstr "tools создано=%(tools_created)s, tools обновлено=%(tools_updated)s, apps создано=%(apps_created)s, apps обновлено=%(apps_updated)s, версий tools создано=%(tool_versions_created)s, версий apps создано=%(application_versions_created)s."
+
+msgid "Modular Hosting"
+msgstr "Модульный хостинг"
+
+msgid "Version must follow semantic versioning (example: 1.2.3 or v1.2.3)."
+msgstr "Версия должна соответствовать семантическому версионированию (например: 1.2.3 или v1.2.3)."
+
+msgid "module_slug is required."
+msgstr "Поле module_slug обязательно."
+
+msgid "Invalid GitHub signature."
+msgstr "Недействительная подпись GitHub."
+
+msgid "%(path)s: missing required field '%(field)s'"
+msgstr "%(path)s: отсутствует обязательное поле '%(field)s'"
+
+msgid "%(path)s: invalid version '%(version)s', expected semantic version"
+msgstr "%(path)s: неверная версия '%(version)s', ожидается семантическая версия"
+
+msgid "%(path)s: unknown module slugs: %(slugs)s"
+msgstr "%(path)s: неизвестные slug модулей: %(slugs)s"
+
+msgid "Yes"
+msgstr "Да"
+
+msgid "No"
+msgstr "Нет"
+
+msgid "Arabic"
+msgstr "Арабский"
+
+msgid "Chinese (Simplified)"
+msgstr "Китайский (упрощённый)"
+
+msgid "English"
+msgstr "Английский"
+
+msgid "French"
+msgstr "Французский"
+
+msgid "Russian"
+msgstr "Русский"
+
+msgid "Spanish"
+msgstr "Испанский"
+
+msgid "Module"
+msgstr "Модуль"
+
+msgid "Tool"
+msgstr "Инструмент"
+
+msgid "Tool version"
+msgstr "Версия инструмента"
+
+msgid "Tool versions"
+msgstr "Версии инструмента"
+
+msgid "Application"
+msgstr "Приложение"
+
+msgid "Application version"
+msgstr "Версия приложения"
+
+msgid "Application versions"
+msgstr "Версии приложения"

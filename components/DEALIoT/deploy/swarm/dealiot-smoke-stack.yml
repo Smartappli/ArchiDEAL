@@ -1,0 +1,114 @@
+version: "3.9"
+
+services:
+  kafka:
+    image: apache/kafka:4.2.0
+    hostname: kafka
+    environment:
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - smoke
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  mqtt:
+    image: eclipse-mosquitto:2.0.18
+    command:
+      - sh
+      - -ec
+      - >-
+        printf 'listener 1883 0.0.0.0\nallow_anonymous true\npersistence false\n'
+        >/tmp/mosquitto.conf;
+        exec /usr/sbin/mosquitto -c /tmp/mosquitto.conf
+    networks:
+      - smoke
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  mqtt-kafka-bridge:
+    image: "${DEALIOT_MQTT_KAFKA_BRIDGE_IMAGE:-dealiot-mqtt-kafka-bridge:ci}"
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: "1883"
+      MQTT_CLIENT_ID: dealiot-swarm-smoke
+      MQTT_CLEAN_SESSION: "true"
+      MQTT_TOPICS: $$share/ingestors/devices/#
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DEFAULT_KAFKA_TOPIC: raw.sensor
+      BRIDGE_HEALTH_BIND: 0.0.0.0
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks:
+      - smoke
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  publisher:
+    image: eclipse-mosquitto:2.0.18
+    command:
+      - sh
+      - -ec
+      - >-
+        for attempt in $$(seq 1 60); do
+          mosquitto_pub -h mqtt -q 1 -t devices/smoke-001/sensor
+          -m "{\"timestamp\":\"2026-07-10T12:00:00Z\",\"sequence\":$${attempt}}" || true;
+          sleep 2;
+        done
+    networks:
+      - smoke
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: none
+
+  verifier:
+    image: apache/kafka:4.2.0
+    command:
+      - sh
+      - -ec
+      - >-
+        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+        >/dev/null 2>&1; do sleep 2; done;
+        timeout 180 /opt/kafka/bin/kafka-console-consumer.sh
+        --bootstrap-server kafka:9092 --topic raw.sensor --from-beginning
+        --property print.value=true | grep -m1 smoke-001
+    networks:
+      - smoke
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: none
+
+networks:
+  smoke:
+    driver: overlay

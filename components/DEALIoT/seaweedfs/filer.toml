@@ -1,0 +1,17 @@
+[leveldb2]
+enabled = true
+dir = "/data/filerldb2"
+
+[notification.kafka]
+enabled = true
+hosts = [
+  "kafka1:9092",
+  "kafka2:9092",
+  "kafka3:9092"
+]
+topic = "media.object.events"
+offsetFile = "/var/lib/seaweedfs/seaweedfs-notification.offset"
+offsetSaveIntervalSeconds = 10
+
+[filer.options]
+buckets_folder = "/buckets"

@@ -1,0 +1,20 @@
+{
+  "name": "DEALData Core Layer",
+  "slug": "dealdata-core-layer",
+  "image": "ghcr.io/smartappli/dealdata-core-layer:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALData/core_layer",
+  "deployment_target": "compose",
+  "public_path": "/dealdata/core",
+  "upstream_host": "dealdata-core",
+  "upstream_port": 7000,
+  "contract_topics": [
+    "projects",
+    "observed_objects",
+    "experiments"
+  ],
+  "production_ready": false,
+  "enabled": true
+}

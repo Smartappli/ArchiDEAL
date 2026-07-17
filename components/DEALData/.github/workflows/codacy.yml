@@ -1,0 +1,137 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+# This workflow checks out code, performs a Codacy security scan
+# and integrates the results with the
+# GitHub Advanced Security code scanning feature.  For more information on
+# the Codacy security scan action usage and parameters, see
+# https://github.com/codacy/codacy-analysis-cli-action.
+# For more information on Codacy Analysis CLI in general, see
+# https://github.com/codacy/codacy-analysis-cli.
+
+name: Codacy Security Scan
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ "main" ]
+  schedule:
+    - cron: '20 15 * * 6'
+
+permissions:
+  contents: read
+
+jobs:
+  codacy-security-scan:
+    permissions:
+      contents: read # for actions/checkout to fetch code
+      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
+    name: Codacy Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Execute Codacy Analysis CLI and generate a SARIF output with the security issues identified during the analysis
+      - name: Run Codacy Analysis CLI
+        uses: codacy/codacy-analysis-cli-action@562ee3e92b8e92df8b67e0a5ff8aa8e261919c08
+        with:
+          # Check https://github.com/codacy/codacy-analysis-cli#project-token to get your project token from your Codacy repository
+          # You can also omit the token and run the tools that support default configurations
+          project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
+          verbose: true
+          output: results.sarif
+          format: sarif
+          # Adjust severity of non-security issues
+          gh-code-scanning-compat: true
+          # Force 0 exit code to allow SARIF file generation
+          # This will handover control about PR rejection to the GitHub side
+          max-allowed-issues: 2147483647
+
+      - name: Normalize and split SARIF run categories for GitHub upload
+        run: |
+          python - <<'PY'
+          import copy
+          import json
+          import math
+          import re
+          from pathlib import Path
+
+          max_runs_per_upload = 20
+          max_upload_steps = 5
+          source = Path("results.sarif")
+          output_dir = Path("sarif-results")
+          data = json.loads(source.read_text(encoding="utf-8"))
+          runs = data.get("runs", [])
+          seen = {}
+
+          def slug(value: str) -> str:
+              value = re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-")
+              return value or "run"
+
+          for index, run in enumerate(runs, start=1):
+              automation = run.setdefault("automationDetails", {})
+              tool = run.get("tool", {}).get("driver", {})
+              base = automation.get("id") or tool.get("name") or f"run-{index}"
+              base = slug(str(base))
+              seen[base] = seen.get(base, 0) + 1
+              suffix = "" if seen[base] == 1 else f"-{seen[base]}"
+              automation["id"] = f"codacy/{base}{suffix}"
+
+          output_dir.mkdir(exist_ok=True)
+          for stale_file in output_dir.glob("results.github.*.sarif"):
+              stale_file.unlink()
+
+          chunk_count = max(1, math.ceil(len(runs) / max_runs_per_upload))
+          if chunk_count > max_upload_steps:
+              raise SystemExit(
+                  f"Codacy produced {len(runs)} SARIF runs, requiring {chunk_count} "
+                  f"upload steps. Increase max_upload_steps and add matching "
+                  f"upload-sarif steps in this workflow."
+              )
+
+          for chunk_index in range(chunk_count):
+              chunk = copy.deepcopy(data)
+              start = chunk_index * max_runs_per_upload
+              end = start + max_runs_per_upload
+              chunk["runs"] = runs[start:end]
+              target = output_dir / f"results.github.{chunk_index + 1:02d}.sarif"
+              target.write_text(json.dumps(chunk, indent=2), encoding="utf-8")
+              print(f"Wrote {target} with {len(chunk['runs'])} SARIF runs")
+          PY
+
+      # Upload the SARIF file generated in the previous step
+      - name: Upload SARIF results file 1
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        with:
+          sarif_file: sarif-results/results.github.01.sarif
+
+      - name: Upload SARIF results file 2
+        if: ${{ hashFiles('sarif-results/results.github.02.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        with:
+          sarif_file: sarif-results/results.github.02.sarif
+
+      - name: Upload SARIF results file 3
+        if: ${{ hashFiles('sarif-results/results.github.03.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        with:
+          sarif_file: sarif-results/results.github.03.sarif
+
+      - name: Upload SARIF results file 4
+        if: ${{ hashFiles('sarif-results/results.github.04.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        with:
+          sarif_file: sarif-results/results.github.04.sarif
+
+      - name: Upload SARIF results file 5
+        if: ${{ hashFiles('sarif-results/results.github.05.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        with:
+          sarif_file: sarif-results/results.github.05.sarif

@@ -1,0 +1,92 @@
+# syntax=docker/dockerfile:1.7
+
+ARG FLINK_BASE_IMAGE=apache/flink:2.2.1-scala_2.12-java17
+FROM ${FLINK_BASE_IMAGE}
+
+USER root
+
+ARG FLINK_KAFKA_CONNECTOR_VERSION=5.0.0-2.2
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    python3-venv \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN python3 - <<'PY'
+from pathlib import Path
+
+jdk_only_exports = (
+    "--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
+    "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
+    "--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
+    "--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+    "--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
+)
+
+for config_path in (
+    Path("/opt/flink/conf/config.yaml"),
+    Path("/opt/flink/conf/flink-conf.yaml"),
+):
+    if not config_path.exists():
+        continue
+
+    config = config_path.read_text(encoding="utf-8")
+    for jdk_only_export in jdk_only_exports:
+        config = config.replace(jdk_only_export, "")
+
+    config_path.write_text(
+        "\n".join(line.rstrip() for line in config.splitlines()) + "\n",
+        encoding="utf-8",
+    )
+PY
+
+RUN python3 - <<'PY'
+import os
+from pathlib import Path
+from urllib.request import urlretrieve
+
+artifacts = (("flink-sql-connector-kafka", os.environ["FLINK_KAFKA_CONNECTOR_VERSION"]),)
+
+lib_dir = Path("/opt/flink/lib")
+for artifact, version in artifacts:
+    jar_name = f"{artifact}-{version}.jar"
+    url = (
+        "https://repo.maven.apache.org/maven2/org/apache/flink/"
+        f"{artifact}/{version}/{jar_name}"
+    )
+    target = lib_dir / jar_name
+    urlretrieve(url, target)
+    target.chmod(0o444)
+PY
+
+COPY --chmod=0444 ./flink/requirements-pyflink.txt /tmp/requirements-pyflink.txt
+COPY --chown=root:root --chmod=0444 ./flink/log4j-console.properties /opt/flink/conf/log4j-console.properties
+COPY --chown=root:root --chmod=0555 ./flink/docker-entrypoint.sh /opt/flink/bin/dealiot-flink-entrypoint.sh
+COPY --chown=root:root --chmod=0555 ./flink/jobs /opt/flink/usrlib
+COPY --chown=root:root --chmod=0555 ./pipelines /opt/pipelines
+
+RUN python3 --version \
+ && python3 -m venv /opt/flink/venv \
+ && /opt/flink/venv/bin/python -m pip install --upgrade pip \
+ && /opt/flink/venv/bin/pip install --no-cache-dir \
+      "packaging" \
+      "setuptools<81" \
+      "wheel<0.46" \
+ && /opt/flink/venv/bin/pip install --no-cache-dir --no-build-isolation -r /tmp/requirements-pyflink.txt \
+ && /opt/flink/venv/bin/python - <<'PY'
+import sys
+print(sys.version)
+import pyflink
+print("PyFlink OK")
+PY
+
+ENV PYFLINK_CLIENT_EXECUTABLE=/opt/flink/venv/bin/python
+ENV PYTHON_EXECUTABLE=/opt/flink/venv/bin/python
+ENV PATH="/opt/flink/venv/bin:${PATH}"
+
+ENTRYPOINT ["/opt/flink/bin/dealiot-flink-entrypoint.sh"]
+
+USER flink

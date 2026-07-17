@@ -1,0 +1,8 @@
+images:
+  - path: spec/image
+    kind: FlinkDeployment
+
+commonLabels:
+  - path: spec/podTemplate/metadata/labels
+    create: true
+    kind: FlinkDeployment

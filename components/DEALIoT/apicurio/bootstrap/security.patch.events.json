@@ -1,0 +1,17 @@
+{
+  "artifactId": "security.patch.events",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"SecurityPatchEvent\",\"type\":\"object\",\"required\":[\"patch_id\",\"asset_id\",\"change_type\",\"status\",\"planned_at\",\"updated_at\"],\"properties\":{\"patch_id\":{\"type\":\"string\"},\"asset_id\":{\"type\":\"string\"},\"change_type\":{\"type\":\"string\",\"enum\":[\"security_update\",\"configuration_change\",\"dependency_update\",\"emergency_fix\"]},\"status\":{\"type\":\"string\",\"enum\":[\"planned\",\"tested\",\"deployed\",\"rolled_back\",\"failed\"]},\"planned_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"deployed_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"related_findings\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"rollback_plan_uri\":{\"type\":\"string\"},\"approver\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "security",
+    "topic": "security.patch.events",
+    "regulation": "CRA,NIS2,DORA"
+  },
+  "name": "Security Patch Event"
+}

@@ -1,0 +1,92 @@
+{
+  "routes": [
+    {
+      "id": "module-core",
+      "uri": "/core/*",
+      "name": "module-core",
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {
+          "django-app:8000": 1
+        }
+      }
+    },
+    {
+      "id": "module-schema-registry-contracts",
+      "uri": "/dealiot/apicurio/*",
+      "name": "module-schema-registry-contracts",
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {
+          "apicurio-registry:8080": 1
+        }
+      }
+    },
+    {
+      "id": "module-flink-runtime",
+      "uri": "/dealiot/flink/*",
+      "name": "module-flink-runtime",
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {
+          "flink-jobmanager:8081": 1
+        }
+      }
+    },
+    {
+      "id": "module-airflow-orchestration",
+      "uri": "/dealiot/airflow/*",
+      "name": "module-airflow-orchestration",
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {
+          "airflow-apiserver:8080": 1
+        }
+      }
+    },
+    {
+      "id": "module-observability",
+      "uri": "/dealiot/prometheus/*",
+      "name": "module-observability",
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {
+          "prometheus:9090": 1
+        }
+      }
+    },
+    {
+      "id": "module-dealdata-core-layer",
+      "uri": "/dealdata/core/*",
+      "name": "module-dealdata-core-layer",
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {
+          "dealdata-core:7000": 1
+        }
+      }
+    },
+    {
+      "id": "module-dealdata-gps-layer",
+      "uri": "/dealdata/gps/*",
+      "name": "module-dealdata-gps-layer",
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {
+          "dealdata-gps:7001": 1
+        }
+      }
+    },
+    {
+      "id": "module-dealdata-sensor-layer",
+      "uri": "/dealdata/sensor/*",
+      "name": "module-dealdata-sensor-layer",
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {
+          "dealdata-sensor:7002": 1
+        }
+      }
+    }
+  ]
+}

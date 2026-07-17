@@ -1,0 +1,127 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: DEALHost\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "DEALHost - Tools/Apps Management"
+msgstr "DEALHost - Gestión de tools/apps"
+
+msgid "Language"
+msgstr "Idioma"
+
+msgid "Apply"
+msgstr "Aplicar"
+
+msgid "Management interface for modules, tools and applications"
+msgstr "Interfaz de gestión de módulos, tools y aplicaciones"
+
+msgid "Autodiscover tools and applications"
+msgstr "Autodescubrir tools y aplicaciones"
+
+msgid "Modules"
+msgstr "Módulos"
+
+msgid "Name"
+msgstr "Nombre"
+
+msgid "Slug"
+msgstr "Slug"
+
+msgid "Branch"
+msgstr "Rama"
+
+msgid "Enabled"
+msgstr "Activo"
+
+msgid "No modules"
+msgstr "Sin módulos"
+
+msgid "Tools"
+msgstr "Tools"
+
+msgid "Current version"
+msgstr "Versión actual"
+
+msgid "No tools"
+msgstr "Sin tools"
+
+msgid "Applications"
+msgstr "Aplicaciones"
+
+msgid "No applications"
+msgstr "Sin aplicaciones"
+
+msgid "Autodiscovery completed: "
+msgstr "Autodescubrimiento completado: "
+
+msgid "tools created=%(tools_created)s, tools updated=%(tools_updated)s, apps created=%(apps_created)s, apps updated=%(apps_updated)s, tool versions created=%(tool_versions_created)s, application versions created=%(application_versions_created)s."
+msgstr "tools creados=%(tools_created)s, tools actualizados=%(tools_updated)s, apps creadas=%(apps_created)s, apps actualizadas=%(apps_updated)s, versiones de tools creadas=%(tool_versions_created)s, versiones de apps creadas=%(application_versions_created)s."
+
+msgid "Modular Hosting"
+msgstr "Alojamiento modular"
+
+msgid "Version must follow semantic versioning (example: 1.2.3 or v1.2.3)."
+msgstr "La versión debe seguir versionado semántico (ejemplo: 1.2.3 o v1.2.3)."
+
+msgid "module_slug is required."
+msgstr "module_slug es obligatorio."
+
+msgid "Invalid GitHub signature."
+msgstr "Firma de GitHub no válida."
+
+msgid "%(path)s: missing required field '%(field)s'"
+msgstr "%(path)s: falta el campo obligatorio '%(field)s'"
+
+msgid "%(path)s: invalid version '%(version)s', expected semantic version"
+msgstr "%(path)s: versión no válida '%(version)s', se esperaba versión semántica"
+
+msgid "%(path)s: unknown module slugs: %(slugs)s"
+msgstr "%(path)s: slugs de módulos desconocidos: %(slugs)s"
+
+msgid "Yes"
+msgstr "Sí"
+
+msgid "No"
+msgstr "No"
+
+msgid "Arabic"
+msgstr "Árabe"
+
+msgid "Chinese (Simplified)"
+msgstr "Chino (simplificado)"
+
+msgid "English"
+msgstr "Inglés"
+
+msgid "French"
+msgstr "Francés"
+
+msgid "Russian"
+msgstr "Ruso"
+
+msgid "Spanish"
+msgstr "Español"
+
+msgid "Module"
+msgstr "Módulo"
+
+msgid "Tool"
+msgstr "Herramienta"
+
+msgid "Tool version"
+msgstr "Versión de herramienta"
+
+msgid "Tool versions"
+msgstr "Versiones de herramienta"
+
+msgid "Application"
+msgstr "Aplicación"
+
+msgid "Application version"
+msgstr "Versión de aplicación"
+
+msgid "Application versions"
+msgstr "Versiones de aplicación"

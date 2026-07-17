@@ -1,0 +1,14 @@
+{
+  "name": "DEALData",
+  "slug": "dealdata",
+  "description": "Plateforme de donnees Smartappli composee des couches core, GPS et sensor.",
+  "module_slugs": [
+    "dealdata-platform",
+    "dealdata-core-layer",
+    "dealdata-gps-layer",
+    "dealdata-sensor-layer"
+  ],
+  "version": "0.1.0",
+  "version_notes": "ArchiDEAL monorepo hosting integration contract for DEALData",
+  "enabled": true
+}

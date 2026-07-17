@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.repository.exports",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"GovernanceRepositoryExport\",\"type\":\"object\",\"required\":[\"export_id\",\"dataset_id\",\"repository\",\"status\",\"created_at\"],\"properties\":{\"export_id\":{\"type\":\"string\"},\"dataset_id\":{\"type\":\"string\"},\"dmp_id\":{\"type\":\"string\"},\"repository\":{\"type\":\"string\",\"enum\":[\"Zenodo\",\"OpenAIRE\",\"institutional_repository\",\"other\"]},\"repository_record_id\":{\"type\":\"string\"},\"repository_deposition_id\":{\"type\":\"string\"},\"doi\":{\"type\":\"string\"},\"record_url\":{\"type\":\"string\"},\"access_right\":{\"type\":\"string\",\"enum\":[\"open\",\"restricted\",\"embargoed\",\"closed\"]},\"status\":{\"type\":\"string\",\"enum\":[\"draft_created\",\"metadata_package_created\",\"metadata_uploaded\",\"registered_for_harvesting\",\"files_uploaded\",\"published\",\"failed\",\"blocked\"]},\"sandbox\":{\"type\":\"boolean\"},\"uploaded_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"legal_review_approved\":{\"type\":\"boolean\"},\"release_gates\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"error_code\":{\"type\":\"string\"},\"created_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.repository.exports",
+    "regulation": "DGA,DataAct,GDPR,OpenData,OpenAIRE"
+  },
+  "name": "Governance Repository Export"
+}

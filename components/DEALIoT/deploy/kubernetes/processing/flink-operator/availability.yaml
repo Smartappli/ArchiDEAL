@@ -1,0 +1,27 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealiot-streaming-taskmanager
+  labels:
+    app.kubernetes.io/name: flink-runtime
+    app.kubernetes.io/part-of: dealiot
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: dealiot-streaming
+      component: taskmanager
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealiot-streaming-jobmanager
+  labels:
+    app.kubernetes.io/name: flink-runtime
+    app.kubernetes.io/part-of: dealiot
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: dealiot-streaming
+      component: jobmanager

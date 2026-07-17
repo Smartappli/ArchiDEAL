@@ -1,0 +1,1 @@
+"""Sensor Django project package."""

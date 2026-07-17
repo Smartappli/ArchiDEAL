@@ -1,0 +1,17 @@
+{
+  "artifactId": "cra.product.lifecycle",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"CraProductLifecycle\",\"type\":\"object\",\"required\":[\"product_id\",\"version\",\"support_status\",\"support_started_at\",\"support_ends_at\",\"updated_at\"],\"properties\":{\"product_id\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"},\"support_status\":{\"type\":\"string\",\"enum\":[\"planned\",\"supported\",\"extended_support\",\"end_of_support\"]},\"support_started_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"support_ends_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"security_update_channel\":{\"type\":\"string\"},\"vulnerability_disclosure_uri\":{\"type\":\"string\"},\"user_security_documentation_uri\":{\"type\":\"string\"},\"essential_requirements\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "cra",
+    "topic": "cra.product.lifecycle",
+    "regulation": "CRA"
+  },
+  "name": "CRA Product Lifecycle"
+}

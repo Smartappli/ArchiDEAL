@@ -1,0 +1,26 @@
+apisix:
+  node_listen:
+    - port: 9080
+  enable_ipv6: false
+
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  admin:
+    admin_key:
+      - name: admin
+        key: ${{APISIX_ADMIN_KEY}}
+        role: admin
+    allow_admin:
+      - 0.0.0.0/0
+    admin_listen:
+      ip: 0.0.0.0
+      port: 9180
+  etcd:
+    host:
+      - http://apisix-etcd:2379
+    prefix: /apisix
+    timeout: 30
+
+#END

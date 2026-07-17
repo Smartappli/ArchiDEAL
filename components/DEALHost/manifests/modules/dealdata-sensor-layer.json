@@ -1,0 +1,20 @@
+{
+  "name": "DEALData Sensor Layer",
+  "slug": "dealdata-sensor-layer",
+  "image": "ghcr.io/smartappli/dealdata-sensor-layer:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALData/sensor_layer",
+  "deployment_target": "compose",
+  "public_path": "/dealdata/sensor",
+  "upstream_host": "dealdata-sensor",
+  "upstream_port": 7002,
+  "contract_topics": [
+    "sensors",
+    "sensor_data",
+    "sensor_observed_objects"
+  ],
+  "production_ready": false,
+  "enabled": true
+}

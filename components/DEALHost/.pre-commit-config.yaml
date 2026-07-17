@@ -1,0 +1,38 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-ast
+      - id: check-case-conflict
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: debug-statements
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.16
+    hooks:
+      - id: ruff
+      - id: ruff-format
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.2
+    hooks:
+      - id: codespell
+        args:
+          - --skip=*.po,*.lock
+          - --ignore-words-list=registre,exemple,branche,groupes,Fonctions,Exemple,objets,liens,versionning,servie,persistant,environnement,persistance,projet,valide,syntaxe,installe,groupe,correspondant,reste,explicite,projets
+
+  - repo: local
+    hooks:
+      - id: validate-hosting-manifests
+        name: Validate hosting manifests, Renovate and APISIX routes
+        entry: python -c "import os, runpy; os.environ['HOSTING_MANIFEST_STRICT_IMAGES'] = 'true'; runpy.run_path('scripts/validate_hosting_manifests.py', run_name='__main__')"
+        language: system
+        pass_filenames: false
+        files: ^(manifests/|infra/apisix/|renovate\.json|scripts/validate_hosting_manifests\.py)

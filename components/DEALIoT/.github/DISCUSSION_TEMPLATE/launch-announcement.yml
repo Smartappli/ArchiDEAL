@@ -1,0 +1,37 @@
+title: "[Launch] "
+labels:
+  - adoption
+  - community
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for launch announcements, public evaluation calls, roadmap milestones, and project recaps.
+  - type: input
+    id: headline
+    attributes:
+      label: Headline
+      description: Short public headline for the announcement.
+    validations:
+      required: true
+  - type: textarea
+    id: announcement
+    attributes:
+      label: Announcement
+      description: What changed, why it matters, and where readers should start.
+    validations:
+      required: true
+  - type: textarea
+    id: requested_feedback
+    attributes:
+      label: Requested feedback
+      description: What concrete feedback, use case, integration, or contribution is requested?
+    validations:
+      required: true
+  - type: checkboxes
+    id: publication_safety
+    attributes:
+      label: Publication safety
+      options:
+        - label: This post contains only public or approved information.
+          required: true

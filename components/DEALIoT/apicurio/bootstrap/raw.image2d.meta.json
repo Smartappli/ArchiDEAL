@@ -1,0 +1,16 @@
+{
+  "artifactId": "raw.image2d.meta",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"RawImage2DMetaEvent\",\"type\":\"object\",\"required\":[\"device_id\",\"timestamp\",\"bucket\",\"object_key\",\"object_uri\",\"format\"],\"properties\":{\"device_id\":{\"type\":\"string\"},\"event_id\":{\"type\":\"string\",\"pattern\":\"^[0-9a-f]{64}$\"},\"schema_version\":{\"type\":\"string\",\"pattern\":\"^[0-9]+\\\\.[0-9]+\\\\.[0-9]+$\"},\"occurred_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"camera_id\":{\"type\":\"string\"},\"timestamp\":{\"type\":\"string\",\"format\":\"date-time\"},\"ingested_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"bucket\":{\"type\":\"string\"},\"object_key\":{\"type\":\"string\"},\"object_uri\":{\"type\":\"string\"},\"format\":{\"type\":\"string\"},\"content_type\":{\"type\":\"string\"},\"size_bytes\":{\"type\":\"integer\",\"minimum\":0},\"width\":{\"type\":\"integer\",\"minimum\":1},\"height\":{\"type\":\"integer\",\"minimum\":1},\"checksum\":{\"type\":\"string\"},\"tags\":{\"type\":\"object\",\"additionalProperties\":true},\"source\":{\"type\":\"string\"},\"mqtt_topic\":{\"type\":\"string\"},\"qos\":{\"type\":\"integer\",\"minimum\":0},\"retain\":{\"type\":\"boolean\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.1.0"
+  },
+  "labels": {
+    "domain": "media",
+    "topic": "raw.image2d.meta"
+  },
+  "name": "Raw Image 2D Metadata Event"
+}

@@ -1,0 +1,17 @@
+{
+  "artifactId": "resilience.third_party.risk",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"ResilienceThirdPartyRisk\",\"type\":\"object\",\"required\":[\"provider_id\",\"service\",\"criticality\",\"owner\",\"status\",\"reviewed_at\"],\"properties\":{\"provider_id\":{\"type\":\"string\"},\"service\":{\"type\":\"string\"},\"criticality\":{\"type\":\"string\",\"enum\":[\"low\",\"medium\",\"high\",\"critical\"]},\"owner\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"onboarding\",\"approved\",\"mitigating\",\"suspended\",\"terminated\"]},\"contract_uri\":{\"type\":\"string\"},\"security_requirements\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"subcontracting_allowed\":{\"type\":\"boolean\"},\"exit_plan_uri\":{\"type\":\"string\"},\"reviewed_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"next_review_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "resilience",
+    "topic": "resilience.third_party.risk",
+    "regulation": "NIS2,DORA,CRA"
+  },
+  "name": "Resilience Third Party Risk"
+}

@@ -1,0 +1,1 @@
+"""GPS Django project package."""

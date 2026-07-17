@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.data.products",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DgaDataProduct\",\"type\":\"object\",\"required\":[\"product_id\",\"title\",\"owner\",\"data_category\",\"lawful_basis\",\"allowed_purposes\",\"access_mode\",\"retention_policy\",\"updated_at\"],\"properties\":{\"product_id\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"owner\":{\"type\":\"string\"},\"data_category\":{\"type\":\"string\",\"enum\":[\"personal\",\"non_personal\",\"mixed\",\"commercially_confidential\"]},\"source_topics\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"source_buckets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"lawful_basis\":{\"type\":\"string\"},\"allowed_purposes\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"prohibited_purposes\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"access_mode\":{\"type\":\"string\",\"enum\":[\"direct\",\"mediated\",\"altruism\",\"restricted\"]},\"format\":{\"type\":\"string\"},\"interoperability_standard\":{\"type\":\"string\"},\"retention_policy\":{\"type\":\"string\"},\"third_country_transfer_allowed\":{\"type\":\"boolean\"},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.data.products",
+    "regulation": "DGA"
+  },
+  "name": "DGA Data Product"
+}

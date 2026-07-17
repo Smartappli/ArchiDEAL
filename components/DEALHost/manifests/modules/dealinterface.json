@@ -1,0 +1,12 @@
+{
+  "name": "DEALInterface",
+  "slug": "dealinterface",
+  "image": "ghcr.io/smartappli/dealinterface:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALInterface",
+  "deployment_target": "compose",
+  "production_ready": false,
+  "enabled": true
+}

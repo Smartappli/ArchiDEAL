@@ -1,0 +1,507 @@
+name: archideal
+
+services:
+  kafka:
+    image: apache/kafka:4.3.1
+    restart: unless-stopped
+    environment:
+      CLUSTER_ID: "5L6g3nShT-eMCtK--X86sw"
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: "3"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_MIN_INSYNC_REPLICAS: "1"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - event
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  kafka-init:
+    image: apache/kafka:4.3.1
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        for topic in raw.gps raw.sensor dlq.events; do
+          /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server kafka:9092 \
+            --create --if-not-exists \
+            --topic "$${topic}" --partitions 3 --replication-factor 1
+        done
+    networks:
+      - event
+
+  vernemq:
+    image: vernemq/vernemq:2.1.2
+    restart: unless-stopped
+    environment:
+      DOCKER_VERNEMQ_ACCEPT_EULA: "yes"
+      DOCKER_VERNEMQ_ALLOW_ANONYMOUS: "off"
+      DOCKER_VERNEMQ_LISTENER__TCP__DEFAULT: "0.0.0.0:1883"
+      DOCKER_VERNEMQ_DISTRIBUTED_COOKIE: ${VERNEMQ_DISTRIBUTED_COOKIE:?set VERNEMQ_DISTRIBUTED_COOKIE}
+      DOCKER_VERNEMQ_USER_admin: ${VERNEMQ_ADMIN_PASSWORD:?set VERNEMQ_ADMIN_PASSWORD}
+    volumes:
+      - vernemq-data:/vernemq/data
+    networks:
+      - ingest
+    healthcheck:
+      test: ["CMD-SHELL", "vernemq ping | grep -q pong"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  mqtt-kafka-bridge:
+    image: archideal/mqtt-kafka-bridge:${ARCHIDEAL_IMAGE_TAG:-dev}
+    build:
+      context: ./components/DEALIoT
+      dockerfile: mqtt-kafka-bridge/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      vernemq:
+        condition: service_healthy
+    environment:
+      MQTT_HOST: vernemq
+      MQTT_PORT: "1883"
+      MQTT_CLIENT_ID: archideal-mqtt-kafka-bridge
+      MQTT_CLEAN_SESSION: "false"
+      MQTT_USERNAME: admin
+      MQTT_PASSWORD: ${VERNEMQ_ADMIN_PASSWORD:?set VERNEMQ_ADMIN_PASSWORD}
+      MQTT_TOPICS: "$$share/ingestors/devices/#,$$share/ingestors/wildfi/#"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      DEFAULT_KAFKA_TOPIC: raw.sensor
+      BRIDGE_HEALTH_BIND: 0.0.0.0
+      BRIDGE_HEALTH_PORT: "8080"
+    networks:
+      - ingest
+      - event
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  dealdata-core-db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dealdata_core
+      POSTGRES_USER: dealdata
+      POSTGRES_PASSWORD: ${CORE_DATABASE_PASSWORD:?set CORE_DATABASE_PASSWORD}
+    volumes:
+      - dealdata-core-db:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_core"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dealdata-gps-db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dealdata_gps
+      POSTGRES_USER: dealdata
+      POSTGRES_PASSWORD: ${GPS_DATABASE_PASSWORD:?set GPS_DATABASE_PASSWORD}
+    volumes:
+      - dealdata-gps-db:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_gps"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dealdata-sensor-db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dealdata_sensor
+      POSTGRES_USER: dealdata
+      POSTGRES_PASSWORD: ${SENSOR_DATABASE_PASSWORD:?set SENSOR_DATABASE_PASSWORD}
+    volumes:
+      - dealdata-sensor-db:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_sensor"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dealdata-core:
+    image: archideal/dealdata-core:${ARCHIDEAL_IMAGE_TAG:-dev}
+    build:
+      context: ./components/DEALData
+      dockerfile: core_layer/Dockerfile
+    restart: unless-stopped
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${CORE_DJANGO_SECRET_KEY:?set CORE_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,dealdata-core
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: dealdata-core-db
+      DATABASE_NAME: dealdata_core
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${CORE_DATABASE_PASSWORD:?set CORE_DATABASE_PASSWORD}
+    depends_on:
+      dealdata-core-db:
+        condition: service_healthy
+    networks:
+      - data
+      - api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7000/health/ready/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dealdata-gps:
+    image: archideal/dealdata-gps:${ARCHIDEAL_IMAGE_TAG:-dev}
+    build:
+      context: ./components/DEALData
+      dockerfile: gps_layer/Dockerfile
+    restart: unless-stopped
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${GPS_DJANGO_SECRET_KEY:?set GPS_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,dealdata-gps
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      DEALDATA_INGEST_TOKEN: ${DEALDATA_INGEST_TOKEN:?set DEALDATA_INGEST_TOKEN}
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: dealdata-gps-db
+      DATABASE_NAME: dealdata_gps
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${GPS_DATABASE_PASSWORD:?set GPS_DATABASE_PASSWORD}
+    depends_on:
+      dealdata-gps-db:
+        condition: service_healthy
+    networks:
+      - data
+      - api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7001/health/ready/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dealdata-sensor:
+    image: archideal/dealdata-sensor:${ARCHIDEAL_IMAGE_TAG:-dev}
+    build:
+      context: ./components/DEALData
+      dockerfile: sensor_layer/Dockerfile
+    restart: unless-stopped
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${SENSOR_DJANGO_SECRET_KEY:?set SENSOR_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,dealdata-sensor
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      DEALDATA_INGEST_TOKEN: ${DEALDATA_INGEST_TOKEN:?set DEALDATA_INGEST_TOKEN}
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: dealdata-sensor-db
+      DATABASE_NAME: dealdata_sensor
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${SENSOR_DATABASE_PASSWORD:?set SENSOR_DATABASE_PASSWORD}
+    depends_on:
+      dealdata-sensor-db:
+        condition: service_healthy
+    networks:
+      - data
+      - api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7002/health/ready/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dealdata-gps-consumer:
+    image: archideal/dealdata-gps:${ARCHIDEAL_IMAGE_TAG:-dev}
+    restart: unless-stopped
+    command: ["python", "manage.py", "consume_dealiot_kafka"]
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${GPS_DJANGO_SECRET_KEY:?set GPS_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: dealdata-gps-consumer
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      DEALDATA_INGEST_TOKEN: ${DEALDATA_INGEST_TOKEN:?set DEALDATA_INGEST_TOKEN}
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: dealdata-gps-db
+      DATABASE_NAME: dealdata_gps
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${GPS_DATABASE_PASSWORD:?set GPS_DATABASE_PASSWORD}
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+      DEALDATA_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DEALDATA_GPS_KAFKA_TOPIC: raw.gps
+      DEALDATA_GPS_KAFKA_GROUP_ID: archideal-dealdata-gps
+      DEALDATA_KAFKA_AUTO_OFFSET_RESET: earliest
+      DEALDATA_KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      dealdata-gps:
+        condition: service_healthy
+    networks:
+      - data
+      - event
+
+  dealdata-sensor-consumer:
+    image: archideal/dealdata-sensor:${ARCHIDEAL_IMAGE_TAG:-dev}
+    restart: unless-stopped
+    command: ["python", "manage.py", "consume_dealiot_kafka"]
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${SENSOR_DJANGO_SECRET_KEY:?set SENSOR_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: dealdata-sensor-consumer
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      DEALDATA_INGEST_TOKEN: ${DEALDATA_INGEST_TOKEN:?set DEALDATA_INGEST_TOKEN}
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: dealdata-sensor-db
+      DATABASE_NAME: dealdata_sensor
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${SENSOR_DATABASE_PASSWORD:?set SENSOR_DATABASE_PASSWORD}
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+      DEALDATA_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DEALDATA_SENSOR_KAFKA_TOPIC: raw.sensor
+      DEALDATA_SENSOR_KAFKA_GROUP_ID: archideal-dealdata-sensor
+      DEALDATA_KAFKA_AUTO_OFFSET_RESET: earliest
+      DEALDATA_KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      dealdata-sensor:
+        condition: service_healthy
+    networks:
+      - data
+      - event
+
+  dealhost-valkey:
+    image: valkey/valkey:9-alpine
+    restart: unless-stopped
+    command: valkey-server --save 60 1 --loglevel warning
+    volumes:
+      - dealhost-valkey:/data
+    networks:
+      host:
+        aliases: [valkey]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  dealhost-nats:
+    image: nats:2-alpine
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    volumes:
+      - dealhost-nats:/data
+    networks:
+      host:
+        aliases: [nats]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  dealhost:
+    image: archideal/dealhost:${ARCHIDEAL_IMAGE_TAG:-dev}
+    build:
+      context: ./components/DEALHost
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: dealhost.settings.dev
+      DJANGO_SECRET_KEY: ${DEALHOST_DJANGO_SECRET_KEY:?set DEALHOST_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,dealhost,django-app
+      DEALHOST_DB_PATH: /data/db.sqlite3
+      DEALHOST_API_TOKENS: ${DEALHOST_API_TOKENS:?set DEALHOST_API_TOKENS}
+      DEALHOST_ADMIN_API_TOKENS: ${DEALHOST_ADMIN_API_TOKENS:?set DEALHOST_ADMIN_API_TOKENS}
+      APISIX_ADMIN_URL: http://apisix:9180
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?set APISIX_ADMIN_KEY}
+      APISIX_UPSTREAM_HOST: dealhost
+      APISIX_UPSTREAM_PORT: "8000"
+      VALKEY_URL: redis://valkey:6379/1
+      NATS_URL: nats://nats:4222
+      NATS_ENABLED: "false"
+      GITHUB_OWNER: Smartappli
+      GITHUB_REPOSITORY: ArchiDEAL
+      GITHUB_ALLOWED_REPOSITORIES: Smartappli/ArchiDEAL
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-local-development-only}
+    volumes:
+      - dealhost-data:/data
+    depends_on:
+      dealhost-valkey:
+        condition: service_healthy
+      dealhost-nats:
+        condition: service_healthy
+      apisix:
+        condition: service_started
+    networks:
+      host:
+      api:
+        aliases: [django-app]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/gateway/health/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  dealiot:
+    image: archideal/dealiot-console:${ARCHIDEAL_IMAGE_TAG:-dev}
+    build:
+      context: ./components/DEALIoT
+      dockerfile: management-console/Dockerfile
+    restart: unless-stopped
+    environment:
+      MANAGEMENT_CONSOLE_PORT: "8080"
+      MANAGEMENT_CONSOLE_PROBE_TIMEOUT_SECONDS: "0.5"
+      MQTT_HOST: vernemq
+      MQTT_PORT: "1883"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    networks:
+      - api
+      - event
+      - ingest
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dealinterface:
+    image: archideal/dealinterface:${ARCHIDEAL_IMAGE_TAG:-dev}
+    build:
+      context: ./components/DEALInterface
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  apisix-etcd:
+    image: bitnamilegacy/etcd:3.5.11
+    restart: unless-stopped
+    environment:
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: http://apisix-etcd:2379
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+    volumes:
+      - apisix-etcd:/bitnami/etcd
+    networks:
+      - host
+
+  apisix:
+    image: apache/apisix:3.17.0-debian
+    restart: unless-stopped
+    environment:
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?set APISIX_ADMIN_KEY}
+    volumes:
+      - ./deploy/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+    depends_on:
+      apisix-etcd:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${ARCHIDEAL_HTTP_PORT:-8080}:9080"
+    networks:
+      - edge
+      - api
+      - host
+
+  apisix-bootstrap:
+    image: python:3.14-alpine
+    restart: "no"
+    environment:
+      APISIX_ADMIN_URL: http://apisix:9180
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?set APISIX_ADMIN_KEY}
+      APISIX_ROUTES_FILE: /bootstrap/routes.json
+    volumes:
+      - ./deploy/apisix/bootstrap.py:/bootstrap/bootstrap.py:ro
+      - ./deploy/apisix/routes.json:/bootstrap/routes.json:ro
+    command: ["python", "/bootstrap/bootstrap.py"]
+    depends_on:
+      apisix:
+        condition: service_started
+      dealhost:
+        condition: service_healthy
+      dealiot:
+        condition: service_healthy
+      dealdata-core:
+        condition: service_healthy
+      dealdata-gps:
+        condition: service_healthy
+      dealdata-sensor:
+        condition: service_healthy
+      dealinterface:
+        condition: service_healthy
+    networks:
+      - host
+
+  mqtt-client:
+    image: eclipse-mosquitto:2.0.22
+    profiles: [tools]
+    entrypoint: ["mosquitto_pub"]
+    networks:
+      - ingest
+
+volumes:
+  kafka-data:
+  vernemq-data:
+  dealdata-core-db:
+  dealdata-gps-db:
+  dealdata-sensor-db:
+  dealhost-valkey:
+  dealhost-nats:
+  dealhost-data:
+  apisix-etcd:
+
+networks:
+  edge:
+  api:
+    internal: true
+  event:
+    internal: true
+  ingest:
+    internal: true
+  data:
+    internal: true
+  host:
+    internal: true

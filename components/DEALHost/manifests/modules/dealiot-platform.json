@@ -1,0 +1,12 @@
+{
+  "name": "DEALIoT Platform",
+  "slug": "dealiot-platform",
+  "image": "ghcr.io/smartappli/dealiot-orchestration:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALIoT",
+  "deployment_target": "kubernetes",
+  "production_ready": false,
+  "enabled": true
+}

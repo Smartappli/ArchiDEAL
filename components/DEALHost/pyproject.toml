@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dealhost"
+version = "0.1.0"
+description = "Architecture d'hébergement modulaire Django 6 avec APISIX + GitHub"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "Django>=6.0.4,<6.1",
+  "djangorestframework>=3.16,<4.0",
+  "httpx>=0.28.1,<0.29",
+  "python-dotenv>=1.2.2,<2.0",
+  "granian>=2.7.3,<3.0",
+  "servestatic>=4.0,<5.0",
+  "argon2-cffi>=25.1,<26.0",
+  "redis>=7.4,<8.1",
+  "nats-py>=2.14.0,<3.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["dealhost*", "apps*"]
+
+[tool.setuptools.package-data]
+"apps.hosting" = ["templates/hosting/*.html"]
+"apps.iam" = ["templates/iam/*.html", "templates/registration/*.html"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "dealhost.settings.test"
+python_files = ["test_*.py", "*_test.py"]
+
+
+[tool.ruff.lint]
+ignore = [
+  "ANN001",
+  "ANN201",
+  "ARG002",
+  "C901",
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "D104",
+  "D105",
+  "D106",
+  "D107",
+  "PLR0912",
+  "PLR2004",
+  "PT009",
+  "RUF012",
+  "S101",
+  "S105",
+  "S106",
+]
+per-file-ignores = {"tests/*.py" = ["INP001"]}

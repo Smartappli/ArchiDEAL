@@ -1,0 +1,14 @@
+{
+  "name": "Module Core",
+  "slug": "module-core",
+  "image": "ghcr.io/dealiot/module-core:latest",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALHost",
+  "deployment_target": "compose",
+  "public_path": "/core",
+  "upstream_host": "django-app",
+  "upstream_port": 8000,
+  "production_ready": false
+}

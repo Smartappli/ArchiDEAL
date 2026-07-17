@@ -1,0 +1,17 @@
+{
+  "artifactId": "security.incident.events",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"SecurityIncidentEvent\",\"type\":\"object\",\"required\":[\"incident_id\",\"detected_at\",\"severity\",\"status\",\"summary\",\"affected_assets\"],\"properties\":{\"incident_id\":{\"type\":\"string\"},\"detected_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"reported_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"severity\":{\"type\":\"string\",\"enum\":[\"low\",\"medium\",\"high\",\"critical\"]},\"status\":{\"type\":\"string\",\"enum\":[\"detected\",\"triaged\",\"contained\",\"reported\",\"recovered\",\"closed\"]},\"summary\":{\"type\":\"string\"},\"incident_type\":{\"type\":\"string\"},\"affected_assets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"data_impact\":{\"type\":\"string\"},\"reporting_deadline\":{\"type\":\"string\",\"format\":\"date-time\"},\"regulatory_channels\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"lessons_learned_uri\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "security",
+    "topic": "security.incident.events",
+    "regulation": "NIS2,DORA,CRA"
+  },
+  "name": "Security Incident Event"
+}

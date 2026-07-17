@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dealiot-external-dependency-contract
+  labels:
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+data:
+  contract.yaml: |
+    version: 1
+    owner: platform
+    required_services:
+      kafka:
+        endpoint_config_key: KAFKA_BOOTSTRAP_SERVERS
+        required_security: tls_sasl_or_mtls
+        minimum_brokers: 3
+        required_secret_key: KAFKA_SASL_PASSWORD
+        required_topics:
+          - raw.sensor
+          - raw.gps
+          - raw.image2d.meta
+          - raw.image3d.meta
+          - raw.video2d.meta
+          - raw.video3d.meta
+          - features.events
+          - state.latest
+          - dlq.events
+          - governance.data.products
+          - governance.access.requests
+          - governance.permission.events
+          - governance.intermediation.log
+          - governance.transfer.notices
+          - governance.research.projects
+          - governance.research.outputs
+          - governance.dataset.catalog
+          - governance.data_management_plans
+          - governance.repository.exports
+          - dataact.product.catalog
+          - dataact.user.access.requests
+          - dataact.third_party.sharing
+          - dataact.user.exports
+          - dataact.safeguards
+          - dataact.legal_basis.checks
+          - security.asset.inventory
+          - security.incident.events
+          - security.vulnerability.findings
+          - security.sbom.attestations
+          - security.patch.events
+          - resilience.backup.tests
+          - resilience.operational.risk
+          - resilience.third_party.risk
+          - compliance.scope.decisions
+          - compliance.control.assessments
+          - compliance.reporting.channels
+          - compliance.legal.dossier
+          - cra.product.lifecycle
+        required_governance:
+          notification_status: required_if_data_intermediation_service
+          neutrality: separate_intermediation_context
+          consent_or_permission_ledger: governance.permission.events
+          intermediation_activity_log: governance.intermediation.log
+          data_product_catalog: governance.data.products
+          dataset_catalog: governance.dataset.catalog
+          data_management_plan_register: governance.data_management_plans
+          repository_export_log: governance.repository.exports
+          unauthorised_transfer_notice_log: governance.transfer.notices
+          research_project_register: governance.research.projects
+          research_output_register: governance.research.outputs
+          mediated_access_required_for:
+            - applications
+            - internal_scientists
+            - external_researchers
+          raw_access_default: denied
+          preferred_delivery:
+            - derived_topics
+            - minimised_exports
+            - controlled_object_access
+        required_data_act:
+          connected_product_catalog: dataact.product.catalog
+          user_access_requests: dataact.user.access.requests
+          third_party_sharing_authorizations: dataact.third_party.sharing
+          user_export_log: dataact.user.exports
+          safeguard_register: dataact.safeguards
+          personal_data_legal_basis_checks: dataact.legal_basis.checks
+          raw_access_default: denied
+          required_access_channels:
+            - direct_secure_user_access
+            - minimised_export
+            - controlled_object_access
+            - user_authorized_third_party_transfer
+          sharing_rules:
+            third_party_sharing: user_authorization_required
+            research_access: combine_data_act_entitlement_with_dga_governance
+            product_and_related_service_data: catalogue_before_release
+            dataset_release: requires_dataset_catalog_and_dmp
+            repository_publication: requires_dmp_and_legal_review
+        required_legal_compliance:
+          legal_dossier_register: compliance.legal.dossier
+          legal_dossier_status: mandatory_before_go_live
+          production_go_live: requires_approved_ropa_dpia_notices_retention_incident_playbook
+          dataset_sharing: requires_catalog_dmp_legal_basis_and_sharing_terms
+          zenodo_publication: requires_legal_review_approved
+          third_party_sharing: requires_signed_terms_user_authority_and_safeguards
+          product_market_release: requires_cra_conformity_file_if_in_scope
+          ai_deployment: requires_ai_inventory_and_risk_classification
+        required_security_resilience:
+          asset_inventory: security.asset.inventory
+          incident_log: security.incident.events
+          vulnerability_register: security.vulnerability.findings
+          sbom_and_provenance: security.sbom.attestations
+          patch_evidence: security.patch.events
+          backup_restore_tests: resilience.backup.tests
+          ict_risk_register: resilience.operational.risk
+          third_party_risk_register: resilience.third_party.risk
+          scope_decision_register: compliance.scope.decisions
+          control_assessment_register: compliance.control.assessments
+          reporting_channel_register: compliance.reporting.channels
+          cra_product_lifecycle_register: cra.product.lifecycle
+          production_plaintext_protocols: denied
+          required_legal_applicability:
+            gdpr: required_for_personal_data
+            eprivacy: assess_terminal_access_and_member_state_rules
+            ai_act: required_before_ai_deployment
+            trade_secrets: required_for_confidential_generated_data
+            radio_and_product_law: required_if_devices_are_placed_on_eu_market
+            open_data_ehds: required_if_public_sector_research_or_health_data
+          release_gates:
+            - asset_owners_and_classification
+            - sbom_provenance_and_signature
+            - no_unaccepted_critical_vulnerabilities
+            - incident_reporting_channels
+            - restore_test_with_rpo_rto
+            - critical_supplier_exit_plan
+          dora_scope: required_if_financial_entity_or_ict_provider
+      mqtt:
+        endpoint_config_keys:
+          - MQTT_HOST
+          - MQTT_PORT
+        required_topic_filters:
+          - $share/ingestors/devices/#
+          - $share/ingestors/wildfi/#
+        required_security: tls_username_password_or_mtls
+        required_secret_key: MQTT_PASSWORD
+      object_storage:
+        endpoint_config_key: S3_ENDPOINT_URL
+        required_security: tls
+        required_secret_keys:
+          - AWS_ACCESS_KEY_ID
+          - AWS_SECRET_ACCESS_KEY
+        required_buckets:
+          - media-raw-2d-images
+          - media-raw-3d-images
+          - media-raw-2d-videos
+          - media-raw-3d-videos
+          - flink-checkpoints
+          - flink-savepoints
+          - flink-ha
+      airflow_metadata_db:
+        required_security: tls
+        required_secret_keys:
+          - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+          - AIRFLOW__CELERY__RESULT_BACKEND
+      airflow_broker:
+        required_security: tls_or_private_network
+        required_secret_key: AIRFLOW__CELERY__BROKER_URL
+    required_secret:
+      name: dealiot-secrets
+      keys:
+        - MQTT_PASSWORD
+        - KAFKA_SASL_PASSWORD
+        - MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET
+        - AWS_ACCESS_KEY_ID
+        - AWS_SECRET_ACCESS_KEY
+        - AIRFLOW__CORE__FERNET_KEY
+        - AIRFLOW__API__SECRET_KEY
+        - AIRFLOW__API_AUTH__JWT_SECRET
+        - AIRFLOW_ADMIN_PASSWORD
+        - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+        - AIRFLOW__CELERY__RESULT_BACKEND
+        - AIRFLOW__CELERY__BROKER_URL
+      optional_keys:
+        - MANAGEMENT_CONSOLE_TOKEN

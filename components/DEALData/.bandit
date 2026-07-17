@@ -1,0 +1,2 @@
+[bandit]
+exclude = ./.git,./.venv,./.pytest_cache,./core_layer/auth/tests.py,./core_layer/core_data/tests.py,./gps_layer/gps_data/tests.py,./sensor_layer/sensor_data/tests.py

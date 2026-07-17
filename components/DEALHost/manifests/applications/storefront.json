@@ -1,0 +1,9 @@
+{
+  "name": "Storefront",
+  "slug": "storefront",
+  "description": "Application vitrine consommant les modules coeur.",
+  "module_slugs": ["module-core"],
+  "version": "2.4.1",
+  "version_notes": "Stable customer storefront release",
+  "enabled": true
+}

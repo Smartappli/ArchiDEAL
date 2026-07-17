@@ -1,0 +1,21 @@
+{
+  "name": "DEALIoT MQTT Kafka Bridge",
+  "slug": "mqtt-kafka-bridge",
+  "image": "ghcr.io/smartappli/dealiot-mqtt-kafka-bridge:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALIoT/mqtt-kafka-bridge",
+  "deployment_target": "kubernetes",
+  "contract_topics": [
+    "raw.sensor",
+    "raw.gps",
+    "raw.image2d.meta",
+    "raw.image3d.meta",
+    "raw.video2d.meta",
+    "raw.video3d.meta",
+    "dlq.events"
+  ],
+  "production_ready": false,
+  "enabled": true
+}

@@ -1,0 +1,244 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  repository:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install validation dependencies
+        run: python -m pip install --upgrade pip PyYAML
+
+      - name: Validate JSON and YAML files
+        run: |
+          python -m json.tool renovate.json > /dev/null
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          paths = [
+              Path(".github/dependabot.yml"),
+              Path(".github/release-drafter.yml"),
+              *sorted(Path(".github/workflows").glob("*.yml")),
+          ]
+          for path in paths:
+              with path.open(encoding="utf-8") as handle:
+                  yaml.safe_load(handle)
+              print(f"validated {path}")
+          PY
+
+      - name: Validate pyproject syntax
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          with Path("pyproject.toml").open("rb") as handle:
+              data = tomllib.load(handle)
+          project = data.get("project", {})
+          if project.get("name") != "dealdata":
+              raise SystemExit("Unexpected project.name in pyproject.toml")
+          if ">=3.14" not in project.get("requires-python", ""):
+              raise SystemExit("pyproject.toml must target Python >=3.14")
+          print("pyproject.toml is valid")
+          PY
+
+  compose:
+    name: Docker Compose config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      CORE_DJANGO_SECRET_KEY: ${{ github.run_id }}-core
+      GPS_DJANGO_SECRET_KEY: ${{ github.run_id }}-gps
+      SENSOR_DJANGO_SECRET_KEY: ${{ github.run_id }}-sensor
+      CORE_DJANGO_ALLOWED_HOSTS: core.example.test
+      GPS_DJANGO_ALLOWED_HOSTS: gps.example.test
+      SENSOR_DJANGO_ALLOWED_HOSTS: sensor.example.test
+      DEALDATA_INGEST_TOKEN: ${{ github.run_id }}-ingest
+      CORE_DATABASE_HOST: core-db
+      CORE_DATABASE_USER: dealdata
+      CORE_DATABASE_PASSWORD: ${{ github.run_id }}-core-db
+      GPS_DATABASE_HOST: gps-db
+      GPS_DATABASE_USER: dealdata
+      GPS_DATABASE_PASSWORD: ${{ github.run_id }}-gps-db
+      SENSOR_DATABASE_HOST: sensor-db
+      SENSOR_DATABASE_USER: dealdata
+      SENSOR_DATABASE_PASSWORD: ${{ github.run_id }}-sensor-db
+      DEALDATA_KAFKA_BOOTSTRAP_SERVERS: kafka1:9092,kafka2:9092,kafka3:9092
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Validate local Compose config
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: Validate DEALIoT consumer Compose profile
+        run: docker compose -f docker-compose.yml --profile dealiot config --quiet
+
+      - name: Validate production Compose config
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.prod.yml \
+            --profile dealiot \
+            config --quiet
+
+  django:
+    name: Django (${{ matrix.layer }})
+    needs: repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: dealdata_test
+          POSTGRES_USER: dealdata
+          POSTGRES_PASSWORD: ${{ github.run_id }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dealdata -d dealdata_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer: core_layer
+            settings: core.settings
+            coverage_package: core_data
+          - layer: gps_layer
+            settings: gps.settings
+            coverage_package: gps_data
+          - layer: sensor_layer
+            settings: sensor.settings
+            coverage_package: sensor_data
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            -r "${{ matrix.layer }}/requirements.txt" \
+            pytest \
+            pytest-cov \
+            pytest-django
+
+      - name: Compile Python files
+        run: python -m compileall -q dealdata_common ${{ matrix.layer }}
+
+      - name: Django check
+        working-directory: ${{ matrix.layer }}
+        env:
+          DATABASE_USE_POSTGRES: "true"
+          DATABASE_HOST: 127.0.0.1
+          DATABASE_NAME: dealdata_test
+          DATABASE_USER: dealdata
+          DATABASE_PASSWORD: ${{ github.run_id }}
+        run: python manage.py check
+
+      - name: Check migrations are committed
+        working-directory: ${{ matrix.layer }}
+        env:
+          DATABASE_USE_POSTGRES: "true"
+          DATABASE_HOST: 127.0.0.1
+          DATABASE_NAME: dealdata_test
+          DATABASE_USER: dealdata
+          DATABASE_PASSWORD: ${{ github.run_id }}
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Smoke Kafka consumer command
+        if: matrix.layer != 'core_layer'
+        working-directory: ${{ matrix.layer }}
+        env:
+          DATABASE_USE_POSTGRES: "true"
+          DATABASE_HOST: 127.0.0.1
+          DATABASE_NAME: dealdata_test
+          DATABASE_USER: dealdata
+          DATABASE_PASSWORD: ${{ github.run_id }}
+        run: python manage.py consume_dealiot_kafka --help
+
+      - name: Run tests
+        working-directory: ${{ matrix.layer }}
+        env:
+          DATABASE_USE_POSTGRES: "true"
+          DATABASE_HOST: 127.0.0.1
+          DATABASE_NAME: dealdata_test
+          DATABASE_USER: dealdata
+          DATABASE_PASSWORD: ${{ github.run_id }}
+        run: |
+          python -m pytest . \
+            --ds=${{ matrix.settings }} \
+            --cov=${{ matrix.coverage_package }} \
+            --cov-report=term-missing \
+            --cov-report=xml:../coverage-${{ matrix.layer }}.xml \
+            --cov-fail-under=80 \
+            -q
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coverage-${{ matrix.layer }}
+          path: coverage-${{ matrix.layer }}.xml
+          if-no-files-found: error
+
+  docker-build:
+    name: Docker build (${{ matrix.layer }})
+    needs: compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        layer: [core_layer, gps_layer, sensor_layer]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build image
+        run: docker build --pull -f ${{ matrix.layer }}/Dockerfile .

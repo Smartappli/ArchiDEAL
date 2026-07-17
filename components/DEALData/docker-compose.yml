@@ -1,0 +1,209 @@
+services:
+  core-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: dealdata_core
+      POSTGRES_USER: dealdata
+      POSTGRES_PASSWORD: ${CORE_DATABASE_PASSWORD:?set CORE_DATABASE_PASSWORD}
+    volumes:
+      - core-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_core"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gps-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: dealdata_gps
+      POSTGRES_USER: dealdata
+      POSTGRES_PASSWORD: ${GPS_DATABASE_PASSWORD:?set GPS_DATABASE_PASSWORD}
+    volumes:
+      - gps-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_gps"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sensor-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: dealdata_sensor
+      POSTGRES_USER: dealdata
+      POSTGRES_PASSWORD: ${SENSOR_DATABASE_PASSWORD:?set SENSOR_DATABASE_PASSWORD}
+    volumes:
+      - sensor-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_sensor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  core:
+    build:
+      context: .
+      dockerfile: core_layer/Dockerfile
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${CORE_DJANGO_SECRET_KEY:?set CORE_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,core
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: core-db
+      DATABASE_NAME: dealdata_core
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${CORE_DATABASE_PASSWORD:?set CORE_DATABASE_PASSWORD}
+    ports:
+      - "7000:7000"
+    depends_on:
+      core-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7000/health/ready/', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gps:
+    build:
+      context: .
+      dockerfile: gps_layer/Dockerfile
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${GPS_DJANGO_SECRET_KEY:?set GPS_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,gps
+      DEALDATA_INGEST_TOKEN: ${DEALDATA_INGEST_TOKEN:?set DEALDATA_INGEST_TOKEN}
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: gps-db
+      DATABASE_NAME: dealdata_gps
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${GPS_DATABASE_PASSWORD:?set GPS_DATABASE_PASSWORD}
+    ports:
+      - "7001:7001"
+    depends_on:
+      gps-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7001/health/ready/', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sensor:
+    build:
+      context: .
+      dockerfile: sensor_layer/Dockerfile
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${SENSOR_DJANGO_SECRET_KEY:?set SENSOR_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,sensor
+      DEALDATA_INGEST_TOKEN: ${DEALDATA_INGEST_TOKEN:?set DEALDATA_INGEST_TOKEN}
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: sensor-db
+      DATABASE_NAME: dealdata_sensor
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${SENSOR_DATABASE_PASSWORD:?set SENSOR_DATABASE_PASSWORD}
+    ports:
+      - "7002:7002"
+    depends_on:
+      sensor-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7002/health/ready/', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gps-dealiot-consumer:
+    profiles: ["dealiot"]
+    build:
+      context: .
+      dockerfile: gps_layer/Dockerfile
+    command: ["python", "manage.py", "consume_dealiot_kafka"]
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${GPS_DJANGO_SECRET_KEY:?set GPS_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,gps
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: gps-db
+      DATABASE_NAME: dealdata_gps
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${GPS_DATABASE_PASSWORD:?set GPS_DATABASE_PASSWORD}
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+      DEALDATA_KAFKA_BOOTSTRAP_SERVERS: ${DEALDATA_KAFKA_BOOTSTRAP_SERVERS:-kafka1:9092,kafka2:9092,kafka3:9092}
+      DEALDATA_GPS_KAFKA_TOPIC: ${DEALDATA_GPS_KAFKA_TOPIC:-raw.gps}
+      DEALDATA_GPS_KAFKA_GROUP_ID: ${DEALDATA_GPS_KAFKA_GROUP_ID:-dealdata-gps-ingest}
+      DEALDATA_KAFKA_AUTO_OFFSET_RESET: ${DEALDATA_KAFKA_AUTO_OFFSET_RESET:-earliest}
+      DEALDATA_KAFKA_MAX_RECORDS: ${DEALDATA_KAFKA_MAX_RECORDS:-100}
+      DEALDATA_KAFKA_POLL_TIMEOUT_MS: ${DEALDATA_KAFKA_POLL_TIMEOUT_MS:-1000}
+      DEALDATA_KAFKA_SECURITY_PROTOCOL: ${DEALDATA_KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
+      DEALDATA_KAFKA_SASL_MECHANISM: ${DEALDATA_KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}
+      DEALDATA_KAFKA_SASL_USERNAME: ${DEALDATA_KAFKA_SASL_USERNAME:-}
+      DEALDATA_KAFKA_SASL_PASSWORD: ${DEALDATA_KAFKA_SASL_PASSWORD:-}
+      DEALDATA_KAFKA_SSL_CAFILE: ${DEALDATA_KAFKA_SSL_CAFILE:-}
+      DEALDATA_KAFKA_SSL_CERTFILE: ${DEALDATA_KAFKA_SSL_CERTFILE:-}
+      DEALDATA_KAFKA_SSL_KEYFILE: ${DEALDATA_KAFKA_SSL_KEYFILE:-}
+      DEALDATA_KAFKA_SSL_CHECK_HOSTNAME: ${DEALDATA_KAFKA_SSL_CHECK_HOSTNAME:-true}
+    depends_on:
+      gps:
+        condition: service_healthy
+
+  sensor-dealiot-consumer:
+    profiles: ["dealiot"]
+    build:
+      context: .
+      dockerfile: sensor_layer/Dockerfile
+    command: ["python", "manage.py", "consume_dealiot_kafka"]
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: ${SENSOR_DJANGO_SECRET_KEY:?set SENSOR_DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,sensor
+      DATABASE_USE_POSTGRES: "true"
+      DATABASE_HOST: sensor-db
+      DATABASE_NAME: dealdata_sensor
+      DATABASE_USER: dealdata
+      DATABASE_PASSWORD: ${SENSOR_DATABASE_PASSWORD:?set SENSOR_DATABASE_PASSWORD}
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+      DEALDATA_KAFKA_BOOTSTRAP_SERVERS: ${DEALDATA_KAFKA_BOOTSTRAP_SERVERS:-kafka1:9092,kafka2:9092,kafka3:9092}
+      DEALDATA_SENSOR_KAFKA_TOPIC: ${DEALDATA_SENSOR_KAFKA_TOPIC:-raw.sensor}
+      DEALDATA_SENSOR_KAFKA_GROUP_ID: ${DEALDATA_SENSOR_KAFKA_GROUP_ID:-dealdata-sensor-ingest}
+      DEALDATA_KAFKA_AUTO_OFFSET_RESET: ${DEALDATA_KAFKA_AUTO_OFFSET_RESET:-earliest}
+      DEALDATA_KAFKA_MAX_RECORDS: ${DEALDATA_KAFKA_MAX_RECORDS:-100}
+      DEALDATA_KAFKA_POLL_TIMEOUT_MS: ${DEALDATA_KAFKA_POLL_TIMEOUT_MS:-1000}
+      DEALDATA_KAFKA_SECURITY_PROTOCOL: ${DEALDATA_KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
+      DEALDATA_KAFKA_SASL_MECHANISM: ${DEALDATA_KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}
+      DEALDATA_KAFKA_SASL_USERNAME: ${DEALDATA_KAFKA_SASL_USERNAME:-}
+      DEALDATA_KAFKA_SASL_PASSWORD: ${DEALDATA_KAFKA_SASL_PASSWORD:-}
+      DEALDATA_KAFKA_SSL_CAFILE: ${DEALDATA_KAFKA_SSL_CAFILE:-}
+      DEALDATA_KAFKA_SSL_CERTFILE: ${DEALDATA_KAFKA_SSL_CERTFILE:-}
+      DEALDATA_KAFKA_SSL_KEYFILE: ${DEALDATA_KAFKA_SSL_KEYFILE:-}
+      DEALDATA_KAFKA_SSL_CHECK_HOSTNAME: ${DEALDATA_KAFKA_SSL_CHECK_HOSTNAME:-true}
+    depends_on:
+      sensor:
+        condition: service_healthy
+
+volumes:
+  core-db-data:
+  gps-db-data:
+  sensor-db-data:

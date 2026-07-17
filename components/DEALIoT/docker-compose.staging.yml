@@ -1,0 +1,37 @@
+# Staging overlay.
+# Adds conservative restart/log settings and uses latest offsets for new streaming groups.
+
+x-staging-logging: &staging-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+services:
+  mqtt-kafka-bridge:
+    logging: *staging-logging
+    environment:
+      LOG_LEVEL: "INFO"
+
+  flink-jobmanager:
+    logging: *staging-logging
+    environment:
+      KAFKA_AUTO_OFFSET_RESET: "latest"
+
+  flink-taskmanager-1:
+    logging: *staging-logging
+
+  flink-taskmanager-2:
+    logging: *staging-logging
+
+  airflow-apiserver:
+    logging: *staging-logging
+
+  airflow-scheduler:
+    logging: *staging-logging
+
+  airflow-worker:
+    logging: *staging-logging
+
+  kafka-connect:
+    logging: *staging-logging

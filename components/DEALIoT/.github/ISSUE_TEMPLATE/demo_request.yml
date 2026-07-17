@@ -1,0 +1,53 @@
+name: Demo or pilot request
+description: Request a DEALIoT, DealHost, or DealData demo with a concrete data source.
+title: "Demo: "
+labels: ["adoption", "demo"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when you want to evaluate the platform with a real or representative use case.
+  - type: dropdown
+    id: product
+    attributes:
+      label: Primary product
+      options:
+        - DEALIoT
+        - DealHost
+        - DealData
+        - Full DEAL suite
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Describe the data source, target users, and decision the pilot should support.
+    validations:
+      required: true
+  - type: textarea
+    id: data_source
+    attributes:
+      label: Data source and expected volume
+      description: Include MQTT topics, device type, media metadata, event rate, or fixture availability.
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment_target
+    attributes:
+      label: Preferred deployment target
+      options:
+        - Local Docker Compose
+        - Kubernetes staging
+        - Docker Swarm staging
+        - DealHost managed runtime
+        - Not sure yet
+    validations:
+      required: true
+  - type: textarea
+    id: success_criteria
+    attributes:
+      label: Success criteria
+      description: Define what must be true after 30 days for adoption to continue.
+    validations:
+      required: true

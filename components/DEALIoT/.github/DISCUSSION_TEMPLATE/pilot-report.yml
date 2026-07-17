@@ -1,0 +1,36 @@
+title: "[Pilot report] "
+labels:
+  - pilot
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this to share a sanitized 30-day pilot result. Keep private deployment and customer context out of the discussion.
+  - type: input
+    id: data_source
+    attributes:
+      label: Data source
+      description: Device, MQTT stream, media source, WildFi payload, or synthetic fixture.
+    validations:
+      required: true
+  - type: textarea
+    id: success_metric
+    attributes:
+      label: Success metric
+      description: What needed to be true after 30 days?
+    validations:
+      required: true
+  - type: textarea
+    id: scorecard
+    attributes:
+      label: Scorecard summary
+      description: Summarize validation scorecard result, production gaps, and next decision.
+    validations:
+      required: true
+  - type: textarea
+    id: follow_up
+    attributes:
+      label: Follow-up needed
+      description: Docs, bugs, integrations, support, or production hardening needed next.
+    validations:
+      required: false

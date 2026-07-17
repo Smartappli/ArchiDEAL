@@ -1,0 +1,17 @@
+{
+  "artifactId": "compliance.control.assessments",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"ComplianceControlAssessment\",\"type\":\"object\",\"required\":[\"assessment_id\",\"regulation\",\"control_id\",\"status\",\"owner\",\"assessed_at\"],\"properties\":{\"assessment_id\":{\"type\":\"string\"},\"regulation\":{\"type\":\"string\",\"enum\":[\"DGA\",\"Data Act\",\"NIS2\",\"DORA\",\"CRA\",\"GDPR\",\"ePrivacy\",\"AI Act\",\"Trade Secrets Directive\",\"Radio Equipment Directive\",\"General Product Safety Regulation\",\"Product Liability Directive\",\"Cybersecurity Act\",\"Open Data Directive\",\"EHDS\"]},\"control_id\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"implemented\",\"partial\",\"todo\",\"blocked\",\"not_applicable\",\"conditional\"]},\"owner\":{\"type\":\"string\"},\"evidence_topics\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"evidence_uri\":{\"type\":\"string\"},\"gaps\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"next_action\":{\"type\":\"string\"},\"due_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"assessed_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "compliance",
+    "topic": "compliance.control.assessments",
+    "regulation": "DGA,DataAct,NIS2,DORA,CRA,GDPR,ePrivacy,AIAct,product"
+  },
+  "name": "Compliance Control Assessment"
+}

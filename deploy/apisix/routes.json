@@ -1,0 +1,88 @@
+{
+  "routes": [
+    {
+      "id": "archideal-dealhost",
+      "uris": ["/dealhost", "/dealhost/*"],
+      "priority": 100,
+      "plugins": {
+        "proxy-rewrite": {
+          "regex_uri": ["^/dealhost/?(.*)$", "/$1"],
+          "host": "dealhost"
+        }
+      },
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {"dealhost:8000": 1}
+      }
+    },
+    {
+      "id": "archideal-dealiot",
+      "uris": ["/dealiot", "/dealiot/*"],
+      "priority": 100,
+      "plugins": {
+        "proxy-rewrite": {
+          "regex_uri": ["^/dealiot/?(.*)$", "/$1"],
+          "host": "dealiot"
+        }
+      },
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {"dealiot:8080": 1}
+      }
+    },
+    {
+      "id": "archideal-dealdata-core",
+      "uris": ["/dealdata/core", "/dealdata/core/*"],
+      "priority": 100,
+      "plugins": {
+        "proxy-rewrite": {
+          "regex_uri": ["^/dealdata/core/?(.*)$", "/$1"],
+          "host": "dealdata-core"
+        }
+      },
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {"dealdata-core:7000": 1}
+      }
+    },
+    {
+      "id": "archideal-dealdata-gps",
+      "uris": ["/dealdata/gps", "/dealdata/gps/*"],
+      "priority": 100,
+      "plugins": {
+        "proxy-rewrite": {
+          "regex_uri": ["^/dealdata/gps/?(.*)$", "/$1"],
+          "host": "dealdata-gps"
+        }
+      },
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {"dealdata-gps:7001": 1}
+      }
+    },
+    {
+      "id": "archideal-dealdata-sensor",
+      "uris": ["/dealdata/sensor", "/dealdata/sensor/*"],
+      "priority": 100,
+      "plugins": {
+        "proxy-rewrite": {
+          "regex_uri": ["^/dealdata/sensor/?(.*)$", "/$1"],
+          "host": "dealdata-sensor"
+        }
+      },
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {"dealdata-sensor:7002": 1}
+      }
+    },
+    {
+      "id": "archideal-interface",
+      "uris": ["/", "/*"],
+      "priority": -100,
+      "upstream": {
+        "type": "roundrobin",
+        "nodes": {"dealinterface:8080": 1}
+      }
+    }
+  ]
+}

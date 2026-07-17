@@ -1,0 +1,53 @@
+﻿name: User feedback
+description: Share adoption friction, evaluation blockers, or usability feedback that is not yet a confirmed bug.
+title: "[Feedback]: "
+labels: ["user-feedback", "adoption"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when something slowed down evaluation or adoption but you do not yet have a confirmed bug reproduction.
+        Do not include secrets, customer data, raw personal data, private endpoints, or vulnerability details.
+  - type: dropdown
+    id: user_type
+    attributes:
+      label: User type
+      options:
+        - Evaluator
+        - Pilot team
+        - Operator
+        - DEALIoT integrator
+        - DealHost operator
+        - Data steward
+        - Contributor
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: What slowed you down?
+      description: Describe the friction, missing information, confusing step, or adoption blocker.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Explain whether this blocks evaluation, pilot, production, integration, or documentation.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected improvement
+      description: What would make this easier for the next user?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Repository SHA, affected layer, deployment target, commands, and sanitized logs if relevant.
+    validations:
+      required: false

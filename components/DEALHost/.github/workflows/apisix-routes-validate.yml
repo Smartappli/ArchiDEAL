@@ -1,0 +1,48 @@
+name: Validate APISIX Routes
+
+on:
+  push:
+    paths:
+      - "infra/apisix/**"
+      - ".github/workflows/apisix-routes-validate.yml"
+  pull_request:
+    paths:
+      - "infra/apisix/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-routes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate JSON syntax
+        run: python -m json.tool infra/apisix/routes.json > /dev/null
+
+      - name: Ensure expected routes exist
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path('infra/apisix/routes.json').read_text())
+          routes = payload.get('routes', [])
+          route_ids = {route.get('id') for route in routes}
+          required = {
+              'module-core',
+              'module-schema-registry-contracts',
+              'module-flink-runtime',
+              'module-airflow-orchestration',
+              'module-observability',
+              'module-dealdata-core-layer',
+              'module-dealdata-gps-layer',
+              'module-dealdata-sensor-layer',
+          }
+          assert routes, 'No APISIX route found in infra/apisix/routes.json'
+          missing = sorted(required - route_ids)
+          assert not missing, f'Missing APISIX route(s): {missing}'
+          print('APISIX routes validation passed')
+          PY

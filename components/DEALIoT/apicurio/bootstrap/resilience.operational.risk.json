@@ -1,0 +1,17 @@
+{
+  "artifactId": "resilience.operational.risk",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"ResilienceOperationalRisk\",\"type\":\"object\",\"required\":[\"risk_id\",\"system\",\"risk_type\",\"severity\",\"owner\",\"status\",\"reviewed_at\"],\"properties\":{\"risk_id\":{\"type\":\"string\"},\"system\":{\"type\":\"string\"},\"risk_type\":{\"type\":\"string\",\"enum\":[\"availability\",\"integrity\",\"confidentiality\",\"capacity\",\"change\",\"third_party\",\"financial_ict\"]},\"severity\":{\"type\":\"string\",\"enum\":[\"low\",\"medium\",\"high\",\"critical\"]},\"owner\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"open\",\"mitigating\",\"accepted\",\"closed\"]},\"scenario\":{\"type\":\"string\"},\"controls\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"reviewed_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"next_review_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "resilience",
+    "topic": "resilience.operational.risk",
+    "regulation": "NIS2,DORA"
+  },
+  "name": "Resilience Operational Risk"
+}

@@ -1,0 +1,91 @@
+name: Bug report
+description: Report reproducible behavior that does not match the expected DEALHost behavior.
+title: "[Bug]: "
+labels:
+  - bug
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Do not include secrets, tokens, private URLs, or vulnerability details.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+      placeholder: Describe the bug and the affected component.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproducible sequence.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Call ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Django app
+        - Hosting API
+        - Gateway API
+        - APISIX routes
+        - GitHub integration
+        - IAM
+        - Manifests
+        - SDK
+        - CI or automation
+        - Documentation
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: main, tag, commit SHA, or package version
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Python version, Docker Compose usage, and relevant service versions.
+      placeholder: |
+        OS:
+        Python:
+        Docker:
+        APISIX:
+        Valkey:
+        NATS:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste only sanitized logs. Remove secrets and private data.
+      render: shell
+    validations:
+      required: false

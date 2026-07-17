@@ -1,0 +1,13 @@
+{
+  "name": "DEALIoT Processing",
+  "slug": "dealiot-processing",
+  "description": "Traitements streaming et batch DEALIoT bases sur Flink et Airflow.",
+  "module_slugs": [
+    "flink-runtime",
+    "beam-runtime",
+    "airflow-orchestration"
+  ],
+  "version": "0.1.0",
+  "version_notes": "Initial DEALIoT processing contract",
+  "enabled": true
+}

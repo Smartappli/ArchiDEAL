@@ -1,0 +1,90 @@
+groups:
+  - name: platform
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cible indisponible"
+          description: "Le job {{ $labels.job }} sur {{ $labels.instance }} ne repond plus."
+
+      - alert: PrometheusTargetFlapping
+        expr: changes(up[10m]) > 4
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cible instable"
+          description: "Le job {{ $labels.job }} change frequemment d'etat."
+
+      - alert: BridgeNotReady
+        expr: max(dealiot_bridge_ready) == 0
+        for: 5m
+        labels:
+          severity: critical
+          slo: ingestion-availability
+        annotations:
+          summary: "MQTT-Kafka bridge unavailable"
+          description: "No bridge replica has a healthy MQTT subscription and Kafka control path."
+
+      - alert: BridgeDeliveryErrors
+        expr: increase(dealiot_bridge_errors_total[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          slo: ingestion-correctness
+        annotations:
+          summary: "Bridge delivery errors detected"
+          description: "At least one bridge reconnect or delivery failure occurred in ten minutes."
+
+      - alert: BridgeDlqRateHigh
+        expr: >-
+          sum(rate(dealiot_bridge_dlq_total[10m]))
+          /
+          clamp_min(sum(rate(dealiot_bridge_forwarded_total[10m])), 0.001)
+          > 0.005
+        for: 10m
+        labels:
+          severity: warning
+          slo: ingestion-quality
+        annotations:
+          summary: "DLQ ratio above 0.5 percent"
+          description: "The ingestion quality SLO is being consumed by invalid events."
+
+      - alert: NormalizerCommitGap
+        expr: >-
+          dealiot_normalizer_processed_total
+          - dealiot_normalizer_committed_total
+          > 100
+        for: 5m
+        labels:
+          severity: critical
+          slo: processing-correctness
+        annotations:
+          summary: "Normalizer processed-to-commit gap is growing"
+          description: "More than 100 records are processed without a durable source offset commit."
+
+      - alert: FlinkCheckpointFailures
+        expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints[15m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          slo: processing-checkpoints
+        annotations:
+          summary: "Flink checkpoints are failing"
+          description: "At least one Flink checkpoint failed during the last fifteen minutes."
+
+      - alert: FlinkCheckpointStale
+        expr: >-
+          time()
+          - flink_jobmanager_job_lastCheckpointCompletedTimestamp / 1000
+          > 300
+        for: 5m
+        labels:
+          severity: critical
+          slo: processing-checkpoints
+        annotations:
+          summary: "Flink has no recent successful checkpoint"
+          description: "The last successful checkpoint is more than five minutes old."

@@ -1,0 +1,34 @@
+{
+  "format": 1,
+  "imported_at": "2026-07-17",
+  "history_mode": "snapshot",
+  "excluded_repositories": [
+    "https://github.com/Smartappli/DEALWebsite"
+  ],
+  "components": {
+    "DEALIoT": {
+      "path": "components/DEALIoT",
+      "repository": "https://github.com/Smartappli/DEALIoT",
+      "commit": "d5a9c4468504f9b82607e7cbb05638b9bd77242f",
+      "tree": "ae9cf93cdb41f88fb8b84087337a4ba8e9701d07"
+    },
+    "DEALHost": {
+      "path": "components/DEALHost",
+      "repository": "https://github.com/Smartappli/DEALHost",
+      "commit": "7dab33070e89d58ed0dc3c7d047ca2344d2d5a76",
+      "tree": "c27dbbdc3711f04fb79cf2d5c1b30d28aa18ab7d"
+    },
+    "DEALData": {
+      "path": "components/DEALData",
+      "repository": "https://github.com/Smartappli/DEALData",
+      "commit": "54bd14be803aa90a6354a895794841bdc1462aae",
+      "tree": "354c66d3ba442af38221149860f7690031dfc49c"
+    },
+    "DEALInterface": {
+      "path": "components/DEALInterface",
+      "repository": "https://github.com/Smartappli/DEALInterface",
+      "commit": "333761cd4b512b96a0dae28db7e1de5e5c51fda5",
+      "tree": "0df19be62ae68c963a961fe621273aedba287d05"
+    }
+  }
+}

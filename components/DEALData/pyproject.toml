@@ -1,0 +1,50 @@
+[project]
+name = "dealdata"
+version = "0.1.0"
+requires-python = ">=3.14.6"
+dependencies = [
+    "Django[argon2]==6.0.7",
+    "django-filter==25.2",
+    "django-health-check[psutil]==4.4.3",
+    "django-valkey[lz4]==0.4.1",
+    "djangorestframework==3.17.1",
+    "djangorestframework-simplejwt==5.5.1",
+    "djangorestframework-stubs>=3.17.0",
+    "granian==2.7.9",
+    "kafka-python==3.0.8",
+    "psycopg[binary,pool]==3.3.4",
+    "python-dotenv==1.2.2",
+    "sentry-sdk[django]==2.65.0",
+    "servestatic[brotli]==4.3.1",
+    "uuid-utils==0.16.0",
+    "valkey==6.1.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "boto3",
+    "pytest",
+    "pytest-cov",
+    "pytest-django",
+]
+
+[tool.pytest.ini_options]
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[tool.ruff]
+extend-exclude = [
+    "uv.lock",
+    "**/requirements*.txt",
+    "core_layer/requirements.txt",
+    "gps_layer/requirements.txt",
+    "sensor_layer/requirements.txt",
+]
+force-exclude = true
+
+[tool.ruff.lint.per-file-ignores]
+"core_layer/core/settings.py" = ["E402"]
+"gps_layer/gps/settings.py" = ["E402"]
+"sensor_layer/sensor/settings.py" = ["E402"]

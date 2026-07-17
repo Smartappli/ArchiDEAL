@@ -1,0 +1,33 @@
+---
+engines:
+  pylint:
+    exclude_paths:
+      - "**/migrations/**"
+      - "uv.lock"
+      - "**/requirements*.txt"
+      - "core_layer/requirements.txt"
+      - "gps_layer/requirements.txt"
+      - "sensor_layer/requirements.txt"
+  pylintpython3:
+    exclude_paths:
+      - "**/migrations/**"
+      - "uv.lock"
+      - "**/requirements*.txt"
+      - "core_layer/requirements.txt"
+      - "gps_layer/requirements.txt"
+      - "sensor_layer/requirements.txt"
+  prospector:
+    exclude_paths:
+      - "**/migrations/**"
+      - "uv.lock"
+      - "**/requirements*.txt"
+      - "core_layer/requirements.txt"
+      - "gps_layer/requirements.txt"
+      - "sensor_layer/requirements.txt"
+  ruff:
+    exclude_paths:
+      - "uv.lock"
+      - "**/requirements*.txt"
+      - "core_layer/requirements.txt"
+      - "gps_layer/requirements.txt"
+      - "sensor_layer/requirements.txt"

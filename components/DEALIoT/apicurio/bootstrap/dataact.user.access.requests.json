@@ -1,0 +1,17 @@
+{
+  "artifactId": "dataact.user.access.requests",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DataActUserAccessRequest\",\"type\":\"object\",\"required\":[\"request_id\",\"user_id\",\"connected_product_id\",\"requested_scope\",\"requested_format\",\"requested_at\",\"status\"],\"properties\":{\"request_id\":{\"type\":\"string\"},\"user_id\":{\"type\":\"string\"},\"connected_product_id\":{\"type\":\"string\"},\"related_service_id\":{\"type\":\"string\"},\"requested_scope\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"requested_format\":{\"type\":\"string\"},\"delivery_channel\":{\"type\":\"string\",\"enum\":[\"api\",\"file_export\",\"stream\",\"controlled_workspace\"]},\"requested_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"fulfilled_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"status\":{\"type\":\"string\",\"enum\":[\"submitted\",\"approved\",\"fulfilled\",\"rejected\",\"expired\",\"cancelled\"]},\"decision_reason\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "dataact",
+    "topic": "dataact.user.access.requests",
+    "regulation": "Data Act"
+  },
+  "name": "Data Act User Access Request"
+}

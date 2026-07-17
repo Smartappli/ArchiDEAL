@@ -1,0 +1,78 @@
+services:
+  django-app:
+    build:
+      context: .
+    image: dealhost:local
+    init: true
+    restart: unless-stopped
+    volumes:
+      - dealhost_data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-dealhost.settings.dev}
+      DEALHOST_DB_PATH: ${DEALHOST_DB_PATH:-/data/db.sqlite3}
+      VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/1}
+      NATS_URL: ${NATS_URL:-nats://nats:4222}
+    depends_on:
+      valkey:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/gateway/health/', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  valkey:
+    image: valkey/valkey:9-alpine
+    restart: unless-stopped
+    command: valkey-server --save 60 1 --loglevel warning
+    volumes:
+      - valkey_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  nats:
+    image: nats:2-alpine
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  apisix:
+    image: apache/apisix:3.17.0-debian
+    restart: unless-stopped
+    volumes:
+      - ./infra/apisix/routes.json:/usr/local/apisix/conf/apisix.yaml:ro
+    environment:
+      APISIX_STAND_ALONE: "true"
+    depends_on:
+      django-app:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:9080:9080"
+      - "127.0.0.1:9180:9180"
+
+volumes:
+  dealhost_data:
+  valkey_data:
