@@ -3,7 +3,7 @@ FROM rust:1.85-bookworm AS builder
 WORKDIR /src
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends cmake pkg-config libssl-dev libsasl2-dev \
+    && apt-get install -y --no-install-recommends cmake pkg-config libssl-dev libsasl2-dev libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./

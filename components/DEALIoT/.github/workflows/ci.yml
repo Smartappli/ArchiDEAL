@@ -70,7 +70,7 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
 
       - name: Install Rust bridge system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake pkg-config libssl-dev libsasl2-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake pkg-config libssl-dev libsasl2-dev libcurl4-openssl-dev
 
       - name: Pre-commit checks
         run: uvx pre-commit run --all-files --show-diff-on-failure
