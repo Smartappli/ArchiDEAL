@@ -1,0 +1,64 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "dependabot"
+      - "python"
+
+  - package-ecosystem: "pip"
+    directory: "/core_layer"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "dependabot"
+      - "python"
+
+  - package-ecosystem: "pip"
+    directory: "/gps_layer"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "dependabot"
+      - "python"
+
+  - package-ecosystem: "pip"
+    directory: "/sensor_layer"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "dependabot"
+      - "python"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "dependabot"
+      - "docker"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "dependabot"
+      - "docker-compose"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "dependabot"
+      - "github-actions"

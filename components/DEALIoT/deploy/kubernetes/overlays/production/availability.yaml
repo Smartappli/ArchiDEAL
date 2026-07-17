@@ -1,0 +1,93 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: airflow-apiserver
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: apiserver
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: apiserver
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: airflow-worker
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: worker
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: management-console
+  labels:
+    app.kubernetes.io/name: management-console
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: management-console
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: airflow-scheduler
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: scheduler
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: scheduler
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: airflow-triggerer
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: triggerer
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: triggerer
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: airflow-dag-processor
+  labels:
+    app.kubernetes.io/name: airflow
+    app.kubernetes.io/component: dag-processor
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: airflow
+      app.kubernetes.io/component: dag-processor

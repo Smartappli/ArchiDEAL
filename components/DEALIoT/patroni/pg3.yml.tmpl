@@ -1,0 +1,68 @@
+scope: tsgis-cluster
+namespace: /service/
+name: pg3
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: pg3:8008
+
+etcd3:
+  hosts: etcd1:2379,etcd2:2379,etcd3:2379
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    synchronous_mode: quorum
+    synchronous_node_count: 1
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_level: logical
+        hot_standby: "on"
+        max_connections: 300
+        max_wal_senders: 16
+        max_replication_slots: 16
+        wal_keep_size: 1GB
+        shared_buffers: 512MB
+        max_worker_processes: 16
+        max_parallel_workers: 8
+        max_parallel_workers_per_gather: 4
+        max_locks_per_transaction: 256
+        shared_preload_libraries: "timescaledb"
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+    - auth-host: scram-sha-256
+    - auth-local: trust
+  pg_hba:
+    - host all all samenet scram-sha-256
+    - host replication replicator samenet scram-sha-256
+  post_bootstrap: /bin/bash /scripts/post-bootstrap.sh
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: pg3:5432
+  data_dir: /home/postgres/pgdata/data
+  pgpass: /tmp/pgpass
+  authentication:
+    replication:
+      username: replicator
+      password: ${PATRONI_REPL_PASSWORD}
+    superuser:
+      username: postgres
+      password: ${POSTGRES_SUPERUSER_PASSWORD}
+    rewind:
+      username: rewind_user
+      password: ${PATRONI_REWIND_PASSWORD}
+  parameters:
+    unix_socket_directories: /var/run/postgresql
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

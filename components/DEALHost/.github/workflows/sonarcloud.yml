@@ -1,0 +1,66 @@
+name: SonarCloud
+
+on:
+  push:
+    branches: ["main", "work"]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
+
+      - name: Install requirements with uv
+        run: uv pip install --system -r requirements.txt
+
+      - name: Install project package with uv
+        run: uv pip install --system -e .
+
+      - name: Install coverage tooling
+        run: uv pip install --system coverage
+
+      - name: Run tests and generate coverage report
+        env:
+          DJANGO_SETTINGS_MODULE: dealhost.settings.test
+          GITHUB_TOKEN: test-token
+          GITHUB_WEBHOOK_SECRET: test-secret
+          APISIX_ADMIN_KEY: test-key
+        run: >-
+          uv run coverage run
+          manage.py test tests --verbosity 2
+
+      - name: Enforce minimum coverage (80%)
+        run: uv run coverage report --fail-under=80
+
+      - name: Export coverage XML
+        run: uv run coverage xml -o coverage.xml
+
+      - name: Run codacy-coverage-reporter
+        uses: codacy/codacy-coverage-reporter-action@6904bd01e29ada115135b5eca20125758ccae53b
+        with:
+          project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
+          coverage-reports: 'coverage.xml'
+        env:
+          CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # nosemgrep: GitHub secret reference, not a literal token.

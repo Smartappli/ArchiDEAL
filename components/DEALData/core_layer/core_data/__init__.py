@@ -1,0 +1,1 @@
+"""Core data application package."""

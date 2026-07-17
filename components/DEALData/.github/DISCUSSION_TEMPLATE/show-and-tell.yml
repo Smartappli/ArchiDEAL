@@ -1,0 +1,36 @@
+﻿title: "[Show and tell] "
+labels:
+  - show-and-tell
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for approved demos, screenshots, sanitized lessons learned, and adopter stories.
+  - type: input
+    id: use_case
+    attributes:
+      label: Use case
+      description: What scenario did you validate?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What worked, what failed, and what was measured?
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Deployment target, data source, DEAL components used, and sanitized configuration.
+    validations:
+      required: true
+  - type: checkboxes
+    id: approval
+    attributes:
+      label: Publication approval
+      options:
+        - label: This post contains only public or approved information.
+          required: true

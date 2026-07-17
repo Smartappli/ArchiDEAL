@@ -1,0 +1,174 @@
+apiVersion: dealiot.io/v1alpha1
+kind: KafkaContract
+metadata:
+  name: dealiot-core-topics
+spec:
+  defaults:
+    replicationFactor: 3
+    minInSyncReplicas: 2
+  topics:
+    - name: raw.sensor
+      partitions: 24
+      retentionMs: 604800000
+    - name: raw.gps
+      partitions: 24
+      retentionMs: 604800000
+    - name: raw.image2d.meta
+      partitions: 12
+      retentionMs: 2592000000
+    - name: raw.image3d.meta
+      partitions: 12
+      retentionMs: 2592000000
+    - name: raw.video2d.meta
+      partitions: 12
+      retentionMs: 2592000000
+    - name: raw.video3d.meta
+      partitions: 12
+      retentionMs: 2592000000
+    - name: features.events
+      partitions: 24
+      retentionMs: 604800000
+    - name: state.latest
+      partitions: 12
+      cleanupPolicy: compact
+      minCleanableDirtyRatio: 0.1
+      deleteRetentionMs: 86400000
+    - name: dlq.events
+      partitions: 12
+      retentionMs: 2592000000
+    - name: media.object.events
+      partitions: 12
+      retentionMs: 2592000000
+    - name: alerts.events
+      partitions: 12
+      retentionMs: 2592000000
+    - name: governance.data.products
+      partitions: 3
+      cleanupPolicy: compact
+    - name: governance.access.requests
+      partitions: 6
+      retentionMs: 31536000000
+    - name: governance.permission.events
+      partitions: 6
+      cleanupPolicy: compact
+      deleteRetentionMs: 31536000000
+    - name: governance.intermediation.log
+      partitions: 12
+      retentionMs: 31536000000
+    - name: governance.transfer.notices
+      partitions: 6
+      retentionMs: 31536000000
+    - name: governance.research.projects
+      partitions: 3
+      cleanupPolicy: compact
+    - name: governance.research.outputs
+      partitions: 6
+      retentionMs: 31536000000
+    - name: governance.dataset.catalog
+      partitions: 3
+      cleanupPolicy: compact
+    - name: governance.data_management_plans
+      partitions: 3
+      cleanupPolicy: compact
+    - name: governance.repository.exports
+      partitions: 6
+      retentionMs: 31536000000
+    - name: dataact.product.catalog
+      partitions: 3
+      cleanupPolicy: compact
+    - name: dataact.user.access.requests
+      partitions: 6
+      retentionMs: 31536000000
+    - name: dataact.third_party.sharing
+      partitions: 6
+      retentionMs: 31536000000
+    - name: dataact.user.exports
+      partitions: 6
+      retentionMs: 31536000000
+    - name: dataact.safeguards
+      partitions: 3
+      cleanupPolicy: compact
+    - name: dataact.legal_basis.checks
+      partitions: 6
+      retentionMs: 31536000000
+    - name: security.asset.inventory
+      partitions: 3
+      cleanupPolicy: compact
+    - name: security.incident.events
+      partitions: 6
+      retentionMs: 31536000000
+    - name: security.vulnerability.findings
+      partitions: 6
+      retentionMs: 31536000000
+    - name: security.sbom.attestations
+      partitions: 3
+      cleanupPolicy: compact
+    - name: security.patch.events
+      partitions: 6
+      retentionMs: 31536000000
+    - name: resilience.backup.tests
+      partitions: 3
+      retentionMs: 31536000000
+    - name: resilience.operational.risk
+      partitions: 3
+      cleanupPolicy: compact
+    - name: resilience.third_party.risk
+      partitions: 3
+      cleanupPolicy: compact
+    - name: compliance.scope.decisions
+      partitions: 3
+      cleanupPolicy: compact
+    - name: compliance.control.assessments
+      partitions: 6
+      retentionMs: 31536000000
+    - name: compliance.reporting.channels
+      partitions: 3
+      cleanupPolicy: compact
+    - name: compliance.legal.dossier
+      partitions: 3
+      cleanupPolicy: compact
+    - name: cra.product.lifecycle
+      partitions: 3
+      cleanupPolicy: compact
+    - name: kafkasql-journal-v3
+      partitions: 1
+      retentionMs: -1
+    - name: kafkasql-snapshots-v3
+      partitions: 1
+      retentionMs: -1
+    - name: registry-events-v3
+      partitions: 1
+      retentionMs: -1
+  principals:
+    - name: dealiot-ingestion
+      write:
+        - raw.*
+        - dlq.events
+    - name: dealiot-flink
+      read:
+        - raw.*
+      write:
+        - features.events
+        - state.latest
+    - name: dealiot-normalizer
+      read:
+        - raw.*
+      write:
+        - features.events
+        - dlq.events
+    - name: dealiot-apicurio
+      readWrite:
+        - kafkasql-journal-v3
+        - kafkasql-snapshots-v3
+        - registry-events-v3
+    - name: dealiot-orchestration
+      readWrite:
+        - governance.*
+        - dataact.*
+        - security.*
+        - resilience.*
+        - compliance.*
+        - cra.*
+    - name: dealiot-operations
+      read:
+        - "*"

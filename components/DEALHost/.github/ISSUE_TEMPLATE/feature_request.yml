@@ -1,0 +1,59 @@
+name: Feature request
+description: Suggest a focused improvement for DEALHost.
+title: "[Feature]: "
+labels:
+  - enhancement
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for product, API, deployment, SDK, or documentation improvements.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem should this solve?
+      placeholder: Describe the current limitation and who is affected.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What change do you want?
+      placeholder: Describe the desired behavior, API, manifest, workflow, or documentation change.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Django app
+        - Hosting API
+        - Gateway API
+        - APISIX routes
+        - GitHub integration
+        - IAM
+        - Manifests
+        - SDK
+        - CI or automation
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What alternatives or workarounds have you considered?
+    validations:
+      required: false
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and deployment impact
+      description: Note any migration, environment variable, route, SDK, or backward compatibility impact.
+    validations:
+      required: false

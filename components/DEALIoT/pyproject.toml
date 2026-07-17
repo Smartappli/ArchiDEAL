@@ -1,0 +1,105 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+  ".git",
+  ".venv",
+  "build",
+  "dist",
+  "grafana",
+  "secrets",
+]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  # Not relevant / too noisy for this repo at this stage:
+  "D",      # pydocstyle (docstring strictness)
+  "ANN",    # mandatory type annotations everywhere
+  "CPY",    # copyright header requirements
+  "INP001", # implicit namespace package warning in current layout
+  "N999",   # non-PEP module folder names (e.g. mqtt-kafka-bridge)
+  "C901",   # function complexity threshold
+  "PLR0911",# too many return statements
+  "ARG002", # unused method args in framework callbacks
+  "BLE001", # broad exception catches in ingestion boundaries
+  "TRY003", # exception message construction style
+  "EM101",  # string literals in raised exceptions
+  "T201",   # print statements in utility scripts
+  "PT009",  # unittest-style assertions in existing tests
+  # Keep compatibility with formatter behavior:
+  "E203",
+  "COM812",
+  "ISC001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "PLR2004", "PT027"]
+"tests/unit/test_repository_unit.py" = ["PLR0912", "PLR0915", "S607"]
+"scripts/localize_website.py" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.14"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+pretty = true
+ignore_missing_imports = true
+explicit_package_bases = true
+exclude = [
+  "(^|/)build/",
+  "(^|/)dist/",
+  "(^|/)grafana/",
+  "(^|/)secrets/",
+  "(^|/)mqtt-kafka-bridge/",
+  "(^|/)airflow/dags/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+  "kafka.*",
+  "boto3",
+  "pyflink.*",
+]
+ignore_missing_imports = true
+
+[tool.djlint]
+profile = "jinja"
+indent = 2
+max_line_length = 100
+format_js = true
+format_css = false
+ignore = "H006,H030"
+
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["."]
+omit = [
+  "tests/*",
+  "**/__init__.py",
+]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+fail_under = 90
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+addopts = "-ra"

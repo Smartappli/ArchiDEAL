@@ -1,0 +1,18 @@
+﻿cff-version: 1.2.0
+message: "If DEALIoT supports your research or deployment, please cite the repository."
+title: "DEALIoT: Production-oriented IoT data platform architecture"
+type: software
+authors:
+  - name: "Smartappli"
+repository-code: "https://github.com/Smartappli/DEALIoT"
+url: "https://smartappli.io/"
+license: "AGPL-3.0-only"
+version: "0.1.0"
+date-released: "2026-06-07"
+keywords:
+  - IoT
+  - data governance
+  - Kafka
+  - Flink
+  - Kubernetes
+  - FAIR data

@@ -1,0 +1,35 @@
+name: Validate Hosting Manifests
+
+on:
+  push:
+    paths:
+      - "manifests/**"
+      - "infra/apisix/**"
+      - "renovate.json"
+      - "scripts/validate_hosting_manifests.py"
+      - ".github/workflows/hosting-manifests-validate.yml"
+  pull_request:
+    paths:
+      - "manifests/**"
+      - "infra/apisix/**"
+      - "renovate.json"
+      - "scripts/validate_hosting_manifests.py"
+      - ".github/workflows/hosting-manifests-validate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-hosting-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate hosting manifests
+        run: python scripts/validate_hosting_manifests.py
+
+      - name: Validate production image policy
+        env:
+          HOSTING_MANIFEST_STRICT_IMAGES: "true"
+        run: python scripts/validate_hosting_manifests.py

@@ -1,0 +1,25 @@
+django-filter==26.1
+
+# --- Monitoring ---
+django-health-check[psutil]==4.4.3
+
+# --- Valkey / cache ---
+django-valkey[lz4]==0.4.1
+# --- Django ---
+Django[argon2]==6.0.7
+
+# --- REST ---
+djangorestframework==3.17.1
+djangorestframework-simplejwt==5.5.1
+
+# --- ASGI server (Django en ASGI) ---
+granian==2.7.9
+kafka-python==3.0.8
+
+# --- Postgres driver ---
+psycopg[binary,pool]==3.3.4
+python-dotenv==1.2.2
+sentry-sdk[django]==2.66.0
+servestatic[brotli]==4.3.1
+uuid-utils==0.17.0
+valkey==6.1.1

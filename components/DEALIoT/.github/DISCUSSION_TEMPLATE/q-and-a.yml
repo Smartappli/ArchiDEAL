@@ -1,0 +1,42 @@
+title: "[Q&A] "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for usage questions, evaluation blockers, local validation, and operational clarification.
+        Do not include secrets, customer data, private endpoints, or vulnerability details.
+  - type: input
+    id: goal
+    attributes:
+      label: Goal
+      description: What are you trying to achieve?
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Deployment target
+      options:
+        - Local Docker Compose
+        - Kubernetes
+        - Docker Swarm
+        - DealHost
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and commands
+      description: Include commit SHA, commands run, expected result, actual result, and sanitized logs.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you already tried
+      description: Link docs or attempts you already checked.
+    validations:
+      required: false

@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.intermediation.log",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DgaIntermediationLog\",\"type\":\"object\",\"required\":[\"activity_id\",\"product_id\",\"actor_id\",\"actor_role\",\"activity_type\",\"purpose\",\"occurred_at\"],\"properties\":{\"activity_id\":{\"type\":\"string\"},\"product_id\":{\"type\":\"string\"},\"actor_id\":{\"type\":\"string\"},\"actor_role\":{\"type\":\"string\",\"enum\":[\"data_holder\",\"data_subject\",\"data_user\",\"intermediary\",\"operator\"]},\"activity_type\":{\"type\":\"string\",\"enum\":[\"catalog_view\",\"request_submitted\",\"permission_checked\",\"data_shared\",\"data_retrieved\",\"conversion_performed\",\"withdrawal_processed\",\"abuse_detected\"]},\"purpose\":{\"type\":\"string\"},\"format\":{\"type\":\"string\"},\"conversion_requested\":{\"type\":\"boolean\"},\"third_country_jurisdiction\":{\"type\":\"string\"},\"occurred_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.intermediation.log",
+    "regulation": "DGA"
+  },
+  "name": "DGA Intermediation Log"
+}

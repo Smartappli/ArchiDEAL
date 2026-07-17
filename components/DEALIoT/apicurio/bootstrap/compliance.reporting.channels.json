@@ -1,0 +1,17 @@
+{
+  "artifactId": "compliance.reporting.channels",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"ComplianceReportingChannel\",\"type\":\"object\",\"required\":[\"channel_id\",\"regulation\",\"trigger\",\"authority_or_recipient\",\"status\",\"owner\",\"updated_at\"],\"properties\":{\"channel_id\":{\"type\":\"string\"},\"regulation\":{\"type\":\"string\",\"enum\":[\"DGA\",\"Data Act\",\"NIS2\",\"DORA\",\"CRA\",\"GDPR\"]},\"trigger\":{\"type\":\"string\"},\"authority_or_recipient\":{\"type\":\"string\"},\"deadline\":{\"type\":\"string\"},\"contact_method\":{\"type\":\"string\"},\"template_uri\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"draft\",\"configured\",\"tested\",\"disabled\"]},\"owner\":{\"type\":\"string\"},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "compliance",
+    "topic": "compliance.reporting.channels",
+    "regulation": "DGA,NIS2,DORA,CRA"
+  },
+  "name": "Compliance Reporting Channel"
+}

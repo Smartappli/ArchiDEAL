@@ -1,0 +1,44 @@
+﻿title: "[Idea] "
+labels:
+  - idea
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for early feature, integration, deployment, or data-governance ideas before opening a scoped issue.
+  - type: textarea
+    id: user_segment
+    attributes:
+      label: User segment and problem
+      description: Who needs this and what adoption or operational problem does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the desired behavior or integration.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Core data model or API
+        - GPS data model or API
+        - Sensor data model or API
+        - DEALIoT ingestion integration
+        - DealHost operations
+        - Data governance or publication
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance signal
+      description: What would prove this idea is useful?
+    validations:
+      required: true

@@ -1,0 +1,17 @@
+{
+  "artifactId": "dataact.product.catalog",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DataActProductCatalog\",\"type\":\"object\",\"required\":[\"catalog_id\",\"connected_product_id\",\"related_service_id\",\"user_id\",\"data_categories\",\"formats\",\"access_methods\",\"collection_frequency\",\"retention_policy\",\"updated_at\"],\"properties\":{\"catalog_id\":{\"type\":\"string\"},\"connected_product_id\":{\"type\":\"string\"},\"related_service_id\":{\"type\":\"string\"},\"user_id\":{\"type\":\"string\"},\"data_holder\":{\"type\":\"string\"},\"data_categories\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"estimated_volume\":{\"type\":\"string\"},\"formats\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"access_methods\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"collection_frequency\":{\"type\":\"string\"},\"retention_policy\":{\"type\":\"string\"},\"direct_access_available\":{\"type\":\"boolean\"},\"third_party_sharing_available\":{\"type\":\"boolean\"},\"trade_secret_or_security_limits\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "dataact",
+    "topic": "dataact.product.catalog",
+    "regulation": "Data Act"
+  },
+  "name": "Data Act Product Catalog"
+}

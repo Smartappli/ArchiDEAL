@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.permission.events",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DgaPermissionEvent\",\"type\":\"object\",\"required\":[\"permission_id\",\"subject_id\",\"subject_type\",\"product_id\",\"event_type\",\"purposes\",\"occurred_at\"],\"properties\":{\"permission_id\":{\"type\":\"string\"},\"subject_id\":{\"type\":\"string\"},\"subject_type\":{\"type\":\"string\",\"enum\":[\"data_holder\",\"data_subject\"]},\"product_id\":{\"type\":\"string\"},\"event_type\":{\"type\":\"string\",\"enum\":[\"granted\",\"withdrawn\",\"expired\",\"updated\"]},\"purposes\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"data_user_id\":{\"type\":\"string\"},\"third_country_jurisdiction\":{\"type\":\"string\"},\"evidence_uri\":{\"type\":\"string\"},\"occurred_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.permission.events",
+    "regulation": "DGA"
+  },
+  "name": "DGA Permission Event"
+}

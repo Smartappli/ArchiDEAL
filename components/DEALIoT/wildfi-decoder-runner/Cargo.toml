@@ -1,0 +1,12 @@
+[package]
+name = "dealiot-wildfi-decoder-runner"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "run-wildfi-decoder"
+path = "src/main.rs"
+
+[dependencies]
+thiserror = "2"

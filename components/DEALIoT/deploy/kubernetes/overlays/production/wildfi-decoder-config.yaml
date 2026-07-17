@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wildfi-decoder-config
+  labels:
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+data:
+  WildFiDecoderConfig.txt: |
+    # accConversionFactor, WildFi OpenSource decoder default
+    0.00024414062
+    # gyroConversionFactor, WildFi OpenSource decoder default
+    0.0153
+    # magConversionFactor, WildFi OpenSource decoder default
+    16
+  ingest-contract.yaml: |
+    version: 1
+    decoder_repository: https://github.com/wildlab/WildFiDecoder
+    firmware_repository: https://github.com/trichl/WildFiOpenSource
+    decoder_component: WildFiDecoderMultiThreaded
+    decoder_git_ref: b4002eb9a6111de140b95e5a35c3f3bd552d51be
+    accepted_mqtt_topic_filters:
+      - $share/ingestors/wildfi/#
+    accepted_topic_examples:
+      - wildfi/tags/{tag_id}/gps
+      - wildfi/tags/{tag_id}/imu
+      - wildfi/tags/{tag_id}/environment
+      - wildfi/tags/{tag_id}/proximity
+      - wildfi/gateways/{gateway_id}/tags/{tag_id}/metadata
+    kafka_mapping:
+      gps:
+        topic: raw.gps
+        required_fields:
+          - tag_id
+          - timestamp_or_utcTimestamp
+          - lat_or_latitude
+          - lon_or_longitude
+      imu:
+        topic: raw.sensor
+      environment:
+        topic: raw.sensor
+      proximity:
+        topic: raw.sensor
+      metadata:
+        topic: raw.sensor
+    native_binary_policy:
+      status: decode_with_wildlab_wildfi_decoder_or_store_artifact
+      reason: WildFi movement/proximity log files are native binary payloads. Production should
+        either decode them before MQTT publication or store the binary artifact and publish metadata.
+    offline_decoder_job:
+      kubernetes_resource: wildfi-decoder
+      image: ghcr.io/smartappli/dealiot-wildfi-decoder
+      workdir_mount: /work
+      suspended_by_default: true

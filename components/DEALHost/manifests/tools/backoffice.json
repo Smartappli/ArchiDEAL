@@ -1,0 +1,9 @@
+{
+  "name": "Backoffice",
+  "slug": "backoffice",
+  "description": "Outil interne d'administration des clients et abonnements.",
+  "module_slugs": ["module-core"],
+  "version": "1.3.0",
+  "version_notes": "Release with multi-module operations dashboard",
+  "enabled": true
+}

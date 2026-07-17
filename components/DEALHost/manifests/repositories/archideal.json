@@ -1,0 +1,172 @@
+{
+  "name": "ArchiDEAL",
+  "slug": "archideal",
+  "repository_full_name": "Smartappli/ArchiDEAL",
+  "source_dependency": {
+    "type": "github-repository",
+    "repository_full_name": "Smartappli/ArchiDEAL",
+    "versioning": "git-sha",
+    "version": "sha-2690f383d769",
+    "ref": "refs/heads/main",
+    "commit_sha": "2690f383d769b8a3b7c8728174d1e5ad14a12314"
+  },
+  "allowed_events": [
+    "push"
+  ],
+  "path_mappings": [
+    {
+      "prefix": "components/DEALIoT/mqtt-kafka-bridge/",
+      "module_slug": "mqtt-kafka-bridge"
+    },
+    {
+      "prefix": "components/DEALIoT/wildfi-decoder/",
+      "module_slug": "wildfi-decoder"
+    },
+    {
+      "prefix": "components/DEALIoT/airflow/",
+      "module_slug": "airflow-orchestration"
+    },
+    {
+      "prefix": "components/DEALIoT/orchestration/",
+      "module_slug": "airflow-orchestration"
+    },
+    {
+      "prefix": "components/DEALIoT/pipelines/",
+      "module_slug": "flink-runtime"
+    },
+    {
+      "prefix": "components/DEALIoT/flink/",
+      "module_slug": "flink-runtime"
+    },
+    {
+      "prefix": "components/DEALIoT/beam/",
+      "module_slug": "beam-runtime"
+    },
+    {
+      "prefix": "components/DEALIoT/apicurio/",
+      "module_slug": "schema-registry-contracts"
+    },
+    {
+      "prefix": "components/DEALIoT/dealiot_contracts/",
+      "module_slug": "schema-registry-contracts"
+    },
+    {
+      "prefix": "components/DEALIoT/prometheus/",
+      "module_slug": "observability"
+    },
+    {
+      "prefix": "components/DEALIoT/grafana/",
+      "module_slug": "observability"
+    },
+    {
+      "prefix": "components/DEALIoT/",
+      "module_slug": "dealiot-platform"
+    },
+    {
+      "prefix": "components/DEALData/core_layer/",
+      "module_slug": "dealdata-core-layer"
+    },
+    {
+      "prefix": "components/DEALData/gps_layer/",
+      "module_slug": "dealdata-gps-layer"
+    },
+    {
+      "prefix": "components/DEALData/sensor_layer/",
+      "module_slug": "dealdata-sensor-layer"
+    },
+    {
+      "prefix": "components/DEALData/",
+      "module_slug": "dealdata-platform"
+    },
+    {
+      "prefix": "components/DEALHost/",
+      "module_slug": "module-core"
+    },
+    {
+      "prefix": "components/DEALInterface/",
+      "module_slug": "dealinterface"
+    },
+    {
+      "prefix": "compose.yaml",
+      "module_slug": "archideal-platform"
+    },
+    {
+      "prefix": "deploy/",
+      "module_slug": "archideal-platform"
+    },
+    {
+      "prefix": "scripts/",
+      "module_slug": "archideal-platform"
+    },
+    {
+      "prefix": ".github/",
+      "module_slug": "archideal-platform"
+    },
+    {
+      "prefix": "docs/",
+      "module_slug": "archideal-platform"
+    },
+    {
+      "prefix": "README.md",
+      "module_slug": "archideal-platform"
+    },
+    {
+      "prefix": "Makefile",
+      "module_slug": "archideal-platform"
+    },
+    {
+      "prefix": "sources.lock.json",
+      "module_slug": "archideal-platform"
+    }
+  ],
+  "route_defaults": [
+    {
+      "module_slug": "module-core",
+      "public_path": "/core",
+      "upstream_host": "django-app",
+      "upstream_port": 8000
+    },
+    {
+      "module_slug": "schema-registry-contracts",
+      "public_path": "/dealiot/apicurio",
+      "upstream_host": "apicurio-registry",
+      "upstream_port": 8080
+    },
+    {
+      "module_slug": "flink-runtime",
+      "public_path": "/dealiot/flink",
+      "upstream_host": "flink-jobmanager",
+      "upstream_port": 8081
+    },
+    {
+      "module_slug": "airflow-orchestration",
+      "public_path": "/dealiot/airflow",
+      "upstream_host": "airflow-apiserver",
+      "upstream_port": 8080
+    },
+    {
+      "module_slug": "observability",
+      "public_path": "/dealiot/prometheus",
+      "upstream_host": "prometheus",
+      "upstream_port": 9090
+    },
+    {
+      "module_slug": "dealdata-core-layer",
+      "public_path": "/dealdata/core",
+      "upstream_host": "dealdata-core",
+      "upstream_port": 7000
+    },
+    {
+      "module_slug": "dealdata-gps-layer",
+      "public_path": "/dealdata/gps",
+      "upstream_host": "dealdata-gps",
+      "upstream_port": 7001
+    },
+    {
+      "module_slug": "dealdata-sensor-layer",
+      "public_path": "/dealdata/sensor",
+      "upstream_host": "dealdata-sensor",
+      "upstream_port": 7002
+    }
+  ]
+}

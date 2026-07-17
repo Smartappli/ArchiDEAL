@@ -1,0 +1,45 @@
+name: Feature or integration request
+description: Propose a feature, device adapter, deployment profile, or data product integration.
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Explain the adoption, operational, or data-value problem.
+    validations:
+      required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Request type
+      options:
+        - Device or MQTT adapter
+        - Deployment or hosting profile
+        - Data product or export
+        - Observability or runbook improvement
+        - Security or compliance workflow
+        - Website, docs, or onboarding
+        - Runtime platform capability
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include affected topics, schemas, manifests, or docs when known.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation approach
+      description: Describe the test, demo, scorecard, or evidence that would prove this works.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Operational or security risks
+      description: Note secrets, migrations, production impact, support boundaries, or compliance concerns.

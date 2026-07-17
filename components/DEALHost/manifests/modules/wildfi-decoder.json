@@ -1,0 +1,16 @@
+{
+  "name": "DEALIoT WildFi Decoder",
+  "slug": "wildfi-decoder",
+  "image": "ghcr.io/smartappli/dealiot-wildfi-decoder:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALIoT/wildfi-decoder",
+  "deployment_target": "kubernetes",
+  "contract_topics": [
+    "raw.sensor",
+    "raw.gps"
+  ],
+  "production_ready": false,
+  "enabled": true
+}

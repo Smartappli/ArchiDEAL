@@ -1,0 +1,70 @@
+[
+  {
+    "name": "valid envelope",
+    "topic": "raw.sensor",
+    "event": {
+      "device_id": "sensor-1",
+      "timestamp": "2026-07-10T12:00:00Z",
+      "payload": {},
+      "event_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "schema_version": "1.0.0"
+    },
+    "expected_errors": []
+  },
+  {
+    "name": "invalid event identity",
+    "topic": "raw.sensor",
+    "event": {
+      "device_id": "sensor-1",
+      "timestamp": "2026-07-10T12:00:00Z",
+      "payload": {},
+      "event_id": "not-a-digest",
+      "schema_version": "1.0.0"
+    },
+    "expected_errors": [
+      "event_id must be a 64-character hexadecimal SHA-256 digest"
+    ]
+  },
+  {
+    "name": "invalid schema version",
+    "topic": "raw.sensor",
+    "event": {
+      "device_id": "sensor-1",
+      "timestamp": "2026-07-10T12:00:00Z",
+      "payload": {},
+      "event_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "schema_version": "1"
+    },
+    "expected_errors": [
+      "schema_version must use semantic version format"
+    ]
+  },
+  {
+    "name": "non-numeric schema version",
+    "topic": "raw.sensor",
+    "event": {
+      "device_id": "sensor-1",
+      "timestamp": "2026-07-10T12:00:00Z",
+      "payload": {},
+      "event_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "schema_version": "v1.0.0"
+    },
+    "expected_errors": [
+      "schema_version must use semantic version format"
+    ]
+  },
+  {
+    "name": "uppercase event identity",
+    "topic": "raw.sensor",
+    "event": {
+      "device_id": "sensor-1",
+      "timestamp": "2026-07-10T12:00:00Z",
+      "payload": {},
+      "event_id": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "schema_version": "1.0.0"
+    },
+    "expected_errors": [
+      "event_id must be a 64-character hexadecimal SHA-256 digest"
+    ]
+  }
+]

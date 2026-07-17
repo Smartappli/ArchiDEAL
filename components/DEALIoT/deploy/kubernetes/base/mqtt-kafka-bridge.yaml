@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mqtt-kafka-bridge
+  labels:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+    app.kubernetes.io/part-of: dealiot
+spec:
+  serviceName: mqtt-kafka-bridge
+  podManagementPolicy: Parallel
+  replicas: 2
+  revisionHistoryLimit: 3
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mqtt-kafka-bridge
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8080"
+        prometheus.io/scrape: "true"
+      labels:
+        app.kubernetes.io/name: mqtt-kafka-bridge
+        app.kubernetes.io/part-of: dealiot
+    spec:
+      terminationGracePeriodSeconds: 60
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bridge
+          image: ghcr.io/smartappli/dealiot-mqtt-kafka-bridge:local-placeholder
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: health
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: dealiot-runtime-config
+          env:
+            - name: BRIDGE_HEALTH_BIND
+              value: 0.0.0.0
+            - name: MQTT_CLIENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MQTT_CLEAN_SESSION
+              value: "false"
+            - name: MQTT_PASSWORD_FILE
+              value: /var/run/dealiot-secrets/mqtt-password
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dealiot-secrets
+                  key: KAFKA_SASL_PASSWORD
+          volumeMounts:
+            - name: dealiot-secrets
+              mountPath: /var/run/dealiot-secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      volumes:
+        - name: dealiot-secrets
+          secret:
+            secretName: dealiot-secrets
+            items:
+              - key: MQTT_PASSWORD
+                path: mqtt-password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqtt-kafka-bridge
+  labels:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+    app.kubernetes.io/part-of: dealiot
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+  ports:
+    - name: health
+      port: 8080
+      targetPort: health
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mqtt-kafka-bridge
+  labels:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+    app.kubernetes.io/part-of: dealiot
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mqtt-kafka-bridge

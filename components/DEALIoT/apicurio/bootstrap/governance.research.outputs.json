@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.research.outputs",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DgaResearchOutput\",\"type\":\"object\",\"required\":[\"output_id\",\"project_id\",\"output_type\",\"title\",\"disclosure_review_status\",\"created_at\"],\"properties\":{\"output_id\":{\"type\":\"string\"},\"project_id\":{\"type\":\"string\"},\"output_type\":{\"type\":\"string\",\"enum\":[\"publication\",\"dataset\",\"model\",\"report\",\"dashboard\",\"derived_features\"]},\"title\":{\"type\":\"string\"},\"summary\":{\"type\":\"string\"},\"data_products_used\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"privacy_techniques\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"disclosure_review_status\":{\"type\":\"string\",\"enum\":[\"pending\",\"approved\",\"rejected\",\"not_required\"]},\"published_uri\":{\"type\":\"string\"},\"created_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"published_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.research.outputs",
+    "regulation": "DGA"
+  },
+  "name": "DGA Research Output"
+}

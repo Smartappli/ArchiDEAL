@@ -1,0 +1,53 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dealiot-slo-alerts
+  labels:
+    app.kubernetes.io/part-of: dealiot
+spec:
+  groups:
+    - name: dealiot-ingestion
+      rules:
+        - alert: BridgeNotReady
+          expr: max(dealiot_bridge_ready) == 0
+          for: 5m
+          labels:
+            severity: critical
+            slo: ingestion-availability
+          annotations:
+            summary: No MQTT-Kafka bridge replica is ready
+        - alert: BridgeDlqRateHigh
+          expr: sum(rate(dealiot_bridge_dlq_total[10m])) / clamp_min(sum(rate(dealiot_bridge_forwarded_total[10m])), 0.001) > 0.005
+          for: 10m
+          labels:
+            severity: warning
+            slo: ingestion-quality
+          annotations:
+            summary: Ingestion DLQ ratio exceeds 0.5 percent
+        - alert: NormalizerCommitGap
+          expr: dealiot_normalizer_processed_total - dealiot_normalizer_committed_total > 100
+          for: 5m
+          labels:
+            severity: critical
+            slo: processing-correctness
+          annotations:
+            summary: Normalizer durable commit gap is growing
+        - alert: FlinkCheckpointFailures
+          expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints[15m]) > 0
+          for: 2m
+          labels:
+            severity: critical
+            slo: processing-checkpoints
+          annotations:
+            summary: Flink checkpoints are failing
+        - alert: FlinkCheckpointStale
+          expr: >-
+            time()
+            - flink_jobmanager_job_lastCheckpointCompletedTimestamp / 1000
+            > 300
+          for: 5m
+          labels:
+            severity: critical
+            slo: processing-checkpoints
+          annotations:
+            summary: Flink has no recent successful checkpoint

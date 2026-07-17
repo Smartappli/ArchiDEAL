@@ -1,0 +1,16 @@
+{
+  "artifactId": "dlq.events",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DeadLetterEvent\",\"type\":\"object\",\"required\":[\"timestamp\",\"source\",\"intended_topic\",\"errors\",\"raw_event\"],\"properties\":{\"timestamp\":{\"type\":\"string\",\"format\":\"date-time\"},\"source\":{\"type\":\"string\"},\"intended_topic\":{\"type\":\"string\"},\"source_topic\":{\"type\":\"string\"},\"device_id\":{\"type\":\"string\"},\"errors\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"raw_event\":{\"type\":\"object\",\"additionalProperties\":true}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "platform",
+    "topic": "dlq.events"
+  },
+  "name": "Dead Letter Event"
+}

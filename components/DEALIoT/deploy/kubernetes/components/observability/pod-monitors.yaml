@@ -1,0 +1,36 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: dealiot-rust-runtime
+  labels:
+    app.kubernetes.io/part-of: dealiot
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - mqtt-kafka-bridge
+          - stream-normalizer
+  podMetricsEndpoints:
+    - port: health
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: dealiot-flink-runtime
+  labels:
+    app.kubernetes.io/part-of: dealiot
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - flink-runtime
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s

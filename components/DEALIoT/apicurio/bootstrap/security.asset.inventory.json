@@ -1,0 +1,17 @@
+{
+  "artifactId": "security.asset.inventory",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"SecurityAssetInventory\",\"type\":\"object\",\"required\":[\"asset_id\",\"asset_type\",\"owner\",\"criticality\",\"environment\",\"updated_at\"],\"properties\":{\"asset_id\":{\"type\":\"string\"},\"asset_type\":{\"type\":\"string\",\"enum\":[\"service\",\"container_image\",\"kafka_topic\",\"database\",\"bucket\",\"secret\",\"external_provider\",\"device\",\"network_zone\"]},\"owner\":{\"type\":\"string\"},\"criticality\":{\"type\":\"string\",\"enum\":[\"low\",\"medium\",\"high\",\"critical\"]},\"environment\":{\"type\":\"string\"},\"component\":{\"type\":\"string\"},\"data_classification\":{\"type\":\"string\"},\"dependencies\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"security_baseline\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "security",
+    "topic": "security.asset.inventory",
+    "regulation": "NIS2,DORA,CRA"
+  },
+  "name": "Security Asset Inventory"
+}

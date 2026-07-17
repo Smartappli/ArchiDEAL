@@ -1,0 +1,25 @@
+﻿name: Documentation gap
+description: Report unclear, missing, or outdated documentation.
+title: "Docs: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Affected page or file
+      description: Link or name the README, configuration file, deployment file, test, or support document.
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: What is unclear or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected improvement
+      description: Explain what a new user, operator, or contributor should be able to do.
+    validations:
+      required: true

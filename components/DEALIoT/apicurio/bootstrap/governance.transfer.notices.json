@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.transfer.notices",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DgaTransferNotice\",\"type\":\"object\",\"required\":[\"notice_id\",\"product_id\",\"incident_type\",\"detected_at\",\"notified_at\",\"status\"],\"properties\":{\"notice_id\":{\"type\":\"string\"},\"product_id\":{\"type\":\"string\"},\"incident_type\":{\"type\":\"string\",\"enum\":[\"unauthorised_access\",\"unauthorised_transfer\",\"unauthorised_use\",\"third_country_risk\"]},\"data_holder_id\":{\"type\":\"string\"},\"data_user_id\":{\"type\":\"string\"},\"jurisdiction\":{\"type\":\"string\"},\"summary\":{\"type\":\"string\"},\"detected_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"notified_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"status\":{\"type\":\"string\",\"enum\":[\"open\",\"contained\",\"notified\",\"closed\"]}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.transfer.notices",
+    "regulation": "DGA"
+  },
+  "name": "DGA Transfer Notice"
+}

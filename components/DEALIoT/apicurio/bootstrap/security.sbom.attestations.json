@@ -1,0 +1,17 @@
+{
+  "artifactId": "security.sbom.attestations",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"SecuritySbomAttestation\",\"type\":\"object\",\"required\":[\"attestation_id\",\"artifact\",\"digest\",\"sbom_format\",\"created_at\",\"status\"],\"properties\":{\"attestation_id\":{\"type\":\"string\"},\"artifact\":{\"type\":\"string\"},\"digest\":{\"type\":\"string\"},\"sbom_format\":{\"type\":\"string\",\"enum\":[\"spdx\",\"cyclonedx\",\"other\"]},\"sbom_uri\":{\"type\":\"string\"},\"provenance_uri\":{\"type\":\"string\"},\"signature_uri\":{\"type\":\"string\"},\"created_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"status\":{\"type\":\"string\",\"enum\":[\"created\",\"verified\",\"rejected\",\"expired\"]},\"critical_components\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "security",
+    "topic": "security.sbom.attestations",
+    "regulation": "CRA,NIS2,DORA"
+  },
+  "name": "Security SBOM Attestation"
+}

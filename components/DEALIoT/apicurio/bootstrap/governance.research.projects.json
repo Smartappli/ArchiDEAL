@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.research.projects",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DgaResearchProject\",\"type\":\"object\",\"required\":[\"project_id\",\"title\",\"general_interest_objective\",\"principal_investigator\",\"data_products\",\"lawful_basis\",\"ethics_review_status\",\"start_date\",\"status\",\"updated_at\"],\"properties\":{\"project_id\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"general_interest_objective\":{\"type\":\"string\"},\"principal_investigator\":{\"type\":\"string\"},\"institution\":{\"type\":\"string\"},\"data_products\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"lawful_basis\":{\"type\":\"string\"},\"ethics_approval_id\":{\"type\":\"string\"},\"ethics_review_status\":{\"type\":\"string\",\"enum\":[\"not_required\",\"pending\",\"approved\",\"rejected\",\"expired\"]},\"permission_model\":{\"type\":\"string\",\"enum\":[\"data_holder_permission\",\"data_subject_consent\",\"data_altruism\",\"internal_research_authorisation\"]},\"pseudonymisation_required\":{\"type\":\"boolean\"},\"publication_policy\":{\"type\":\"string\"},\"start_date\":{\"type\":\"string\",\"format\":\"date\"},\"end_date\":{\"type\":\"string\",\"format\":\"date\"},\"status\":{\"type\":\"string\",\"enum\":[\"planned\",\"active\",\"paused\",\"completed\",\"withdrawn\"]},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.research.projects",
+    "regulation": "DGA"
+  },
+  "name": "DGA Research Project"
+}

@@ -1,0 +1,16 @@
+{
+  "artifactId": "media.object.events",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"MediaObjectEvents\",\"type\":\"object\",\"required\":[\"Records\"],\"properties\":{\"Records\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"required\":[\"eventTime\",\"eventName\",\"s3\"],\"properties\":{\"eventVersion\":{\"type\":\"string\"},\"eventSource\":{\"type\":\"string\"},\"awsRegion\":{\"type\":\"string\"},\"eventTime\":{\"type\":\"string\",\"format\":\"date-time\"},\"eventName\":{\"type\":\"string\"},\"s3\":{\"type\":\"object\",\"required\":[\"bucket\",\"object\"],\"properties\":{\"bucket\":{\"type\":\"object\",\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\"},\"arn\":{\"type\":\"string\"}},\"additionalProperties\":true},\"object\":{\"type\":\"object\",\"required\":[\"key\"],\"properties\":{\"key\":{\"type\":\"string\"},\"size\":{\"type\":\"integer\",\"minimum\":0},\"eTag\":{\"type\":\"string\"},\"contentType\":{\"type\":\"string\"},\"versionId\":{\"type\":\"string\"},\"sequencer\":{\"type\":\"string\"}},\"additionalProperties\":true}},\"additionalProperties\":true}},\"additionalProperties\":true}}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "media",
+    "topic": "media.object.events"
+  },
+  "name": "Media Object Events"
+}

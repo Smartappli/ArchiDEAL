@@ -1,0 +1,12 @@
+{
+  "name": "ArchiDEAL Platform",
+  "slug": "archideal-platform",
+  "image": "apache/apisix:3.17.0-debian",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": ".",
+  "deployment_target": "compose",
+  "production_ready": false,
+  "enabled": true
+}

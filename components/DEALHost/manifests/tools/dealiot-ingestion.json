@@ -1,0 +1,13 @@
+{
+  "name": "DEALIoT Ingestion",
+  "slug": "dealiot-ingestion",
+  "description": "Ingestion MQTT vers Kafka et validation des contrats evenementiels DEALIoT.",
+  "module_slugs": [
+    "mqtt-kafka-bridge",
+    "schema-registry-contracts",
+    "wildfi-decoder"
+  ],
+  "version": "0.1.0",
+  "version_notes": "Initial DEALIoT integration contract",
+  "enabled": true
+}

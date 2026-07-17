@@ -1,0 +1,114 @@
+name: SonarQube
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  sonarqube:
+    name: SonarQube Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip coverage
+          python -m pip install \
+            -r core_layer/requirements.txt \
+            -r gps_layer/requirements.txt \
+            -r sensor_layer/requirements.txt \
+            boto3 \
+            pytest \
+            pytest-cov \
+            pytest-django
+
+      - name: Generate core coverage report
+        working-directory: core_layer
+        run: |
+          python -m pytest . \
+            --ds=core.settings \
+            --cov=core_data \
+            --cov-report=xml:../coverage-core.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -q
+
+      - name: Generate GPS coverage report
+        working-directory: gps_layer
+        run: |
+          python -m pytest . \
+            --ds=gps.settings \
+            --cov=gps_data \
+            --cov-report=xml:../coverage-gps.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -q
+
+      - name: Generate sensor coverage report
+        working-directory: sensor_layer
+        run: |
+          python -m pytest . \
+            --ds=sensor.settings \
+            --cov=sensor_data \
+            --cov-report=xml:../coverage-sensor.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -q
+
+      - name: Verify coverage report for SonarQube
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for report in ("coverage-core.xml", "coverage-gps.xml", "coverage-sensor.xml"):
+              path = Path(report)
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"{report} was not generated")
+              text = path.read_text(encoding="utf-8")
+              if "<coverage " not in text:
+                  raise SystemExit(f"{report} does not look like a coverage report")
+          print("Coverage reports generated and valid for SonarQube import")
+          PY
+
+      - name: Run codacy-coverage-reporter
+        if: ${{ env.CODACY_PROJECT_TOKEN != '' }}
+        uses: codacy/codacy-coverage-reporter-action@89d6c85cfafaec52c72b6c5e8b2878d33104c699
+        with:
+          project-token: ${{ env.CODACY_PROJECT_TOKEN }}
+          coverage-reports: "coverage-core.xml,coverage-gps.xml,coverage-sensor.xml"
+
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        with:
+          args: >-
+            -Dsonar.python.coverage.reportPaths=coverage-core.xml,coverage-gps.xml,coverage-sensor.xml
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}

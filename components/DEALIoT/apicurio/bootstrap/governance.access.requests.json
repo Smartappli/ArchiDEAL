@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.access.requests",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DgaAccessRequest\",\"type\":\"object\",\"required\":[\"request_id\",\"product_id\",\"requester_id\",\"requester_type\",\"declared_purpose\",\"requested_at\",\"status\"],\"properties\":{\"request_id\":{\"type\":\"string\"},\"product_id\":{\"type\":\"string\"},\"requester_id\":{\"type\":\"string\"},\"requester_type\":{\"type\":\"string\",\"enum\":[\"data_user\",\"data_holder\",\"data_subject\",\"public_sector_body\",\"researcher\"]},\"declared_purpose\":{\"type\":\"string\"},\"requested_fields\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"requested_format\":{\"type\":\"string\"},\"third_country_jurisdiction\":{\"type\":\"string\"},\"requested_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"status\":{\"type\":\"string\",\"enum\":[\"submitted\",\"under_review\",\"approved\",\"rejected\",\"withdrawn\",\"expired\"]},\"decision_reason\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.access.requests",
+    "regulation": "DGA"
+  },
+  "name": "DGA Access Request"
+}

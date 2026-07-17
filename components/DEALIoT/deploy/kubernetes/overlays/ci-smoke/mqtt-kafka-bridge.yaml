@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mqtt-kafka-bridge
+  labels:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: ci-smoke
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mqtt-kafka-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mqtt-kafka-bridge
+        app.kubernetes.io/part-of: dealiot
+        dealiot.io/environment: ci-smoke
+    spec:
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bridge
+          image: ghcr.io/smartappli/dealiot-mqtt-kafka-bridge:local-placeholder
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: health
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: dealiot-runtime-config
+          env:
+            - name: BRIDGE_HEALTH_BIND
+              value: 0.0.0.0
+            - name: MQTT_CLIENT_ID
+              value: dealiot-kind-smoke
+            - name: MQTT_CLEAN_SESSION
+              value: "true"
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      terminationGracePeriodSeconds: 30

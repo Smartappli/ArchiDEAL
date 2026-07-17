@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dealiot-smoke
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - mqtt-broker.yaml
+  - kafka.yaml
+  - mqtt-kafka-bridge.yaml
+  - verifier.yaml
+
+images:
+  - name: ghcr.io/smartappli/dealiot-mqtt-kafka-bridge
+    newName: dealiot-mqtt-kafka-bridge
+    newTag: ci

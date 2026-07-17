@@ -1,0 +1,16 @@
+Package: dealhostR
+Type: Package
+Title: R SDK for DEALHost Hosting API
+Version: 0.1.0
+Authors@R: person(given = "DEALHost", family = "Team", role = c("aut", "cre"), email = "devnull@example.com")
+Description: Minimal R SDK to manage tools and hosted applications on DEALHost.
+License: MIT
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.2
+Imports:
+    httr2,
+    jsonlite
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

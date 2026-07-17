@@ -1,0 +1,70 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wildfi-decoder
+  labels:
+    app.kubernetes.io/name: wildfi-decoder
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: production
+spec:
+  suspend: true
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wildfi-decoder
+        app.kubernetes.io/part-of: dealiot
+        dealiot.io/environment: production
+    spec:
+      restartPolicy: Never
+      serviceAccountName: dealiot-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: decoder
+          image: ghcr.io/smartappli/dealiot-wildfi-decoder:local-placeholder
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: WILDFI_DECODER_MODE
+              value: "2"
+            - name: WILDFI_DECODER_BURST_FORM
+              value: "0"
+            - name: WILDFI_DECODER_FILE_INDEX
+              value: "0"
+            - name: WILDFI_DECODER_TAG_SELECTION
+              value: "0"
+            - name: WILDFI_IMU_FREQUENCY
+              value: "25"
+          volumeMounts:
+            - name: decoder-config
+              mountPath: /opt/wildfi-decoder/WildFiDecoderConfig.txt
+              subPath: WildFiDecoderConfig.txt
+              readOnly: true
+            - name: workdir
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      volumes:
+        - name: decoder-config
+          configMap:
+            name: wildfi-decoder-config
+        - name: workdir
+          persistentVolumeClaim:
+            claimName: wildfi-decoder-workdir
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,12 @@
+.git
+.github
+.idea
+.venv
+.ruff_cache
+__pycache__
+*.py[cod]
+*.sqlite3
+.coverage
+coverage.xml
+htmlcov
+staticfiles

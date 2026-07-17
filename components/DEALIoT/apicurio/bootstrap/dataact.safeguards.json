@@ -1,0 +1,17 @@
+{
+  "artifactId": "dataact.safeguards",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"DataActSafeguard\",\"type\":\"object\",\"required\":[\"safeguard_id\",\"data_product_id\",\"safeguard_type\",\"description\",\"applies_to\",\"updated_at\"],\"properties\":{\"safeguard_id\":{\"type\":\"string\"},\"data_product_id\":{\"type\":\"string\"},\"safeguard_type\":{\"type\":\"string\",\"enum\":[\"trade_secret\",\"security\",\"personal_data\",\"third_country\",\"abuse_prevention\",\"technical_limit\"]},\"description\":{\"type\":\"string\"},\"applies_to\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"mitigation\":{\"type\":\"string\"},\"blocking\":{\"type\":\"boolean\"},\"review_required\":{\"type\":\"boolean\"},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "dataact",
+    "topic": "dataact.safeguards",
+    "regulation": "Data Act"
+  },
+  "name": "Data Act Safeguard"
+}

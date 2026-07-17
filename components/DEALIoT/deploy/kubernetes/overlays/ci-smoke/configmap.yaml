@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dealiot-runtime-config
+  labels:
+    app.kubernetes.io/part-of: dealiot
+    dealiot.io/environment: ci-smoke
+data:
+  DEFAULT_KAFKA_TOPIC: "raw.sensor"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  LOG_LEVEL: "INFO"
+  MQTT_HOST: "mqtt-broker"
+  MQTT_PORT: "1883"
+  MQTT_TOPICS: "$share/ingestors/devices/#,$share/ingestors/wildfi/#"
+  WILDFI_TOPIC_PREFIXES: "wildfi,wild-fi"

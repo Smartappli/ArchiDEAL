@@ -1,0 +1,13 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.venv
+**/__pycache__
+**/*.pyc
+**/.env
+**/*.sqlite3
+**/db.sqlite3
+**/logs
+coverage-*.xml
+htmlcov

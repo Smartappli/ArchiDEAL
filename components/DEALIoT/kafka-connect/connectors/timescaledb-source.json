@@ -1,0 +1,32 @@
+{
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.dbname": "appdb",
+    "database.hostname": "haproxy",
+    "database.password": "__INJECT_AT_RUNTIME__",
+    "database.port": "5432",
+    "database.user": "debezium",
+    "decimal.handling.mode": "string",
+    "heartbeat.interval.ms": "10000",
+    "heartbeat.topics.prefix": "__debezium-heartbeat",
+    "include.schema.changes": "false",
+    "key.converter": "io.apicurio.registry.utils.converter.ExtJsonConverter",
+    "key.converter.apicurio.registry.auto-register": "true",
+    "key.converter.apicurio.registry.find-latest": "true",
+    "key.converter.apicurio.registry.url": "http://apicurio-registry:8080/apis/registry/v2",
+    "plugin.name": "pgoutput",
+    "publication.name": "dbz_publication",
+    "schema.include.list": "public",
+    "slot.drop.on.stop": "false",
+    "slot.name": "debezium_appdb",
+    "tasks.max": "1",
+    "time.precision.mode": "connect",
+    "tombstones.on.delete": "false",
+    "topic.prefix": "appdb",
+    "value.converter": "io.apicurio.registry.utils.converter.ExtJsonConverter",
+    "value.converter.apicurio.registry.auto-register": "true",
+    "value.converter.apicurio.registry.find-latest": "true",
+    "value.converter.apicurio.registry.url": "http://apicurio-registry:8080/apis/registry/v2"
+  },
+  "name": "timescaledb-source"
+}

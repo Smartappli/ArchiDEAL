@@ -1,0 +1,23 @@
+---
+engines:
+  opengrep:
+    exclude_paths:
+      # Guarded by tests/unit/test_repository_unit.py; current UI code avoids HTML sinks.
+      - "management-console/static/app.js"
+  bandit:
+    exclude_paths:
+      # Guarded by tests/unit/test_management_console_app_unit.py and backend hotspot tests.
+      - "management-console/management_console/app.py"
+  pylintpython3:
+    exclude_paths:
+      # Codacy reports the BaseHTTPRequestHandler override despite local Pylint suppression.
+      - "management-console/management_console/app.py"
+  prospector:
+    exclude_paths:
+      - "tests/unit/test_bridge_unit.py"
+      - "tests/unit/test_media_backfill_unit.py"
+
+exclude_paths:
+  - ".github/ISSUE_TEMPLATE/*.yml"
+  # Codacy flags the pinned SonarSource action commit as a SonarQube API key.
+  - ".github/workflows/sonarqube.yml"

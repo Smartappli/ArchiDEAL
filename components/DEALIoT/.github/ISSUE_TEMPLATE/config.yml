@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Community Q&A
+    url: https://github.com/Smartappli/DEALIoT/discussions/categories/q-a
+    about: Ask usage questions, evaluation blockers, and operational questions here first.
+  - name: Product ideas
+    url: https://github.com/Smartappli/DEALIoT/discussions/categories/ideas
+    about: Start here for unscoped feature, integration, and adoption ideas.
+  - name: Contributor help
+    url: https://github.com/Smartappli/DEALIoT/discussions/categories/contributor-help
+    about: Get help choosing scope, validation, or a first contribution path.
+  - name: Security report
+    url: https://github.com/Smartappli/DEALIoT/security/advisories/new
+    about: Report vulnerabilities privately instead of opening a public issue.
+  - name: Managed hosting or pilot contact
+    url: mailto:contact@smartappli.com?subject=DEAL%20pilot%20or%20hosting%20request
+    about: Use this for DealHost, pilots, and private deployment discussions.

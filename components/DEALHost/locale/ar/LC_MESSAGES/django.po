@@ -1,0 +1,127 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: DEALHost\n"
+"Language: ar\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "DEALHost - Tools/Apps Management"
+msgstr "DEALHost - إدارة الأدوات/التطبيقات"
+
+msgid "Language"
+msgstr "اللغة"
+
+msgid "Apply"
+msgstr "تطبيق"
+
+msgid "Management interface for modules, tools and applications"
+msgstr "واجهة إدارة الوحدات والأدوات والتطبيقات"
+
+msgid "Autodiscover tools and applications"
+msgstr "اكتشاف الأدوات والتطبيقات تلقائيًا"
+
+msgid "Modules"
+msgstr "الوحدات"
+
+msgid "Name"
+msgstr "الاسم"
+
+msgid "Slug"
+msgstr "المعرّف"
+
+msgid "Branch"
+msgstr "الفرع"
+
+msgid "Enabled"
+msgstr "مفعّل"
+
+msgid "No modules"
+msgstr "لا توجد وحدات"
+
+msgid "Tools"
+msgstr "الأدوات"
+
+msgid "Current version"
+msgstr "الإصدار الحالي"
+
+msgid "No tools"
+msgstr "لا توجد أدوات"
+
+msgid "Applications"
+msgstr "التطبيقات"
+
+msgid "No applications"
+msgstr "لا توجد تطبيقات"
+
+msgid "Autodiscovery completed: "
+msgstr "اكتمل الاكتشاف التلقائي: "
+
+msgid "tools created=%(tools_created)s, tools updated=%(tools_updated)s, apps created=%(apps_created)s, apps updated=%(apps_updated)s, tool versions created=%(tool_versions_created)s, application versions created=%(application_versions_created)s."
+msgstr "تم إنشاء أدوات=%(tools_created)s، تم تحديث أدوات=%(tools_updated)s، تم إنشاء تطبيقات=%(apps_created)s، تم تحديث تطبيقات=%(apps_updated)s، تم إنشاء إصدارات الأدوات=%(tool_versions_created)s، تم إنشاء إصدارات التطبيقات=%(application_versions_created)s."
+
+msgid "Modular Hosting"
+msgstr "استضافة معيارية"
+
+msgid "Version must follow semantic versioning (example: 1.2.3 or v1.2.3)."
+msgstr "يجب أن يتبع الإصدار أسلوب الإصدار الدلالي (مثال: 1.2.3 أو v1.2.3)."
+
+msgid "module_slug is required."
+msgstr "الحقل module_slug مطلوب."
+
+msgid "Invalid GitHub signature."
+msgstr "توقيع GitHub غير صالح."
+
+msgid "%(path)s: missing required field '%(field)s'"
+msgstr "%(path)s: الحقل الإلزامي '%(field)s' مفقود"
+
+msgid "%(path)s: invalid version '%(version)s', expected semantic version"
+msgstr "%(path)s: الإصدار '%(version)s' غير صالح، مطلوب إصدار دلالي"
+
+msgid "%(path)s: unknown module slugs: %(slugs)s"
+msgstr "%(path)s: معرّفات الوحدات غير معروفة: %(slugs)s"
+
+msgid "Yes"
+msgstr "نعم"
+
+msgid "No"
+msgstr "لا"
+
+msgid "Arabic"
+msgstr "العربية"
+
+msgid "Chinese (Simplified)"
+msgstr "الصينية (المبسطة)"
+
+msgid "English"
+msgstr "الإنجليزية"
+
+msgid "French"
+msgstr "الفرنسية"
+
+msgid "Russian"
+msgstr "الروسية"
+
+msgid "Spanish"
+msgstr "الإسبانية"
+
+msgid "Module"
+msgstr "وحدة"
+
+msgid "Tool"
+msgstr "أداة"
+
+msgid "Tool version"
+msgstr "إصدار الأداة"
+
+msgid "Tool versions"
+msgstr "إصدارات الأداة"
+
+msgid "Application"
+msgstr "تطبيق"
+
+msgid "Application version"
+msgstr "إصدار التطبيق"
+
+msgid "Application versions"
+msgstr "إصدارات التطبيق"

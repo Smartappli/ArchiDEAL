@@ -1,0 +1,135 @@
+name: SDK Unit Tests
+
+on:
+  push:
+    branches: ["main", "work"]
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/workflows/sdk-unit-tests.yml"
+      - "sdk/python/**"
+      - "sdk/go/dealhost-sdk/**"
+      - "sdk/rust/dealhost-sdk/**"
+      - "sdk/java/dealhost-sdk/**"
+      - "sdk/r/dealhostR/**"
+      - "sdk/julia/DealHostSDK.jl/**"
+  pull_request:
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/workflows/sdk-unit-tests.yml"
+      - "sdk/python/**"
+      - "sdk/go/dealhost-sdk/**"
+      - "sdk/rust/dealhost-sdk/**"
+      - "sdk/java/dealhost-sdk/**"
+      - "sdk/r/dealhostR/**"
+      - "sdk/julia/DealHostSDK.jl/**"
+
+permissions:
+  contents: read
+
+jobs:
+  python-sdk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
+
+      - name: Install SDK
+        run: uv pip install --system -e sdk/python
+
+      - name: Run unit tests
+        run: python -m unittest discover -s sdk/python/tests -v
+
+  go-sdk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.22"
+          cache: false
+
+      - name: Run unit tests
+        working-directory: sdk/go/dealhost-sdk
+        run: go test ./...
+
+  rust-sdk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+        with:
+          toolchain: stable
+
+      - name: Run unit tests
+        working-directory: sdk/rust/dealhost-sdk
+        run: cargo test
+
+  java-sdk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run unit tests
+        working-directory: sdk/java/dealhost-sdk
+        run: mvn --batch-mode test
+
+  r-sdk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+
+      - name: Install test dependencies
+        run: >-
+          Rscript -e "install.packages(c('httr2', 'jsonlite', 'testthat'),
+          repos = 'https://cloud.r-project.org')"
+
+      - name: Run unit tests
+        run: Rscript -e "testthat::test_local('sdk/r/dealhostR')"
+
+  julia-sdk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Julia
+        uses: julia-actions/setup-julia@v3
+        with:
+          version: "1.11"
+
+      - name: Run unit tests
+        run: >-
+          julia --project=sdk/julia/DealHostSDK.jl
+          -e 'using Pkg; Pkg.instantiate(); Pkg.test()'

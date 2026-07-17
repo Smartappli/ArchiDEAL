@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.dataset.catalog",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"GovernanceDatasetCatalog\",\"type\":\"object\",\"required\":[\"dataset_id\",\"title\",\"dataset_type\",\"owner\",\"data_products\",\"classification\",\"access_mode\",\"license_policy\",\"retention_policy\",\"updated_at\"],\"properties\":{\"dataset_id\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"dataset_type\":{\"type\":\"string\",\"enum\":[\"raw\",\"derived\",\"aggregate\",\"metadata\",\"research_release\"]},\"owner\":{\"type\":\"string\"},\"steward\":{\"type\":\"string\"},\"project_id\":{\"type\":\"string\"},\"data_products\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"minItems\":1},\"source_topics\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"classification\":{\"type\":\"string\",\"enum\":[\"public\",\"internal\",\"restricted\",\"personal\",\"sensitive\",\"mixed\"]},\"personal_data\":{\"type\":\"boolean\"},\"fair_metadata_uri\":{\"type\":\"string\"},\"schema_refs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"access_mode\":{\"type\":\"string\",\"enum\":[\"open\",\"mediated\",\"restricted\",\"embargoed\"]},\"license_policy\":{\"type\":\"string\"},\"retention_policy\":{\"type\":\"string\"},\"preservation_location\":{\"type\":\"string\"},\"dmp_id\":{\"type\":\"string\"},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.dataset.catalog",
+    "regulation": "DGA,Data Act,GDPR"
+  },
+  "name": "Governance Dataset Catalog"
+}

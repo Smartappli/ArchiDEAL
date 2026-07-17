@@ -1,0 +1,17 @@
+{
+  "artifactId": "compliance.scope.decisions",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"ComplianceScopeDecision\",\"type\":\"object\",\"required\":[\"decision_id\",\"regulation\",\"scope_status\",\"owner\",\"decided_at\",\"basis\"],\"properties\":{\"decision_id\":{\"type\":\"string\"},\"regulation\":{\"type\":\"string\",\"enum\":[\"DGA\",\"Data Act\",\"NIS2\",\"DORA\",\"CRA\",\"GDPR\",\"ePrivacy\",\"AI Act\",\"Trade Secrets Directive\",\"Radio Equipment Directive\",\"General Product Safety Regulation\",\"Product Liability Directive\",\"Cybersecurity Act\",\"Open Data Directive\",\"EHDS\"]},\"scope_status\":{\"type\":\"string\",\"enum\":[\"in_scope\",\"out_of_scope\",\"conditional\",\"pending\"]},\"owner\":{\"type\":\"string\"},\"basis\":{\"type\":\"string\"},\"jurisdictions\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"affected_services\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"evidence_uri\":{\"type\":\"string\"},\"decided_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"next_review_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "compliance",
+    "topic": "compliance.scope.decisions",
+    "regulation": "DGA,DataAct,NIS2,DORA,CRA,GDPR,ePrivacy,AIAct,product"
+  },
+  "name": "Compliance Scope Decision"
+}

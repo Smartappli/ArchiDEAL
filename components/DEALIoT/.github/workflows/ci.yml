@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  cross-platform-python-tests:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Unit test suite
+        run: python -m unittest discover -s tests/unit -p "test_*.py" -v
+
+  lint-and-validate:
+    name: Lint & Validate Repository Assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      AIRFLOW_FERNET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-fernet
+      AIRFLOW_API_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-api
+      AIRFLOW_JWT_SECRET: ${{ github.run_id }}-${{ github.run_attempt }}-jwt
+      AIRFLOW_ADMIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-airflow-admin
+      AIRFLOW_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-airflow-db
+      VERNEMQ_ADMIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-vernemq-admin
+      VERNEMQ_DISTRIBUTED_COOKIE: ${{ github.run_id }}-${{ github.run_attempt }}-vernemq-cookie
+      SEAWEEDFS_S3_ACCESS_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-s3-access
+      SEAWEEDFS_S3_SECRET_KEY: ${{ github.run_id }}-${{ github.run_attempt }}-seaweedfs-s3
+      GRAFANA_ADMIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-grafana-admin
+      ACME_EMAIL: "ci@example.com"
+      STORAGE_BASE_DOMAIN: "local.test"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990
+
+      - name: Install Rust bridge system dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake pkg-config libssl-dev libsasl2-dev libcurl4-openssl-dev
+
+      - name: Pre-commit checks
+        run: uvx pre-commit run --all-files --show-diff-on-failure
+
+      - name: JSON syntax validation
+        run: |
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          failures = []
+          for path in Path('.').rglob('*.json'):
+            if '.git' in path.parts:
+              continue
+            try:
+              json.loads(path.read_text(encoding='utf-8'))
+            except Exception as exc:
+              failures.append(f"{path}: {exc}")
+
+          if failures:
+            raise SystemExit("\n".join(failures))
+
+          print("All JSON files are syntactically valid.")
+          PY
+
+      - name: Python syntax validation
+        run: uv run python -m compileall -q airflow/dags mqtt-kafka-bridge pipelines flink/jobs
+
+      - name: Rust bridge checks
+        run: |
+          rustup component add clippy
+          cargo fmt --check --all
+          cargo clippy --workspace --locked -- -D warnings
+          cargo test --workspace --locked
+          cargo check --workspace --locked
+
+      - name: Unit test suite
+        run: uv run python -m unittest discover -s tests/unit -p "test_*.py" -v
+
+      - name: Integration test suite
+        run: uv run python -m unittest -v tests/integration/test_platform_integration.py
+
+      - name: Deployment test suite
+        run: uv run --with PyYAML python -m unittest -v tests/deployment/test_deployment_readiness.py
+
+      - name: Application smoke test suite
+        run: uv run python -m unittest -v tests/test_application_smoke.py
+
+      - name: Compose file validation
+        run: docker compose -f docker-compose.yml config -q

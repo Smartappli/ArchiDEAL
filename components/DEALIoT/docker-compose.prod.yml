@@ -1,0 +1,69 @@
+# Production-like local validation overlay.
+# This is still Docker Compose, not a multi-host production deployment.
+
+x-prod-logging: &prod-logging
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "10"
+
+x-prod-resources-small: &prod-resources-small
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 1g
+
+x-prod-resources-medium: &prod-resources-medium
+  deploy:
+    resources:
+      limits:
+        cpus: "2.0"
+        memory: 3g
+
+services:
+  seaweedfs-edge:
+    logging: *prod-logging
+    ports:
+      - "80:80"
+      - "443:443"
+
+  mqtt-kafka-bridge:
+    <<: *prod-resources-small
+    logging: *prod-logging
+    environment:
+      LOG_LEVEL: "INFO"
+
+  airflow-apiserver:
+    <<: *prod-resources-medium
+    logging: *prod-logging
+
+  airflow-scheduler:
+    <<: *prod-resources-medium
+    logging: *prod-logging
+
+  airflow-worker:
+    <<: *prod-resources-medium
+    logging: *prod-logging
+
+  management-console:
+    <<: *prod-resources-small
+    logging: *prod-logging
+
+  flink-jobmanager:
+    <<: *prod-resources-medium
+    logging: *prod-logging
+    environment:
+      KAFKA_AUTO_OFFSET_RESET: "latest"
+
+  flink-taskmanager-1:
+    <<: *prod-resources-medium
+    logging: *prod-logging
+
+  flink-taskmanager-2:
+    <<: *prod-resources-medium
+    logging: *prod-logging
+
+  kafka-connect:
+    <<: *prod-resources-medium
+    logging: *prod-logging

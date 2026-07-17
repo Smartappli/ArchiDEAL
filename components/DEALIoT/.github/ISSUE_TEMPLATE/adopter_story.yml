@@ -1,0 +1,41 @@
+name: Adopter story
+description: Propose an approved public reference or sanitized case study.
+title: "Adopter story: "
+labels: ["adoption", "case-study"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only submit information approved for public use. Do not include confidential data.
+  - type: input
+    id: organization
+    attributes:
+      label: Organization or project name
+      description: Use "private reference" if the name cannot be public.
+    validations:
+      required: true
+  - type: textarea
+    id: approval
+    attributes:
+      label: Publication approval
+      description: Identify who approved this public reference and any limits.
+    validations:
+      required: true
+  - type: dropdown
+    id: components
+    attributes:
+      label: Components used
+      multiple: true
+      options:
+        - DEALIoT
+        - DealHost
+        - DealData
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome or lesson
+      description: Provide measurable outcome, operational lesson, or adoption blocker.
+    validations:
+      required: true

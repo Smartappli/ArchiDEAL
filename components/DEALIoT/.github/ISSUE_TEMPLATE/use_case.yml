@@ -1,0 +1,53 @@
+name: Use case proposal
+description: Propose a concrete DEALIoT, DealHost, or DealData scenario for adoption work.
+title: "Use case: "
+labels: ["adoption", "use-case"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when a scenario could become a demo, pilot, partner integration, documentation example, or public launch story.
+  - type: dropdown
+    id: primary_track
+    attributes:
+      label: Primary track
+      options:
+        - Livestock telemetry
+        - WildFi decoding
+        - Precision agriculture
+        - Industrial IoT hardening
+        - Research publication
+        - Data sharing readiness
+        - Managed hosting
+        - Device or platform integration
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: user_problem
+    attributes:
+      label: User problem
+      description: Describe the operational or research decision this scenario should improve.
+    validations:
+      required: true
+  - type: textarea
+    id: data_path
+    attributes:
+      label: Data path
+      description: List the input data, expected event contract, processing step, and output.
+    validations:
+      required: true
+  - type: textarea
+    id: proof
+    attributes:
+      label: Public proof that could be produced
+      description: Identify screenshots, fixtures, docs, dashboards, scorecards, or approved stories this use case could generate.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and sensitive data
+      description: Note privacy, deployment, compliance, or partner constraints before any public material is created.
+    validations:
+      required: false

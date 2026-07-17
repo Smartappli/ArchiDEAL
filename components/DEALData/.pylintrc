@@ -1,0 +1,23 @@
+[MASTER]
+load-plugins=pylint_django
+django-settings-module=dealdata_common.pylint_settings
+ignore-paths=.*[\\/]migrations[\\/].*
+source-roots=.,core_layer,gps_layer,sensor_layer
+
+[MESSAGES CONTROL]
+disable=
+    abstract-method,
+    arguments-differ,
+    access-member-before-definition,
+    duplicate-code,
+    invalid-name,
+    line-too-long,
+    missing-class-docstring,
+    missing-function-docstring,
+    missing-module-docstring,
+    no-member,
+    no-name-in-module,
+    too-few-public-methods,
+    unsubscriptable-object,
+    wrong-import-position,
+    too-many-arguments

@@ -1,0 +1,20 @@
+{
+  "identities": [
+    {
+      "actions": [
+        "Admin",
+        "Read",
+        "Write",
+        "List",
+        "Tagging"
+      ],
+      "credentials": [
+        {
+          "accessKey": "$$ACCESS_KEY",
+          "secretKey": "$$SECRET_KEY"
+        }
+      ],
+      "name": "app"
+    }
+  ]
+}

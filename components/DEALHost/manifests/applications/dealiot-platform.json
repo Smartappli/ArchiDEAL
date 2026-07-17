@@ -1,0 +1,18 @@
+{
+  "name": "DEALIoT",
+  "slug": "dealiot",
+  "description": "Plateforme IoT edge-to-cloud Smartappli exposee et suivie par DEALHost.",
+  "module_slugs": [
+    "dealiot-platform",
+    "mqtt-kafka-bridge",
+    "schema-registry-contracts",
+    "flink-runtime",
+    "beam-runtime",
+    "airflow-orchestration",
+    "wildfi-decoder",
+    "observability"
+  ],
+  "version": "0.1.0",
+  "version_notes": "ArchiDEAL monorepo hosting integration contract for DEALIoT",
+  "enabled": true
+}

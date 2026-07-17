@@ -1,0 +1,8 @@
+﻿# Default ownership keeps reviews routed until area-specific maintainers exist.
+* @Smartappli
+
+/core_layer/ @Smartappli
+/gps_layer/ @Smartappli
+/sensor_layer/ @Smartappli
+/dealdata_common/ @Smartappli
+/.github/ @Smartappli

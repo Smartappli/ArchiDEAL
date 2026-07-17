@@ -1,0 +1,17 @@
+{
+  "artifactId": "governance.data_management_plans",
+  "artifactType": "JSON",
+  "firstVersion": {
+    "content": {
+      "content": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"GovernanceDataManagementPlan\",\"type\":\"object\",\"required\":[\"dmp_id\",\"project_id\",\"owner\",\"version\",\"status\",\"created_at\",\"updated_at\"],\"properties\":{\"dmp_id\":{\"type\":\"string\"},\"project_id\":{\"type\":\"string\"},\"owner\":{\"type\":\"string\"},\"version\":{\"type\":\"string\"},\"status\":{\"type\":\"string\",\"enum\":[\"draft\",\"approved\",\"active\",\"needs_review\",\"retired\"]},\"datasets\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"fair_principles\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"metadata_standard\":{\"type\":\"string\"},\"legal_basis\":{\"type\":\"string\"},\"ethics_review_status\":{\"type\":\"string\",\"enum\":[\"not_required\",\"pending\",\"approved\",\"rejected\",\"expired\"]},\"access_policy\":{\"type\":\"string\"},\"sharing_policy\":{\"type\":\"string\"},\"retention_policy\":{\"type\":\"string\"},\"preservation_plan\":{\"type\":\"string\"},\"security_controls\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"roles_and_responsibilities\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"cost_owner\":{\"type\":\"string\"},\"review_due_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"created_at\":{\"type\":\"string\",\"format\":\"date-time\"},\"updated_at\":{\"type\":\"string\",\"format\":\"date-time\"}},\"additionalProperties\":false}",
+      "contentType": "application/json"
+    },
+    "version": "1.0.0"
+  },
+  "labels": {
+    "domain": "governance",
+    "topic": "governance.data_management_plans",
+    "regulation": "DGA,Data Act,GDPR"
+  },
+  "name": "Governance Data Management Plan"
+}

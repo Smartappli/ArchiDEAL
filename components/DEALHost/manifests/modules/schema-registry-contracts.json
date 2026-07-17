@@ -1,0 +1,21 @@
+{
+  "name": "DEALIoT Schema Registry Contracts",
+  "slug": "schema-registry-contracts",
+  "image": "apicurio/apicurio-registry:3.3.0",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALIoT/apicurio",
+  "deployment_target": "kubernetes",
+  "public_path": "/dealiot/apicurio",
+  "upstream_host": "apicurio-registry",
+  "upstream_port": 8080,
+  "healthcheck_path": "/health",
+  "contract_topics": [
+    "raw.sensor",
+    "raw.gps",
+    "media.object.events",
+    "dlq.events"
+  ],
+  "enabled": true
+}

@@ -1,0 +1,22 @@
+{
+  "name": "DEALIoT Flink Runtime",
+  "slug": "flink-runtime",
+  "image": "ghcr.io/smartappli/dealiot-flink-pyflink:local-placeholder",
+  "branch": "main",
+  "repository_owner": "Smartappli",
+  "repository_name": "ArchiDEAL",
+  "source_path": "components/DEALIoT/pipelines",
+  "deployment_target": "kubernetes",
+  "public_path": "/dealiot/flink",
+  "upstream_host": "flink-jobmanager",
+  "upstream_port": 8081,
+  "contract_topics": [
+    "raw.sensor",
+    "raw.gps",
+    "features.events",
+    "state.latest",
+    "dlq.events"
+  ],
+  "production_ready": false,
+  "enabled": true
+}

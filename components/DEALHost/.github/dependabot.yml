@@ -1,0 +1,137 @@
+version: 2
+
+# Dependabot covers standard manifests in this repository.
+# Renovate is kept for non-standard integration manifests such as manifests/modules/*.json.
+# Smartappli source dependencies are pinned in manifests/repositories/*.json.
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Brussels"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "dependabot", "python", "runtime", "runtime-risk"]
+    commit-message:
+      prefix: "deps(python-runtime)"
+    groups:
+      python-runtime:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      python-runtime-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/sdk/python"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:30"
+      timezone: "Europe/Brussels"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "dependabot", "python", "sdk"]
+    commit-message:
+      prefix: "deps(python-sdk)"
+    groups:
+      python-sdk:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      python-sdk-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+
+  - package-ecosystem: "cargo"
+    directory: "/sdk/rust/dealhost-sdk"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+      timezone: "Europe/Brussels"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "dependabot", "rust", "sdk"]
+    commit-message:
+      prefix: "deps(rust-sdk)"
+    groups:
+      rust-sdk:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      rust-sdk-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+
+  - package-ecosystem: "gomod"
+    directory: "/sdk/go/dealhost-sdk"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:30"
+      timezone: "Europe/Brussels"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "dependabot", "go", "sdk"]
+    commit-message:
+      prefix: "deps(go-sdk)"
+    groups:
+      go-sdk:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      go-sdk-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "Europe/Brussels"
+    open-pull-requests-limit: 2
+    labels: ["dependencies", "dependabot", "docker-compose", "runtime-risk"]
+    commit-message:
+      prefix: "deps(compose)"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:30"
+      timezone: "Europe/Brussels"
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "dependabot", "github-actions", "ci", "runtime-risk"]
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      github-actions:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      github-actions-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"

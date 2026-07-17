@@ -1,0 +1,99 @@
+name: Build & Push Docker Images
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  WILDFI_DECODER_GIT_REF: b4002eb9a6111de140b95e5a35c3f3bd552d51be
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image_name: orchestration
+            context: .
+            dockerfile: ./orchestration/Dockerfile
+          - image_name: mqtt-kafka-bridge
+            context: .
+            dockerfile: ./mqtt-kafka-bridge/Dockerfile
+          - image_name: stream-normalizer
+            context: .
+            dockerfile: ./stream-normalizer/Dockerfile
+          - image_name: management-console
+            context: .
+            dockerfile: ./management-console/Dockerfile
+          - image_name: flink-pyflink
+            context: .
+            dockerfile: ./flink/Dockerfile.pyflink
+          - image_name: beam-python-runtime
+            context: .
+            dockerfile: ./beam/Dockerfile.python-runtime
+          - image_name: beam-jobserver
+            context: ./beam
+            dockerfile: ./beam/Dockerfile.jobserver
+          - image_name: beam-python-harness
+            context: ./beam
+            dockerfile: ./beam/Dockerfile.python-harness
+          - image_name: wildfi-decoder
+            context: .
+            dockerfile: ./wildfi-decoder/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Docker Buildx
+        run: |
+          docker buildx create --name dealiot-builder --use || docker buildx use dealiot-builder
+          docker buildx inspect --bootstrap
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Build and push ${{ matrix.image_name }}
+        run: |
+          OWNER_LC="${GITHUB_REPOSITORY_OWNER,,}"
+          IMAGE="ghcr.io/${OWNER_LC}/dealiot-${{ matrix.image_name }}"
+          TAGS=("--tag" "${IMAGE}:sha-${GITHUB_SHA}")
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAGS+=("--tag" "${IMAGE}:${GITHUB_REF#refs/tags/}")
+          fi
+          BUILD_ARGS=()
+          if [ "${{ matrix.image_name }}" = "wildfi-decoder" ]; then
+            BUILD_ARGS+=("--build-arg" "WILDFI_DECODER_GIT_REF=${WILDFI_DECODER_GIT_REF}")
+          fi
+          docker buildx build \
+            --push \
+            --sbom=true \
+            --provenance=true \
+            --metadata-file "${RUNNER_TEMP}/build-metadata.json" \
+            "${TAGS[@]}" \
+            "${BUILD_ARGS[@]}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --file "${{ matrix.dockerfile }}" \
+            "${{ matrix.context }}"
+          DIGEST="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/build-metadata.json")"
+          test -n "${DIGEST}"
+          test "${DIGEST}" != "null"
+          cosign sign --yes "${IMAGE}@${DIGEST}"
