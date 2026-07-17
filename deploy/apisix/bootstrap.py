@@ -30,7 +30,7 @@ def request(path: str, *, method: str = "GET", payload: dict | None = None) -> i
 def wait_for_admin_api() -> None:
     for attempt in range(60):
         try:
-            request("/apisix/admin/routes?page=1&page_size=1")
+            request("/apisix/admin/routes?page=1&page_size=10")
             return
         except (HTTPError, URLError, TimeoutError, ConnectionError):
             if attempt == 59:
