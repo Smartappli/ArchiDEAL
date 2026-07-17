@@ -2,7 +2,7 @@
 
 ArchiDEAL is the integration monorepo for the operational DEAL suite. It contains coordinated
 snapshots of DEALIoT, DEALHost, DEALData, and DEALInterface, plus one root-level development stack
-that exercises their real communication contracts. DEALWebsite is intentionally not included.
+that exercises their real communication contracts.
 
 > **Status:** the root Compose stack is for development and cross-repository integration testing.
 > It is not a production topology: Kafka and MQTT are single-node/plaintext, DEALHost uses SQLite,
