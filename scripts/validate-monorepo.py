@@ -34,6 +34,27 @@ def networks(service: dict) -> set[str]:
     return set(configured)
 
 
+def volume_targets(service: dict) -> set[str]:
+    targets = set()
+    for volume in service.get("volumes", []):
+        if isinstance(volume, dict):
+            target = volume.get("target")
+        else:
+            parts = str(volume).split(":")
+            target = parts[1] if len(parts) > 1 else parts[0]
+        if target:
+            targets.add(target)
+    return targets
+
+
+def reject_legacy_postgres_18_mounts(path: Path) -> None:
+    compose = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for service_name, service in compose.get("services", {}).items():
+        if str(service.get("image", "")).startswith("postgres:18"):
+            if "/var/lib/postgresql/data" in volume_targets(service):
+                fail(f"{path}: {service_name} uses the pre-PostgreSQL 18 data mount")
+
+
 def validate_sources() -> None:
     lock = json.loads((ROOT / "sources.lock.json").read_text(encoding="utf-8"))
     components = lock.get("components", {})
@@ -87,6 +108,15 @@ def validate_compose() -> None:
     missing = required - set(services)
     if missing:
         fail(f"missing integration services: {sorted(missing)}")
+
+    reject_legacy_postgres_18_mounts(ROOT / "compose.yaml")
+    for service_name in (
+        "dealdata-core-db",
+        "dealdata-gps-db",
+        "dealdata-sensor-db",
+    ):
+        if "/var/lib/postgresql" not in volume_targets(services[service_name]):
+            fail(f"{service_name} must persist the PostgreSQL 18 cluster root")
 
     published = {name for name, service in services.items() if service.get("ports")}
     if published != {"apisix"}:
@@ -182,6 +212,9 @@ def validate_gateway() -> None:
 
 
 def validate_component_compatibility() -> None:
+    reject_legacy_postgres_18_mounts(ROOT / "components/DEALData/docker-compose.yml")
+    reject_legacy_postgres_18_mounts(ROOT / "components/DEALIoT/docker-compose.yml")
+
     repository_manifests = sorted(
         (ROOT / "components/DEALHost/manifests/repositories").glob("*.json"),
     )

@@ -115,7 +115,7 @@ services:
       POSTGRES_USER: dealdata
       POSTGRES_PASSWORD: ${CORE_DATABASE_PASSWORD:?set CORE_DATABASE_PASSWORD}
     volumes:
-      - dealdata-core-db:/var/lib/postgresql/data
+      - dealdata-core-db:/var/lib/postgresql
     networks:
       - data
     healthcheck:
@@ -132,7 +132,7 @@ services:
       POSTGRES_USER: dealdata
       POSTGRES_PASSWORD: ${GPS_DATABASE_PASSWORD:?set GPS_DATABASE_PASSWORD}
     volumes:
-      - dealdata-gps-db:/var/lib/postgresql/data
+      - dealdata-gps-db:/var/lib/postgresql
     networks:
       - data
     healthcheck:
@@ -149,7 +149,7 @@ services:
       POSTGRES_USER: dealdata
       POSTGRES_PASSWORD: ${SENSOR_DATABASE_PASSWORD:?set SENSOR_DATABASE_PASSWORD}
     volumes:
-      - dealdata-sensor-db:/var/lib/postgresql/data
+      - dealdata-sensor-db:/var/lib/postgresql
     networks:
       - data
     healthcheck:

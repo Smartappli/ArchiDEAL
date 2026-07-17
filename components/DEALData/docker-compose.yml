@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: dealdata
       POSTGRES_PASSWORD: ${CORE_DATABASE_PASSWORD:?set CORE_DATABASE_PASSWORD}
     volumes:
-      - core-db-data:/var/lib/postgresql/data
+      - core-db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_core"]
       interval: 10s
@@ -20,7 +20,7 @@ services:
       POSTGRES_USER: dealdata
       POSTGRES_PASSWORD: ${GPS_DATABASE_PASSWORD:?set GPS_DATABASE_PASSWORD}
     volumes:
-      - gps-db-data:/var/lib/postgresql/data
+      - gps-db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_gps"]
       interval: 10s
@@ -34,7 +34,7 @@ services:
       POSTGRES_USER: dealdata
       POSTGRES_PASSWORD: ${SENSOR_DATABASE_PASSWORD:?set SENSOR_DATABASE_PASSWORD}
     volumes:
-      - sensor-db-data:/var/lib/postgresql/data
+      - sensor-db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dealdata -d dealdata_sensor"]
       interval: 10s

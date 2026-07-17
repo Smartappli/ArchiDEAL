@@ -1533,7 +1533,7 @@ services:
       POSTGRES_PASSWORD: "${AIRFLOW_DB_PASSWORD:?define AIRFLOW_DB_PASSWORD in .env}"
       POSTGRES_DB: airflow
     volumes:
-      - airflow_postgres_data:/var/lib/postgresql/data
+      - airflow_postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
       interval: 10s
