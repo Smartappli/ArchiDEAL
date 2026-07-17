@@ -58,11 +58,12 @@ def health_checks(base_url: str) -> None:
         for item in health.get("checks", [])
         if isinstance(item, dict)
     }
-    for dependency in ("kafka", "mqtt"):
+    dependencies = {"kafka": "Kafka", "vernemq": "MQTT"}
+    for dependency, label in dependencies.items():
         check = checks.get(dependency)
         if not check or check.get("status") != "healthy":
-            raise RuntimeError(f"DEALIoT cannot reach {dependency}: {check}")
-        print(f"ok: DEALIoT reaches {dependency}")
+            raise RuntimeError(f"DEALIoT cannot reach {label}: {check}")
+        print(f"ok: DEALIoT reaches {label}")
 
 
 def event_count(base_url: str, layer: str, device_id: str) -> int:
