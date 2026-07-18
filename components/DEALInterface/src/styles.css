@@ -285,13 +285,13 @@ h2 {
   letter-spacing: -0.055em;
 }
 
-h1 {
+.hero__content h1 {
   position: relative;
   z-index: 1;
   max-width: 58rem;
   margin-bottom: 1.1rem;
-  font-size: clamp(3rem, 7vw, 6.7rem);
-  line-height: 0.86;
+  font-size: clamp(2.75rem, 4.5vw, 5rem);
+  line-height: 0.95;
 }
 
 .hero__content p {
@@ -351,7 +351,7 @@ h1 {
 .hero-console strong {
   margin: 0.5rem 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(4rem, 9vw, 7rem);
+  font-size: clamp(3rem, 5.5vw, 5rem);
   line-height: 1;
 }
 
@@ -1302,8 +1302,8 @@ h1 {
     padding: 1.4rem;
   }
 
-  h1 {
-    font-size: clamp(2.65rem, 18vw, 4.4rem);
+  .hero__content h1 {
+    font-size: clamp(2.35rem, 12vw, 3.5rem);
   }
 
   .module-nav__item:hover,
