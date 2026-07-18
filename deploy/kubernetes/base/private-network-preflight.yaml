@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: network-preflight-${RELEASE_ID}
+  labels:
+    app.kubernetes.io/name: private-network-preflight
+    app.kubernetes.io/component: preflight
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: private-network-preflight
+        app.kubernetes.io/component: preflight
+        app.kubernetes.io/part-of: archideal
+        archideal.io/release: "${RELEASE_ID}"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      serviceAccountName: archideal-preflight
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: private-network-preflight
+          image: "${IMAGE_APISIX_BOOTSTRAP}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/bootstrap/private_network_preflight.py"]
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "${KAFKA_BOOTSTRAP_SERVERS}"
+            - name: KAFKA_EGRESS_CIDR
+              value: "${KAFKA_EGRESS_CIDR}"
+            - name: MQTT_HOST
+              value: "${MQTT_HOST}"
+            - name: MQTT_EGRESS_CIDR
+              value: "${MQTT_EGRESS_CIDR}"
+            - name: POSTGRES_METADATA_HOST
+              value: "${POSTGRES_METADATA_HOST}"
+            - name: POSTGRES_METADATA_EGRESS_CIDR
+              value: "${POSTGRES_METADATA_EGRESS_CIDR}"
+            - name: POSTGRES_DATA_HOST
+              value: "${POSTGRES_DATA_HOST}"
+            - name: POSTGRES_DATA_EGRESS_CIDR
+              value: "${POSTGRES_DATA_EGRESS_CIDR}"
+            - name: VALKEY_HOST
+              value: "${VALKEY_HOST}"
+            - name: VALKEY_EGRESS_CIDR
+              value: "${VALKEY_EGRESS_CIDR}"
+            - name: ETCD_ENDPOINT_1
+              value: "${ETCD_ENDPOINT_1}"
+            - name: ETCD_ENDPOINT_2
+              value: "${ETCD_ENDPOINT_2}"
+            - name: ETCD_ENDPOINT_3
+              value: "${ETCD_ENDPOINT_3}"
+            - name: ETCD_EGRESS_CIDR
+              value: "${ETCD_EGRESS_CIDR}"
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001

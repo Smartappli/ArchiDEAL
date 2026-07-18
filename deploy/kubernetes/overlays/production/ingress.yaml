@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: archideal
+  labels:
+    app.kubernetes.io/name: archideal-edge
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+  annotations:
+    archideal.io/release: "${RELEASE_ID}"
+    cert-manager.io/cluster-issuer: "${CLUSTER_ISSUER}"
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/hsts: "true"
+    nginx.ingress.kubernetes.io/hsts-include-subdomains: "true"
+    nginx.ingress.kubernetes.io/hsts-max-age: "31536000"
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+spec:
+  ingressClassName: "${INGRESS_CLASS}"
+  tls:
+    - hosts:
+        - "${PUBLIC_HOST}"
+      secretName: "${TLS_SECRET_NAME}"
+  rules:
+    - host: "${PUBLIC_HOST}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  name: http

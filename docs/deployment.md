@@ -54,21 +54,136 @@ Run component tests, root validation and the end-to-end smoke test before creati
 Nested `.github/workflows` files under `components/` are retained as provenance but are not executed
 by GitHub; root workflows are authoritative.
 
-## Production gates
+The authoritative `Release images` workflow assembles a signed record for all eight first-party
+images and the two approved upstream images. Configure its four non-secret upstream repository
+variables, evidence contract and retention procedure as described in
+[supply-chain.md](supply-chain.md). Do not construct a production release manifest by hand.
 
-The root Compose file must not be deployed as production without a reviewed production overlay.
-At minimum, that overlay must provide:
+## Production deployment
 
-- multi-node Kafka and MQTT with TLS, SASL/authentication and least-privilege ACLs;
-- TLS termination, trusted forwarded headers and an explicit public route policy;
-- OIDC Authorization Code with PKCE or a backend-for-frontend for DEALInterface;
-- PostgreSQL for DEALHost and managed/HA PostgreSQL for DEALData;
-- a secret manager, rotation procedure and no plaintext environment secrets;
-- APISIX Admin API network allowlisting and preferably mTLS;
-- persistent-volume backups plus tested restore procedures;
-- full dependency-aware readiness, metrics, logs and traces;
-- immutable images and software-bill-of-materials/provenance checks;
-- the complete DEALIoT processing, schema, storage and observability services required by the use case.
+Production is Kubernetes-only and the supported image profile is Linux/amd64. Every Pod is pinned
+to that architecture. The application, Ingress and monitoring namespaces must be distinct trust
+boundaries. Dependency and Pod ranges must be non-overlapping RFC1918 networks; the trusted-proxy
+range must also use RFC1918 addressing. Kafka, MQTT, the two PostgreSQL trust zones, Valkey and
+etcd use separate destination CIDRs so one workload receives only the egress path it needs.
 
-The full deployment is supported only when the cross-component smoke test also passes against the
-production topology.
+Install Git, Cosign, Python 3.12+ and kubectl on the promotion host. Copy
+`deploy/kubernetes/values.example.yaml` outside the repository, replace every example endpoint, and
+copy its `releaseId` into `RELEASE_ID` and its ten image references exactly from one signed GitHub
+Release manifest. Download and extract
+that release's `release-evidence.tar.gz` as shown in [supply-chain.md](supply-chain.md), then use the
+ordered deployer. It verifies the Sigstore release bundle, evidence hashes/content, repository
+allowlist, eight first-party signatures and attestations before it renders or calls kubectl. It then
+performs client-side and server-side admission checks, waits for secrets and the Kafka contract,
+runs migrations, rolls out every controller, bootstraps APISIX, and only then promotes the public
+Ingress and runs an authenticated smoke check:
+
+Before the first promotion, label the actual Prometheus scraper Pods with
+`monitoring.archideal.io/scraper=true`. The deployer requires at least one Ready scraper and Ready,
+schedulable Linux/amd64 nodes across three `topology.kubernetes.io/zone` values before it mutates
+the cluster. NetworkPolicies grant that labelled scraper only the dedicated metrics ports; the
+DEALData application APIs remain reachable solely through APISIX.
+
+The configured IngressClass must be served by ingress-nginx Pods in `INGRESS_NAMESPACE`. Their Pod
+templates must retain the standard `app.kubernetes.io/name=ingress-nginx` and
+`app.kubernetes.io/component=controller` labels, and their effective `--controller-class` and
+`--ingress-class` arguments must match the configured IngressClass. Before any cluster mutation,
+the deployer requires at least one such Running/Ready non-`hostNetwork` controller and verifies
+that every Ready matching controller Pod IP is contained in `INGRESS_PROXY_CIDR`. oauth2-proxy
+accepts ingress only from Pods satisfying that same namespace-and-label identity; choose the proxy
+CIDR to cover those controller Pod IPs, not a broad node or VPC range.
+
+Before it applies or updates any NetworkPolicy, the deployer launches a new invocation-scoped DNS
+preflight from the `archideal` namespace. Every address returned inside the cluster for all Kafka
+brokers, MQTT, metadata PostgreSQL, data PostgreSQL, Valkey and all three etcd endpoints must be
+inside that dependency's dedicated CIDR. Empty, mixed in-range/out-of-range and uncovered
+dual-stack answers stop promotion. This Job receives no Secret or service-account token and logs no
+resolved address. This protects both the first deployment and upgrades from installing policies
+that do not match the cluster's actual DNS view.
+
+```bash
+make production-deploy \
+  PRODUCTION_VALUES=/secure/config/archideal-production-values.yaml \
+  KUBE_CONTEXT=archideal-production \
+  ARCHIDEAL_BEARER_TOKEN_FILE=/secure/runtime/archideal-token \
+  PRODUCTION_RELEASE_MANIFEST=/secure/releases/release-1/release-manifest.json \
+  PRODUCTION_RELEASE_BUNDLE=/secure/releases/release-1/release-manifest.sigstore.json \
+  PRODUCTION_RELEASE_EVIDENCE_DIR=/secure/releases/release-1
+```
+
+Never deploy the production bundle with one monolithic `kubectl apply`: Jobs and serving workloads
+would no longer be ordered. When an ArchiDEAL Ingress already exists, the deployer also requires
+`APPROVE_LIVE_UPGRADE=1`; set it only after confirming that all migrations follow the
+expand/contract pattern and remain compatible with the active release. Before its first mutation,
+the deployer also requires all eleven controller templates and every Ready serving Pod to carry one
+unanimous `archideal.io/release`, matching the active Ingress. Mixed, unavailable or partially
+observed releases fail before the cluster is changed.
+
+Promotion is fail-closed after the first mutation. An `EXIT` fence preserves the original failure
+code, deletes `ingress/archideal`, waits for its removal even when the failure happens during the
+public smoke, and records `failed`, the attempted release and the validated previous release on the
+`archideal` Namespace. It prints the exact `make production-rollback` shape to use with archived
+artifacts. It never silently re-exposes the previous Pods: public traffic resumes only after the
+previous signed release has passed the complete ordered deploy and fresh smoke gates. A successful
+promotion revalidates all eleven serving controllers, then records a coherent `succeeded` state on
+both the Namespace and Ingress.
+
+The renderer fails on mutable images, unapproved image repositories, example endpoints, incomplete HA dependencies, non-HTTPS
+OIDC/etcd/telemetry endpoints, wildcard access groups and public dependency CIDRs. Secret values are
+never accepted by the values file; they are extracted from the configured `ClusterSecretStore`.
+
+The deployer runs the full production smoke gate with the short-lived OIDC bearer token stored in
+the file above. After the runtime `ExternalSecret` is Ready, it copies
+`dealdata-ingest-token` into a mode-0600 temporary file and removes it through the deployer's
+cleanup trap. The gate proves the authenticated DEALHost business API is reachable, anonymous
+access is rejected without following a login redirect, and an unsigned anonymous GitHub webhook
+is rejected with HTTP 401 by DEALHost. It then creates one unique GPS event and one unique sensor
+event through the public edge, replays both, and requires HTTP 201 then HTTP 200 with exactly one
+stored event per layer.
+
+The final gate also runs an invocation-scoped MQTT TLS synthetic with the dedicated
+`mqtt/smoke-username` and `mqtt/smoke-password` secrets. This broker account must have
+publish-only ACLs for the `devices/archideal-smoke-*` GPS and sensor topics, without subscribe or
+administrative rights. The public verification then waits for exactly one GPS and one sensor row
+after MQTT, the Rust bridge, Kafka and both DEALData consumers; the GPS message is published twice
+to prove end-to-end idempotence. Each deploy invocation specializes the private-DNS preflight,
+Kafka contract preflight, APISIX bootstrap and MQTT synthetic templates with fresh Kubernetes Job
+names. It also derives a fresh MQTT device and message identity, so retrying or rolling back with
+the same `RELEASE_ID` cannot reuse a Complete Job or database rows from an earlier gate.
+
+The same full gate can be repeated independently against the active release. The command creates a
+new MQTT Job, verifies MQTT -> bridge -> Kafka -> consumers -> PostgreSQL through authenticated
+OIDC queries, and also repeats the direct API idempotence checks. Both credentials must be supplied
+as file paths; never put their values on the command line:
+
+```bash
+make production-smoke \
+  PRODUCTION_VALUES=/secure/runtime/production-values.yaml \
+  KUBE_CONTEXT=production-eu \
+  ARCHIDEAL_BEARER_TOKEN_FILE=/secure/runtime/archideal-token \
+  ARCHIDEAL_INGEST_TOKEN_FILE=/secure/runtime/dealdata-ingest-token
+```
+
+To roll back, select the artifacts of the `archideal.io/previous-release` recorded by the failed or
+last successful promotion. Create a clean, detached source worktree at that manifest's signed Git
+revision—the verifier rejects a different or dirty checkout. Review that the existing expanded
+schema remains compatible with that application release, then run the target release's wrapper:
+
+```bash
+make -C /secure/releases/release-previous/source production-rollback \
+  KUBE_CONTEXT=production-eu \
+  ROLLBACK_VALUES=/secure/releases/release-previous/values.yaml \
+  ROLLBACK_RELEASE_MANIFEST=/secure/releases/release-previous/release-manifest.json \
+  ROLLBACK_RELEASE_BUNDLE=/secure/releases/release-previous/release-manifest.sigstore.json \
+  ROLLBACK_RELEASE_EVIDENCE_DIR=/secure/releases/release-previous \
+  ARCHIDEAL_BEARER_TOKEN_FILE=/secure/runtime/archideal-token \
+  APPROVE_SCHEMA_COMPATIBLE_ROLLBACK=1
+```
+
+The wrapper requires the rollback target to equal the recorded previous release, then reuses the
+same signed-release verifier, ordered deployer, invocation-fresh APISIX/MQTT Jobs and complete
+smoke. It does not call reverse migrations, `pg_restore`, or any destructive schema operation.
+
+Deployment mechanics do not by themselves authorize a go-live. Record every security, resilience,
+backup, restore and SLO result in [production-readiness.md](production-readiness.md). See the
+backup/restore and disaster-recovery runbooks before the first promotion.

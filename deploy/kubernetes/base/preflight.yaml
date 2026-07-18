@@ -1,0 +1,92 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-preflight-${RELEASE_ID}
+  labels:
+    app.kubernetes.io/name: kafka-preflight
+    app.kubernetes.io/component: preflight
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka-preflight
+        app.kubernetes.io/component: preflight
+        app.kubernetes.io/part-of: archideal
+        archideal.io/release: "${RELEASE_ID}"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      serviceAccountName: archideal-migrations
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kafka-preflight
+          image: "${IMAGE_DEALDATA_GPS}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "dealdata_common.kafka_preflight"]
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: KAFKA_PREFLIGHT_TOPICS
+              value: >-
+                raw.sensor,raw.gps,raw.image2d.meta,raw.image3d.meta,
+                raw.video2d.meta,raw.video3d.meta,dlq.events
+            - name: KAFKA_PREFLIGHT_MIN_PARTITIONS
+              value: "3"
+            - name: KAFKA_PREFLIGHT_MIN_REPLICATION_FACTOR
+              value: "3"
+            - name: KAFKA_PREFLIGHT_MIN_IN_SYNC_REPLICAS
+              value: "2"
+            - name: DEALDATA_KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: kafka-consumer-username
+            - name: DEALDATA_KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: kafka-consumer-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: kafka-ca.crt
+                path: kafka-ca.crt
+        - name: tmp
+          emptyDir: {}

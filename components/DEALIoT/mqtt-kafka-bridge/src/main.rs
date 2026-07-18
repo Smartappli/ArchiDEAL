@@ -3,20 +3,170 @@ use log::{error, info, warn};
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
-use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
+use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, SubAck, SubscribeReasonCode};
 use std::fs;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tiny_http::{Header, Response, Server, StatusCode};
+
+const KAFKA_DELIVERY_BUCKETS: [(u64, &str); 11] = [
+    (5_000, "0.005"),
+    (10_000, "0.01"),
+    (25_000, "0.025"),
+    (50_000, "0.05"),
+    (100_000, "0.1"),
+    (250_000, "0.25"),
+    (500_000, "0.5"),
+    (1_000_000, "1"),
+    (2_500_000, "2.5"),
+    (5_000_000, "5"),
+    (10_000_000, "10"),
+];
+const KAFKA_METADATA_TIMEOUT: Duration = Duration::from_secs(5);
+const KAFKA_HEALTH_INTERVAL: Duration = Duration::from_secs(15);
+const KAFKA_QUEUE_TIMEOUT: Duration = Duration::from_secs(5);
+const KAFKA_DELIVERY_TIMEOUT_MS: &str = "30000";
+const KAFKA_SOCKET_TIMEOUT_MS: &str = "10000";
+
+struct DurationHistogram {
+    buckets: [AtomicU64; KAFKA_DELIVERY_BUCKETS.len()],
+    count: AtomicU64,
+    sum_microseconds: AtomicU64,
+}
+
+impl Default for DurationHistogram {
+    fn default() -> Self {
+        Self {
+            buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+            count: AtomicU64::new(0),
+            sum_microseconds: AtomicU64::new(0),
+        }
+    }
+}
+
+impl DurationHistogram {
+    fn observe(&self, duration: Duration) {
+        let microseconds = duration.as_micros().min(u128::from(u64::MAX)) as u64;
+        self.count.fetch_add(1, Ordering::Relaxed);
+        self.sum_microseconds
+            .fetch_add(microseconds, Ordering::Relaxed);
+        for (index, (upper_bound, _)) in KAFKA_DELIVERY_BUCKETS.iter().enumerate() {
+            if microseconds <= *upper_bound {
+                self.buckets[index].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
 
 #[derive(Default)]
 struct BridgeMetrics {
     ready: AtomicBool,
+    mqtt_subscriptions_ready: AtomicBool,
+    kafka_ready: AtomicBool,
+    received_total: AtomicU64,
     forwarded_total: AtomicU64,
     dlq_total: AtomicU64,
     errors_total: AtomicU64,
+    kafka_metadata_errors_total: AtomicU64,
+    kafka_delivery_duration: DurationHistogram,
+}
+
+impl BridgeMetrics {
+    fn reset_readiness(&self) {
+        self.mqtt_subscriptions_ready
+            .store(false, Ordering::Relaxed);
+        self.kafka_ready.store(false, Ordering::Relaxed);
+        self.ready.store(false, Ordering::Relaxed);
+    }
+
+    fn update_readiness(&self) {
+        self.ready.store(
+            self.mqtt_subscriptions_ready.load(Ordering::Relaxed)
+                && self.kafka_ready.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+    }
+
+    fn set_mqtt_subscriptions_ready(&self, ready: bool) {
+        self.mqtt_subscriptions_ready
+            .store(ready, Ordering::Relaxed);
+        self.update_readiness();
+    }
+
+    fn set_kafka_ready(&self, ready: bool) {
+        let was_ready = self.kafka_ready.swap(ready, Ordering::Relaxed);
+        if was_ready && !ready {
+            self.errors_total.fetch_add(1, Ordering::Relaxed);
+            self.kafka_metadata_errors_total
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        self.update_readiness();
+    }
+
+    fn render_prometheus(&self) -> String {
+        let count = self.kafka_delivery_duration.count.load(Ordering::Relaxed);
+        let sum_seconds = self
+            .kafka_delivery_duration
+            .sum_microseconds
+            .load(Ordering::Relaxed) as f64
+            / 1_000_000.0;
+        let mut output = format!(
+            concat!(
+                "# HELP dealiot_bridge_ready Whether MQTT subscriptions and the Kafka control path are ready.\n",
+                "# TYPE dealiot_bridge_ready gauge\n",
+                "dealiot_bridge_ready {}\n",
+                "# HELP dealiot_bridge_mqtt_subscriptions_ready Whether all configured MQTT subscriptions are acknowledged.\n",
+                "# TYPE dealiot_bridge_mqtt_subscriptions_ready gauge\n",
+                "dealiot_bridge_mqtt_subscriptions_ready {}\n",
+                "# HELP dealiot_bridge_kafka_ready Whether the most recent bounded Kafka metadata check succeeded.\n",
+                "# TYPE dealiot_bridge_kafka_ready gauge\n",
+                "dealiot_bridge_kafka_ready {}\n",
+                "# HELP dealiot_bridge_received_total MQTT publish deliveries received, including broker redeliveries.\n",
+                "# TYPE dealiot_bridge_received_total counter\n",
+                "dealiot_bridge_received_total {}\n",
+                "# HELP dealiot_bridge_forwarded_total MQTT deliveries durably written to Kafka and acknowledged to MQTT.\n",
+                "# TYPE dealiot_bridge_forwarded_total counter\n",
+                "dealiot_bridge_forwarded_total {}\n",
+                "# HELP dealiot_bridge_dlq_total Durably forwarded messages routed to the invalid-event DLQ.\n",
+                "# TYPE dealiot_bridge_dlq_total counter\n",
+                "dealiot_bridge_dlq_total {}\n",
+                "# HELP dealiot_bridge_errors_total Bridge reconnect, delivery or Kafka metadata failures.\n",
+                "# TYPE dealiot_bridge_errors_total counter\n",
+                "dealiot_bridge_errors_total {}\n",
+                "# HELP dealiot_bridge_kafka_metadata_errors_total Kafka metadata health transitions from ready to unavailable.\n",
+                "# TYPE dealiot_bridge_kafka_metadata_errors_total counter\n",
+                "dealiot_bridge_kafka_metadata_errors_total {}\n",
+                "# HELP dealiot_bridge_kafka_delivery_duration_seconds Kafka produce acknowledgement latency.\n",
+                "# TYPE dealiot_bridge_kafka_delivery_duration_seconds histogram\n"
+            ),
+            u8::from(self.ready.load(Ordering::Relaxed)),
+            u8::from(self.mqtt_subscriptions_ready.load(Ordering::Relaxed)),
+            u8::from(self.kafka_ready.load(Ordering::Relaxed)),
+            self.received_total.load(Ordering::Relaxed),
+            self.forwarded_total.load(Ordering::Relaxed),
+            self.dlq_total.load(Ordering::Relaxed),
+            self.errors_total.load(Ordering::Relaxed),
+            self.kafka_metadata_errors_total.load(Ordering::Relaxed),
+        );
+        for (index, (_, label)) in KAFKA_DELIVERY_BUCKETS.iter().enumerate() {
+            output.push_str(&format!(
+                "dealiot_bridge_kafka_delivery_duration_seconds_bucket{{le=\"{label}\"}} {}\n",
+                self.kafka_delivery_duration.buckets[index].load(Ordering::Relaxed),
+            ));
+        }
+        output.push_str(&format!(
+            concat!(
+                "dealiot_bridge_kafka_delivery_duration_seconds_bucket{{le=\"+Inf\"}} {count}\n",
+                "dealiot_bridge_kafka_delivery_duration_seconds_sum {sum_seconds:.6}\n",
+                "dealiot_bridge_kafka_delivery_duration_seconds_count {count}\n"
+            ),
+            count = count,
+            sum_seconds = sum_seconds,
+        ));
+        output
+    }
 }
 
 #[tokio::main]
@@ -32,11 +182,11 @@ async fn main() -> Result<(), BridgeError> {
     );
 
     loop {
-        metrics.ready.store(false, Ordering::Relaxed);
+        metrics.reset_readiness();
         match run_bridge(&config, Arc::clone(&metrics)).await {
             Ok(()) => return Ok(()),
             Err(error) => {
-                metrics.ready.store(false, Ordering::Relaxed);
+                metrics.reset_readiness();
                 metrics.errors_total.fetch_add(1, Ordering::Relaxed);
                 error!("Bridge error; retry in 5s: {error}");
                 tokio::time::sleep(Duration::from_secs(5)).await;
@@ -49,8 +199,9 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
     let producer = kafka_producer(config)?;
     producer
         .client()
-        .fetch_metadata(None, Timeout::After(Duration::from_secs(10)))
+        .fetch_metadata(None, Timeout::After(KAFKA_METADATA_TIMEOUT))
         .map_err(|error| BridgeError::Config(format!("Kafka metadata check failed: {error}")))?;
+    metrics.set_kafka_ready(true);
     let mut mqtt_options = MqttOptions::new(
         config.mqtt_client_id.clone(),
         config.mqtt_host.clone(),
@@ -81,10 +232,13 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
     let mut pending_subscriptions = config.mqtt_topics.len();
+    let mut kafka_health_interval = tokio::time::interval(KAFKA_HEALTH_INTERVAL);
+    kafka_health_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    kafka_health_interval.tick().await;
     loop {
         tokio::select! {
             _ = &mut shutdown => {
-                metrics.ready.store(false, Ordering::Relaxed);
+                metrics.reset_readiness();
                 let _ = client.disconnect().await;
                 producer.flush(Timeout::After(Duration::from_secs(10))).map_err(|error| {
                     BridgeError::Config(format!("Kafka flush during shutdown failed: {error}"))
@@ -92,8 +246,40 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
                 info!("Graceful shutdown completed");
                 return Ok(());
             }
+            _ = kafka_health_interval.tick() => {
+                let health_producer = producer.clone();
+                let check = tokio::task::spawn_blocking(move || {
+                    health_producer
+                        .client()
+                        .fetch_metadata(None, Timeout::After(KAFKA_METADATA_TIMEOUT))
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                });
+                match tokio::time::timeout(KAFKA_METADATA_TIMEOUT + Duration::from_secs(1), check).await {
+                    Ok(Ok(Ok(_))) => {
+                        let recovered = !metrics.kafka_ready.load(Ordering::Relaxed);
+                        metrics.set_kafka_ready(true);
+                        if recovered {
+                            info!("Kafka metadata health check recovered");
+                        }
+                    }
+                    Ok(Ok(Err(error))) => {
+                        metrics.set_kafka_ready(false);
+                        warn!("Kafka metadata health check failed: {error}");
+                    }
+                    Ok(Err(error)) => {
+                        metrics.set_kafka_ready(false);
+                        warn!("Kafka metadata health task failed: {error}");
+                    }
+                    Err(_) => {
+                        metrics.set_kafka_ready(false);
+                        warn!("Kafka metadata health check exceeded its bounded timeout");
+                    }
+                }
+            }
             event = eventloop.poll() => match event {
             Ok(Event::Incoming(Incoming::Publish(publish))) => {
+                metrics.received_total.fetch_add(1, Ordering::Relaxed);
                 let msg = MqttMessage {
                     topic: publish.topic.clone(),
                     payload: publish.payload.to_vec(),
@@ -104,15 +290,19 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
                 let (send_topic, send_event) = route_event(&built.topic, built.event);
                 let payload = serde_json::to_vec(&send_event)?;
                 let key = built.key;
+                let delivery_started_at = Instant::now();
                 producer
                     .send(
                         FutureRecord::to(&send_topic).key(&key).payload(&payload),
-                        Timeout::Never,
+                        Timeout::After(KAFKA_QUEUE_TIMEOUT),
                     )
                     .await
                     .map_err(|(error, _)| {
                         BridgeError::Config(format!("Kafka send failed: {error}"))
                     })?;
+                metrics
+                    .kafka_delivery_duration
+                    .observe(delivery_started_at.elapsed());
                 client.ack(&publish).await.map_err(|error| {
                     BridgeError::Config(format!("MQTT acknowledgement failed: {error}"))
                 })?;
@@ -122,10 +312,8 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
                 }
                 info!("Forwarded MQTT message to Kafka topic={send_topic}");
             }
-            Ok(Event::Incoming(Incoming::SubAck(_))) => {
-                pending_subscriptions = pending_subscriptions.saturating_sub(1);
-                if pending_subscriptions == 0 {
-                    metrics.ready.store(true, Ordering::Relaxed);
+            Ok(Event::Incoming(Incoming::SubAck(suback))) => {
+                if handle_subscription_ack(&suback, &mut pending_subscriptions, &metrics)? {
                     info!("Bridge is ready; all MQTT subscriptions and Kafka metadata checks succeeded");
                 }
             }
@@ -138,6 +326,32 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
             }
         }
     }
+}
+
+fn handle_subscription_ack(
+    suback: &SubAck,
+    pending_subscriptions: &mut usize,
+    metrics: &BridgeMetrics,
+) -> Result<bool, BridgeError> {
+    let accepted = suback.return_codes.len() == 1
+        && suback
+            .return_codes
+            .iter()
+            .all(|code| matches!(code, SubscribeReasonCode::Success(QoS::AtLeastOnce)));
+    if !accepted {
+        metrics.set_mqtt_subscriptions_ready(false);
+        return Err(BridgeError::Config(format!(
+            "MQTT QoS 1 subscription rejected or downgraded pkid={} return_codes={:?}",
+            suback.pkid, suback.return_codes
+        )));
+    }
+
+    *pending_subscriptions = pending_subscriptions.saturating_sub(1);
+    let all_subscriptions_ready = *pending_subscriptions == 0;
+    if all_subscriptions_ready {
+        metrics.set_mqtt_subscriptions_ready(true);
+    }
+    Ok(all_subscriptions_ready)
 }
 
 async fn shutdown_signal() {
@@ -158,6 +372,18 @@ async fn shutdown_signal() {
 }
 
 fn kafka_producer(config: &BridgeConfig) -> Result<FutureProducer, BridgeError> {
+    kafka_client_config(config)?
+        .create()
+        .map_err(|error| BridgeError::Config(format!("Kafka producer init failed: {error}")))
+}
+
+fn kafka_client_config(config: &BridgeConfig) -> Result<ClientConfig, BridgeError> {
+    let mut client_config = base_kafka_client_config(config);
+    apply_kafka_security_config(&mut client_config)?;
+    Ok(client_config)
+}
+
+fn base_kafka_client_config(config: &BridgeConfig) -> ClientConfig {
     let mut client_config = ClientConfig::new();
     client_config
         .set("bootstrap.servers", config.kafka_bootstrap_servers.as_str())
@@ -167,12 +393,12 @@ fn kafka_producer(config: &BridgeConfig) -> Result<FutureProducer, BridgeError> 
         .set("linger.ms", "50")
         .set("batch.size", "131072")
         .set("compression.type", "lz4")
-        .set("max.in.flight.requests.per.connection", "1");
+        .set("max.in.flight.requests.per.connection", "1")
+        .set("delivery.timeout.ms", KAFKA_DELIVERY_TIMEOUT_MS)
+        .set("message.timeout.ms", KAFKA_DELIVERY_TIMEOUT_MS)
+        .set("socket.timeout.ms", KAFKA_SOCKET_TIMEOUT_MS);
 
-    apply_kafka_security_config(&mut client_config)?;
     client_config
-        .create()
-        .map_err(|error| BridgeError::Config(format!("Kafka producer init failed: {error}")))
 }
 
 fn apply_kafka_security_config(client_config: &mut ClientConfig) -> Result<(), BridgeError> {
@@ -310,22 +536,7 @@ fn start_health_server(bind: String, port: u16, metrics: Arc<BridgeMetrics>) {
                     );
                 let _ = request.respond(response);
             } else if request.url() == "/metrics" {
-                let body = format!(
-                    concat!(
-                        "# TYPE dealiot_bridge_ready gauge\n",
-                        "dealiot_bridge_ready {}\n",
-                        "# TYPE dealiot_bridge_forwarded_total counter\n",
-                        "dealiot_bridge_forwarded_total {}\n",
-                        "# TYPE dealiot_bridge_dlq_total counter\n",
-                        "dealiot_bridge_dlq_total {}\n",
-                        "# TYPE dealiot_bridge_errors_total counter\n",
-                        "dealiot_bridge_errors_total {}\n"
-                    ),
-                    u8::from(metrics.ready.load(Ordering::Relaxed)),
-                    metrics.forwarded_total.load(Ordering::Relaxed),
-                    metrics.dlq_total.load(Ordering::Relaxed),
-                    metrics.errors_total.load(Ordering::Relaxed),
-                );
+                let body = metrics.render_prometheus();
                 let response = Response::from_string(body)
                     .with_status_code(StatusCode(200))
                     .with_header(
@@ -436,5 +647,104 @@ mod tests {
         let mut options = mqtt_options();
 
         configure_mqtt_tls(&config, &mut options).expect("complete client TLS auth should work");
+    }
+
+    #[test]
+    fn bridge_metrics_expose_durable_delivery_denominator_and_latency_histogram() {
+        let metrics = BridgeMetrics::default();
+        metrics.received_total.fetch_add(2, Ordering::Relaxed);
+        metrics.forwarded_total.fetch_add(1, Ordering::Relaxed);
+        metrics
+            .kafka_delivery_duration
+            .observe(Duration::from_millis(75));
+
+        let output = metrics.render_prometheus();
+
+        assert!(output.contains("dealiot_bridge_received_total 2"));
+        assert!(output.contains("dealiot_bridge_forwarded_total 1"));
+        assert!(
+            output.contains("dealiot_bridge_kafka_delivery_duration_seconds_bucket{le=\"0.1\"} 1")
+        );
+        assert!(
+            output.contains("dealiot_bridge_kafka_delivery_duration_seconds_bucket{le=\"0.05\"} 0")
+        );
+        assert!(output.contains("dealiot_bridge_kafka_delivery_duration_seconds_count 1"));
+    }
+
+    #[test]
+    fn bridge_readiness_tracks_both_dependencies_and_metadata_failures() {
+        let metrics = BridgeMetrics::default();
+
+        metrics.set_mqtt_subscriptions_ready(true);
+        assert!(!metrics.ready.load(Ordering::Relaxed));
+
+        metrics.set_kafka_ready(true);
+        assert!(metrics.ready.load(Ordering::Relaxed));
+
+        metrics.set_kafka_ready(false);
+        metrics.set_kafka_ready(false);
+        assert!(!metrics.ready.load(Ordering::Relaxed));
+        assert_eq!(metrics.errors_total.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            metrics.kafka_metadata_errors_total.load(Ordering::Relaxed),
+            1
+        );
+
+        metrics.reset_readiness();
+        assert_eq!(metrics.errors_total.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn kafka_producer_configuration_bounds_queue_delivery_and_metadata_checks() {
+        let config = base_kafka_client_config(&test_config());
+
+        assert_eq!(
+            config.get("delivery.timeout.ms"),
+            Some(KAFKA_DELIVERY_TIMEOUT_MS)
+        );
+        assert_eq!(
+            config.get("message.timeout.ms"),
+            Some(KAFKA_DELIVERY_TIMEOUT_MS)
+        );
+        assert_eq!(
+            config.get("socket.timeout.ms"),
+            Some(KAFKA_SOCKET_TIMEOUT_MS)
+        );
+        assert_eq!(KAFKA_QUEUE_TIMEOUT, Duration::from_secs(5));
+        assert_eq!(KAFKA_METADATA_TIMEOUT, Duration::from_secs(5));
+        assert_eq!(KAFKA_HEALTH_INTERVAL, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn mqtt_subscription_rejection_cannot_leave_the_bridge_ready() {
+        let metrics = BridgeMetrics::default();
+        metrics.set_kafka_ready(true);
+        metrics.set_mqtt_subscriptions_ready(true);
+        let mut pending_subscriptions = 1;
+        let rejected = SubAck::new(42, vec![SubscribeReasonCode::Failure]);
+
+        let error = handle_subscription_ack(&rejected, &mut pending_subscriptions, &metrics)
+            .expect_err("a rejected MQTT subscription must fail the bridge loop");
+
+        assert!(error
+            .to_string()
+            .contains("MQTT QoS 1 subscription rejected or downgraded"));
+        assert_eq!(pending_subscriptions, 1);
+        assert!(!metrics.mqtt_subscriptions_ready.load(Ordering::Relaxed));
+        assert!(!metrics.ready.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn mqtt_subscription_qos_downgrade_is_rejected() {
+        let metrics = BridgeMetrics::default();
+        metrics.set_kafka_ready(true);
+        let mut pending_subscriptions = 1;
+        let downgraded = SubAck::new(43, vec![SubscribeReasonCode::Success(QoS::AtMostOnce)]);
+
+        handle_subscription_ack(&downgraded, &mut pending_subscriptions, &metrics)
+            .expect_err("a QoS 0 grant must not satisfy the QoS 1 ingestion contract");
+
+        assert_eq!(pending_subscriptions, 1);
+        assert!(!metrics.ready.load(Ordering::Relaxed));
     }
 }

@@ -215,6 +215,13 @@ def validate_component_compatibility() -> None:
     reject_legacy_postgres_18_mounts(ROOT / "components/DEALData/docker-compose.yml")
     reject_legacy_postgres_18_mounts(ROOT / "components/DEALIoT/docker-compose.yml")
 
+    dealhost_dockerignore = (
+        ROOT / "components/DEALHost/.dockerignore"
+    ).read_text(encoding="utf-8").splitlines()
+    for sensitive_pattern in (".env", ".env.*", "secrets/", "*.pem", "*.key"):
+        if sensitive_pattern not in dealhost_dockerignore:
+            fail(f"DEALHost Docker context must exclude {sensitive_pattern}")
+
     repository_manifests = sorted(
         (ROOT / "components/DEALHost/manifests/repositories").glob("*.json"),
     )

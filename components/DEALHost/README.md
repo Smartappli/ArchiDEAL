@@ -65,7 +65,10 @@ Upstream modules (containers/services Django)
 
 ## Endpoints clés
 
-- `GET /api/gateway/health/` : état du service gateway.
+- `GET /api/gateway/health/live/` : liveness locale, sans dépendance externe.
+- `GET /api/gateway/health/ready/` : readiness PostgreSQL + Valkey ; renvoie `503`
+  si l'une des deux dépendances est indisponible.
+- `GET /api/gateway/health/` : alias de readiness conservé pour compatibilité.
 - `POST /api/gateway/github/sync/` : récupère le dernier commit d’une branche du dépôt `Smartappli/ArchiDEAL`.
 - `GET /api/gateway/github/repositories/` : liste les repositories intégrés, leurs événements autorisés, modules mappés et routes publiques déclarées.
 - `POST /api/gateway/apisix/publish/` : crée/met à jour une route APISIX, avec `dry_run=true` pour prévisualiser le payload sans appel admin APISIX.
@@ -293,13 +296,19 @@ System.out.println(response);
 
 - Remplacer toutes les valeurs `replace-me` / placeholders.
 - Définir `DJANGO_ALLOWED_HOSTS`; en production, la configuration refuse de démarrer si cette variable est vide ou contient `*`.
-- Définir `DEALHOST_API_TOKENS` pour les clients API en lecture et `DEALHOST_ADMIN_API_TOKENS` pour les opérations d'administration (IAM, publication APISIX, autodiscovery, création/mise à jour hosting).
+- Pour les comptes de service, définir `DEALHOST_API_TOKENS` en lecture et `DEALHOST_ADMIN_API_TOKENS` pour les opérations d'administration.
+- Pour les opérateurs derrière l'edge OIDC, configurer `DEALHOST_OIDC_INTROSPECTION_URL`, `DEALHOST_OIDC_ISSUER`, `DEALHOST_OIDC_AUDIENCE`, les identifiants confidentiels du client et les groupes `DEALHOST_OIDC_READ_GROUPS` / `DEALHOST_OIDC_ADMIN_GROUPS`. L'introspection valide l'activité, l'émetteur, l'audience et l'appartenance au groupe avant de créer l'identité applicative.
 - Restreindre l'exposition réseau et exposer uniquement APISIX en edge.
 - Protéger le webhook GitHub avec `GITHUB_WEBHOOK_SECRET`.
 - Configurer GitHub pour transmettre `X-GitHub-Delivery` : DEALHost déduplique les livraisons signées pendant 24 h afin d'éviter les publications de route rejouées.
 - Restreindre les webhooks acceptés avec `GITHUB_ALLOWED_REPOSITORIES=Smartappli/ArchiDEAL`.
-- Externaliser SQLite vers PostgreSQL en environnement de production.
+- La production refuse SQLite et exige PostgreSQL avec `DEALHOST_DATABASE_SSLMODE=verify-full` et une autorité de certification explicite via `DEALHOST_DATABASE_SSLROOTCERT`.
+- La production refuse `redis://` et exige que `VALKEY_URL` utilise `rediss://`. Le profil Compose
+  local conserve `redis://valkey:6379/1` uniquement pour le développement isolé.
 - Sessions en backend `cached_db` (persistance DB + cache Valkey pour performance).
+- L'image de production installe `requirements.lock` avec `--require-hashes` ; régénérer ce
+  fichier depuis `uv.lock` avec `uv export --frozen --no-dev --no-emit-project --format
+  requirements.txt --output-file requirements.lock` après toute mise à jour volontaire.
 
 
 ## Runtime ASGI
@@ -311,7 +320,8 @@ System.out.println(response);
 ## Cache et sessions
 
 - `SESSION_ENGINE=django.contrib.sessions.backends.cached_db` : sessions persistées en base Django.
-- `CACHES["default"]` pointe vers Valkey via `VALKEY_URL` (ex: `redis://valkey:6379/1`).
+- `CACHES["default"]` pointe vers Valkey via `VALKEY_URL` (`redis://valkey:6379/1` en local,
+  `rediss://<hôte>:6380/1` obligatoire avec les settings de production).
 - `ServeStatic` est activé dans le middleware Django et via le storage `CompressedManifestStaticFilesStorage` pour servir les assets statiques en ASGI.
 
 ## Messaging interne (NATS)

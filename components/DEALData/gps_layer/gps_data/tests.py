@@ -204,6 +204,7 @@ def test_kafka_consumer_requires_topic_and_group_id(options, message: str) -> No
     SECURE_HSTS_INCLUDE_SUBDOMAINS=False,
     DEALDATA_REQUIRE_INGEST_TOKEN=True,
     DEALDATA_INGEST_TOKEN=EMPTY_INGEST_TOKEN,
+    DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3"}},
 )
 def test_deployment_checks_reject_insecure_ingestion_configuration() -> None:
     """Production checks reject missing HTTPS, HSTS, and ingestion-token settings."""
@@ -216,7 +217,16 @@ def test_deployment_checks_reject_insecure_ingestion_configuration() -> None:
     }
 
     CHECK.assertTrue(
-        {"dealdata.E001", "dealdata.E002", "dealdata.E003", "dealdata.E004"}
+        {
+            "dealdata.E001",
+            "dealdata.E002",
+            "dealdata.E003",
+            "dealdata.E004",
+            "dealdata.E005",
+            "dealdata.E006",
+            "dealdata.E007",
+            "dealdata.E008",
+        }
         <= error_ids,
     )
 
@@ -229,6 +239,16 @@ def test_deployment_checks_reject_insecure_ingestion_configuration() -> None:
     SECURE_HSTS_PRELOAD=True,
     DEALDATA_REQUIRE_INGEST_TOKEN=True,
     DEALDATA_INGEST_TOKEN=TEST_INGEST_TOKEN,
+    DATABASES={
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "PASSWORD": "database-secret",  # nosec B106 - test fixture.
+            "OPTIONS": {
+                "sslmode": "verify-full",
+                "sslrootcert": "/run/secrets/postgres/ca.crt",
+            },
+        },
+    },
 )
 def test_deployment_checks_accept_hardened_ingestion_configuration() -> None:
     """Production checks accept the supported HTTPS and ingestion settings."""
@@ -644,24 +664,12 @@ def test_wildfi_gps_list_rejects_reversed_time_window() -> None:
     CHECK.assertEqual(response.data["detail"], INVALID_LIST_QUERY_PARAMETERS_DETAIL)
 
 
-@pytest.mark.django_db
 def test_gps_metrics_exposes_prometheus_counts() -> None:
-    """Metrics endpoint exposes stored GPS event counters."""
-    client = APIClient()
-    event = {
-        "event_id": "gps-metric-1",
-        "device_id": "wildfi-17",
-        "timestamp": "2026-05-24T12:30:00Z",
-        "latitude": 50.6333,
-        "longitude": 5.5667,
-        "payload": {"fix": 3},
-    }
-    client.post("/api/ingest/wildfi/gps/", event, format="json")
-
+    """Metrics endpoint exposes a cheap service marker without inventory scans."""
     response = Client().get("/metrics/")
 
     CHECK.assertEqual(response.status_code, 200)
-    CHECK.assertIn("dealdata_gps_wildfi_events_total 1", response.content.decode())
+    CHECK.assertIn("dealdata_gps_service_info 1", response.content.decode())
 
 
 @pytest.mark.django_db

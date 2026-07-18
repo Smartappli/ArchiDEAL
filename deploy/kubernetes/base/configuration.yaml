@@ -1,0 +1,308 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: archideal-runtime
+  labels:
+    app.kubernetes.io/part-of: archideal
+data:
+  PUBLIC_HOST: "${PUBLIC_HOST}"
+  DJANGO_DEBUG: "false"
+  DJANGO_ALLOWED_HOSTS: "${PUBLIC_HOST},dealhost,dealdata-core,dealdata-gps,dealdata-sensor"
+  DJANGO_CSRF_TRUSTED_ORIGINS: "https://${PUBLIC_HOST}"
+  DEALHOST_SCRIPT_NAME: /dealhost
+  DJANGO_SECURE_SSL_REDIRECT: "true"
+  DJANGO_SECURE_HSTS_SECONDS: "31536000"
+  DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS: "true"
+  DJANGO_SECURE_HSTS_PRELOAD: "true"
+  DATABASE_USE_POSTGRES: "true"
+  DATABASE_PORT: "5432"
+  DATABASE_SSLMODE: verify-full
+  DATABASE_SSLROOTCERT: /var/run/archideal-ca/postgres-ca.crt
+  DATABASE_CONN_MAX_AGE: "60"
+  DEALHOST_DATABASE_ENGINE: postgresql
+  DEALHOST_DATABASE_HOST: "${POSTGRES_METADATA_HOST}"
+  DEALHOST_DATABASE_NAME: dealhost
+  DEALHOST_DATABASE_USER: dealhost
+  DEALHOST_DATABASE_PORT: "5432"
+  DEALHOST_DATABASE_SSLMODE: verify-full
+  DEALHOST_DATABASE_SSLROOTCERT: /var/run/archideal-ca/postgres-ca.crt
+  DEALHOST_DATABASE_CONN_MAX_AGE: "60"
+  DEALDATA_CORE_DATABASE_HOST: "${POSTGRES_DATA_HOST}"
+  DEALDATA_CORE_DATABASE_NAME: dealdata_core
+  DEALDATA_CORE_DATABASE_USER: dealdata_core
+  DEALDATA_GPS_DATABASE_HOST: "${POSTGRES_DATA_HOST}"
+  DEALDATA_GPS_DATABASE_NAME: dealdata_gps
+  DEALDATA_GPS_DATABASE_USER: dealdata_gps
+  DEALDATA_SENSOR_DATABASE_HOST: "${POSTGRES_DATA_HOST}"
+  DEALDATA_SENSOR_DATABASE_NAME: dealdata_sensor
+  DEALDATA_SENSOR_DATABASE_USER: dealdata_sensor
+  KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS}"
+  KAFKA_SECURITY_PROTOCOL: SASL_SSL
+  KAFKA_SASL_MECHANISM: SCRAM-SHA-512
+  KAFKA_SSL_CAFILE: /var/run/archideal-ca/kafka-ca.crt
+  KAFKA_SSL_CHECK_HOSTNAME: "true"
+  DEALDATA_KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS}"
+  DEALDATA_KAFKA_SECURITY_PROTOCOL: SASL_SSL
+  DEALDATA_KAFKA_SASL_MECHANISM: SCRAM-SHA-512
+  DEALDATA_KAFKA_SSL_CAFILE: /var/run/archideal-ca/kafka-ca.crt
+  DEALDATA_KAFKA_SSL_CHECK_HOSTNAME: "true"
+  DEALDATA_KAFKA_AUTO_OFFSET_RESET: earliest
+  DEALDATA_GPS_KAFKA_TOPIC: raw.gps
+  DEALDATA_GPS_KAFKA_GROUP_ID: archideal-dealdata-gps-v1
+  DEALDATA_SENSOR_KAFKA_TOPIC: raw.sensor
+  DEALDATA_SENSOR_KAFKA_GROUP_ID: archideal-dealdata-sensor-v1
+  MQTT_HOST: "${MQTT_HOST}"
+  MQTT_PORT: "8883"
+  MQTT_TLS_ENABLED: "true"
+  MQTT_TLS_CA_FILE: /var/run/archideal-ca/mqtt-ca.crt
+  MQTT_TLS_INSECURE_SKIP_VERIFY: "false"
+  MQTT_CLEAN_SESSION: "false"
+  MQTT_TOPICS: "$share/ingestors/devices/#,$share/ingestors/wildfi/#"
+  DEFAULT_KAFKA_TOPIC: raw.sensor
+  BRIDGE_HEALTH_BIND: 0.0.0.0
+  BRIDGE_HEALTH_PORT: "8080"
+  MANAGEMENT_CONSOLE_PORT: "8080"
+  MANAGEMENT_CONSOLE_PRODUCTION_MODE: "true"
+  MANAGEMENT_CONSOLE_PROBE_TIMEOUT_SECONDS: "2"
+  MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL: "${OIDC_INTROSPECTION_URL}"
+  MANAGEMENT_CONSOLE_OIDC_ISSUER: "${OIDC_ISSUER_URL}"
+  MANAGEMENT_CONSOLE_OIDC_AUDIENCE: "${OIDC_AUDIENCE}"
+  DEALHOST_OIDC_INTROSPECTION_URL: "${OIDC_INTROSPECTION_URL}"
+  DEALHOST_OIDC_ISSUER: "${OIDC_ISSUER_URL}"
+  DEALHOST_OIDC_AUDIENCE: "${OIDC_AUDIENCE}"
+  DEALHOST_OIDC_READ_GROUPS: "${OIDC_ALLOWED_GROUP}"
+  DEALHOST_OIDC_ADMIN_GROUPS: "${OIDC_ALLOWED_GROUP}"
+  DEALHOST_OIDC_TIMEOUT_SECONDS: "3"
+  MANAGEMENT_CONSOLE_OIDC_READ_ROLES: "${OIDC_ALLOWED_GROUP}"
+  MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES: "${OIDC_ALLOWED_GROUP}"
+  APISIX_ADMIN_URL: http://apisix-admin:9180
+  APISIX_UPSTREAM_HOST: dealhost
+  APISIX_UPSTREAM_PORT: "8000"
+  GITHUB_OWNER: Smartappli
+  GITHUB_REPOSITORY: ArchiDEAL
+  GITHUB_ALLOWED_REPOSITORIES: Smartappli/ArchiDEAL
+  NATS_ENABLED: "false"
+  SENTRY_ENVIRONMENT: production
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-production-config
+  labels:
+    app.kubernetes.io/name: apisix
+    app.kubernetes.io/part-of: archideal
+data:
+  config.yaml: |
+    apisix:
+      node_listen:
+        - port: 9080
+      enable_ipv6: false
+      enable_admin: true
+      enable_control: true
+      ssl:
+        ssl_trusted_certificate: /var/run/archideal-ca/etcd-ca.crt
+      control:
+        ip: 127.0.0.1
+        port: 9092
+
+    deployment:
+      role: traditional
+      role_traditional:
+        config_provider: etcd
+      admin:
+        admin_key:
+          - name: production-admin
+            key: ${{APISIX_ADMIN_KEY}}
+            role: admin
+        allow_admin:
+          - "${POD_CIDR}"
+        admin_listen:
+          ip: 0.0.0.0
+          port: 9180
+      etcd:
+        host:
+          - "${ETCD_ENDPOINT_1}"
+          - "${ETCD_ENDPOINT_2}"
+          - "${ETCD_ENDPOINT_3}"
+        prefix: /archideal/apisix
+        timeout: 30
+        user: ${{ETCD_USERNAME}}
+        password: ${{ETCD_PASSWORD}}
+        tls:
+          verify: true
+          cert: /var/run/archideal-ca/etcd-client.crt
+          key: /var/run/archideal-ca/etcd-client.key
+          sni: "${ETCD_TLS_SERVER_NAME}"
+
+    plugin_attr:
+      prometheus:
+        export_addr:
+          ip: 0.0.0.0
+          port: 9091
+      opentelemetry:
+        resource:
+          service.name: archideal-apisix
+        collector:
+          address: ${{OTEL_COLLECTOR_HTTP_ENDPOINT}}
+          request_timeout: 3
+        batch_span_processor:
+          drop_on_queue_full: false
+          max_queue_size: 2048
+          batch_timeout: 2
+          inactive_timeout: 1
+          max_export_batch_size: 512
+
+    nginx_config:
+      error_log_level: warn
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-bootstrap
+  labels:
+    app.kubernetes.io/name: apisix-bootstrap
+    app.kubernetes.io/part-of: archideal
+data:
+  routes.json: |
+    {
+      "routes": [
+        {
+          "id": "archideal-dealhost",
+          "uris": ["/dealhost", "/dealhost/*"],
+          "priority": 100,
+          "plugins": {
+            "prometheus": {},
+            "opentelemetry": {"sampler": {"name": "always_on"}},
+            "proxy-rewrite": {
+              "regex_uri": ["^/dealhost/?(.*)$", "/$1"],
+              "host": "dealhost",
+              "headers": {
+                "set": {
+                  "Authorization": "Bearer $http_x_forwarded_access_token",
+                  "X-Forwarded-Proto": "$http_x_forwarded_proto"
+                }
+              }
+            }
+          },
+          "upstream": {
+            "type": "roundrobin",
+            "pass_host": "node",
+            "nodes": {"dealhost:8000": 1}
+          }
+        },
+        {
+          "id": "archideal-dealiot",
+          "uris": ["/dealiot", "/dealiot/*"],
+          "priority": 100,
+          "plugins": {
+            "prometheus": {},
+            "opentelemetry": {"sampler": {"name": "always_on"}},
+            "proxy-rewrite": {
+              "regex_uri": ["^/dealiot/?(.*)$", "/$1"],
+              "host": "dealiot",
+              "headers": {
+                "set": {
+                  "Authorization": "Bearer $http_x_forwarded_access_token",
+                  "X-Forwarded-Proto": "$http_x_forwarded_proto"
+                }
+              }
+            }
+          },
+          "upstream": {
+            "type": "roundrobin",
+            "pass_host": "node",
+            "nodes": {"dealiot:8080": 1}
+          }
+        },
+        {
+          "id": "archideal-dealdata-core",
+          "uris": ["/dealdata/core", "/dealdata/core/*"],
+          "priority": 100,
+          "plugins": {
+            "prometheus": {},
+            "opentelemetry": {"sampler": {"name": "always_on"}},
+            "proxy-rewrite": {
+              "regex_uri": ["^/dealdata/core/?(.*)$", "/$1"],
+              "host": "dealdata-core",
+              "headers": {
+                "set": {
+                  "X-Forwarded-Proto": "$http_x_forwarded_proto"
+                }
+              }
+            }
+          },
+          "upstream": {
+            "type": "roundrobin",
+            "pass_host": "node",
+            "nodes": {"dealdata-core:7000": 1}
+          }
+        },
+        {
+          "id": "archideal-dealdata-gps",
+          "uris": ["/dealdata/gps", "/dealdata/gps/*"],
+          "priority": 100,
+          "plugins": {
+            "prometheus": {},
+            "opentelemetry": {"sampler": {"name": "always_on"}},
+            "proxy-rewrite": {
+              "regex_uri": ["^/dealdata/gps/?(.*)$", "/$1"],
+              "host": "dealdata-gps",
+              "headers": {
+                "set": {
+                  "X-Forwarded-Proto": "$http_x_forwarded_proto"
+                }
+              }
+            }
+          },
+          "upstream": {
+            "type": "roundrobin",
+            "pass_host": "node",
+            "nodes": {"dealdata-gps:7001": 1}
+          }
+        },
+        {
+          "id": "archideal-dealdata-sensor",
+          "uris": ["/dealdata/sensor", "/dealdata/sensor/*"],
+          "priority": 100,
+          "plugins": {
+            "prometheus": {},
+            "opentelemetry": {"sampler": {"name": "always_on"}},
+            "proxy-rewrite": {
+              "regex_uri": ["^/dealdata/sensor/?(.*)$", "/$1"],
+              "host": "dealdata-sensor",
+              "headers": {
+                "set": {
+                  "X-Forwarded-Proto": "$http_x_forwarded_proto"
+                }
+              }
+            }
+          },
+          "upstream": {
+            "type": "roundrobin",
+            "pass_host": "node",
+            "nodes": {"dealdata-sensor:7002": 1}
+          }
+        },
+        {
+          "id": "archideal-interface",
+          "uris": ["/", "/*"],
+          "priority": -100,
+          "plugins": {
+            "prometheus": {},
+            "opentelemetry": {"sampler": {"name": "always_on"}},
+            "proxy-rewrite": {
+              "headers": {
+                "set": {
+                  "X-Forwarded-Proto": "$http_x_forwarded_proto"
+                }
+              }
+            }
+          },
+          "upstream": {
+            "type": "roundrobin",
+            "pass_host": "node",
+            "nodes": {"dealinterface:8080": 1}
+          }
+        }
+      ]
+    }

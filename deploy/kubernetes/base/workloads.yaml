@@ -1,0 +1,1648 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/component: identity-edge
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oauth2-proxy
+        app.kubernetes.io/component: identity-edge
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "44180"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: oauth2-proxy
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: oauth2-proxy
+      initContainers:
+        - name: validate-valkey-tls
+          image: "${IMAGE_DEALHOST}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c"]
+          args:
+            - >-
+              from dealhost.settings.env import cache_config;
+              cache_config(require_tls=True)
+          env:
+            - name: VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: valkey-url
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      containers:
+        - name: oauth2-proxy
+          image: "${IMAGE_OAUTH2_PROXY}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - --provider=oidc
+            - --oidc-issuer-url=${OIDC_ISSUER_URL}
+            - --oidc-groups-claim=groups
+            - --oidc-extra-audience=${OIDC_AUDIENCE}
+            - --allowed-group=${OIDC_ALLOWED_GROUP}
+            - --scope=openid profile email groups
+            - --code-challenge-method=S256
+            - --email-domain=*
+            - --upstream=http://apisix:9080
+            - --http-address=0.0.0.0:4180
+            - --metrics-address=0.0.0.0:44180
+            - --redirect-url=https://${PUBLIC_HOST}/oauth2/callback
+            - --proxy-prefix=/oauth2
+            - --reverse-proxy=true
+            - --trusted-proxy-ip=${INGRESS_PROXY_CIDR}
+            - --skip-provider-button=true
+            - --skip-jwt-bearer-tokens=true
+            - --skip-auth-route=POST=^/dealhost/api/gateway/github/webhook/$
+            - --extra-jwt-issuers=${OIDC_ISSUER_URL}=${OIDC_AUDIENCE}
+            - --bearer-token-login-fallback=false
+            - --pass-authorization-header=false
+            - --set-authorization-header=false
+            - --pass-access-token=true
+            - --set-xauthrequest=true
+            - --pass-user-headers=true
+            - --cookie-name=__Host-archideal
+            - --cookie-path=/
+            - --cookie-secure=true
+            - --cookie-httponly=true
+            - --cookie-samesite=lax
+            - --cookie-refresh=15m
+            - --cookie-expire=8h
+            - --cookie-csrf-per-request=true
+            - --cookie-csrf-expire=5m
+            - --session-store-type=redis
+            - --silence-ping-logging=true
+          env:
+            - name: OAUTH2_PROXY_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: oauth2-client-id
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: oauth2-client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: oauth2-cookie-secret
+            - name: OAUTH2_PROXY_REDIS_CONNECTION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: valkey-url
+          ports:
+            - name: http
+              containerPort: 4180
+            - name: metrics
+              containerPort: 44180
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apisix
+  labels:
+    app.kubernetes.io/name: apisix
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apisix
+        app.kubernetes.io/component: gateway
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: /apisix/prometheus/metrics
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 636
+        runAsGroup: 636
+        fsGroup: 636
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          minDomains: 3
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      initContainers:
+        - name: prepare-runtime
+          image: "${IMAGE_APISIX}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - cp -R /usr/local/apisix/. /runtime/
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 636
+            runAsGroup: 636
+          volumeMounts:
+            - name: runtime
+              mountPath: /runtime
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: apisix
+          image: "${IMAGE_APISIX}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: APISIX_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: apisix-admin-key
+            - name: ETCD_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: etcd-username
+            - name: ETCD_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: etcd-password
+            - name: OTEL_COLLECTOR_HTTP_ENDPOINT
+              value: "${OTEL_COLLECTOR_HTTP_ENDPOINT}"
+          ports:
+            - name: proxy
+              containerPort: 9080
+            - name: admin
+              containerPort: 9180
+            - name: metrics
+              containerPort: 9091
+          startupProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 9191
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 636
+            runAsGroup: 636
+          volumeMounts:
+            - name: runtime
+              mountPath: /usr/local/apisix
+            - name: config
+              mountPath: /usr/local/apisix/conf/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+        - name: apisix-health
+          image: "${IMAGE_APISIX_BOOTSTRAP}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/bootstrap/health.py"]
+          args:
+            - --upstream
+            - http://127.0.0.1:9091/apisix/prometheus/metrics
+            - --bind
+            - 0.0.0.0
+            - --port
+            - "9191"
+          ports:
+            - name: health
+              containerPort: 9191
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: apisix-production-config
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: etcd-ca.crt
+                path: etcd-ca.crt
+              - key: etcd-client.crt
+                path: etcd-client.crt
+              - key: etcd-client.key
+                path: etcd-client.key
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealdata-core
+  labels:
+    app.kubernetes.io/name: dealdata-core
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealdata-core
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealdata-core
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9101"
+        prometheus.io/path: /metrics
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 2000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-core
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-core
+      containers:
+        - name: dealdata-core
+          image: "${IMAGE_DEALDATA_CORE}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - granian
+            - core.asgi:application
+            - --interface
+            - asgi
+            - --host
+            - 0.0.0.0
+            - --port
+            - "7000"
+            - --workers
+            - "4"
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: RUN_MIGRATIONS
+              value: "0"
+            - name: RUN_COLLECTSTATIC
+              value: "0"
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-core-django-secret-key
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_CORE_DATABASE_HOST
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_CORE_DATABASE_NAME
+            - name: DATABASE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_CORE_DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-core-database-password
+          ports:
+            - name: http
+              containerPort: 7000
+          startupProbe:
+            httpGet:
+              path: /health/live/
+              port: http
+              httpHeaders: &forwarded-https
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: Host
+                  value: dealdata-core
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready/
+              port: http
+              httpHeaders: *forwarded-https
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health/live/
+              port: http
+              httpHeaders: *forwarded-https
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: staticfiles
+              mountPath: /app/staticfiles
+            - name: tmp
+              mountPath: /tmp
+        - name: metrics-proxy
+          image: "${IMAGE_DEALDATA_CORE}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "dealdata_common.metrics_proxy"]
+          args:
+            - --upstream
+            - http://127.0.0.1:7000/metrics/
+            - --upstream-ready
+            - http://127.0.0.1:7000/health/ready/
+            - --upstream-host
+            - dealdata-core
+            - --bind
+            - 0.0.0.0
+            - --port
+            - "9101"
+          ports:
+            - name: metrics
+              containerPort: 9101
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+              - key: kafka-ca.crt
+                path: kafka-ca.crt
+        - name: staticfiles
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealdata-gps
+  labels:
+    app.kubernetes.io/name: dealdata-gps
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealdata-gps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealdata-gps
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9101"
+        prometheus.io/path: /metrics
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 2000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-gps
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-gps
+      containers:
+        - name: dealdata-gps
+          image: "${IMAGE_DEALDATA_GPS}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - granian
+            - gps.asgi:application
+            - --interface
+            - asgi
+            - --host
+            - 0.0.0.0
+            - --port
+            - "7001"
+            - --workers
+            - "4"
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: RUN_MIGRATIONS
+              value: "0"
+            - name: RUN_COLLECTSTATIC
+              value: "0"
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-gps-django-secret-key
+            - name: DEALDATA_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-ingest-token
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_GPS_DATABASE_HOST
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_GPS_DATABASE_NAME
+            - name: DATABASE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_GPS_DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-gps-database-password
+          ports:
+            - name: http
+              containerPort: 7001
+          startupProbe:
+            httpGet:
+              path: /health/live/
+              port: http
+              httpHeaders: &forwarded-https-gps
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: Host
+                  value: dealdata-gps
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready/
+              port: http
+              httpHeaders: *forwarded-https-gps
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health/live/
+              port: http
+              httpHeaders: *forwarded-https-gps
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: staticfiles
+              mountPath: /app/staticfiles
+            - name: tmp
+              mountPath: /tmp
+        - name: metrics-proxy
+          image: "${IMAGE_DEALDATA_GPS}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "dealdata_common.metrics_proxy"]
+          args:
+            - --upstream
+            - http://127.0.0.1:7001/metrics/
+            - --upstream-ready
+            - http://127.0.0.1:7001/health/ready/
+            - --upstream-host
+            - dealdata-gps
+            - --bind
+            - 0.0.0.0
+            - --port
+            - "9101"
+          ports:
+            - name: metrics
+              containerPort: 9101
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+              - key: kafka-ca.crt
+                path: kafka-ca.crt
+        - name: staticfiles
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealdata-sensor
+  labels:
+    app.kubernetes.io/name: dealdata-sensor
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealdata-sensor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealdata-sensor
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9101"
+        prometheus.io/path: /metrics
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 2000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-sensor
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-sensor
+      containers:
+        - name: dealdata-sensor
+          image: "${IMAGE_DEALDATA_SENSOR}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - granian
+            - sensor.asgi:application
+            - --interface
+            - asgi
+            - --host
+            - 0.0.0.0
+            - --port
+            - "7002"
+            - --workers
+            - "4"
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: RUN_MIGRATIONS
+              value: "0"
+            - name: RUN_COLLECTSTATIC
+              value: "0"
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-sensor-django-secret-key
+            - name: DEALDATA_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-ingest-token
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_SENSOR_DATABASE_HOST
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_SENSOR_DATABASE_NAME
+            - name: DATABASE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_SENSOR_DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-sensor-database-password
+          ports:
+            - name: http
+              containerPort: 7002
+          startupProbe:
+            httpGet:
+              path: /health/live/
+              port: http
+              httpHeaders: &forwarded-https-sensor
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: Host
+                  value: dealdata-sensor
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready/
+              port: http
+              httpHeaders: *forwarded-https-sensor
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health/live/
+              port: http
+              httpHeaders: *forwarded-https-sensor
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: staticfiles
+              mountPath: /app/staticfiles
+            - name: tmp
+              mountPath: /tmp
+        - name: metrics-proxy
+          image: "${IMAGE_DEALDATA_SENSOR}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "dealdata_common.metrics_proxy"]
+          args:
+            - --upstream
+            - http://127.0.0.1:7002/metrics/
+            - --upstream-ready
+            - http://127.0.0.1:7002/health/ready/
+            - --upstream-host
+            - dealdata-sensor
+            - --bind
+            - 0.0.0.0
+            - --port
+            - "9101"
+          ports:
+            - name: metrics
+              containerPort: 9101
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+              - key: kafka-ca.crt
+                path: kafka-ca.crt
+        - name: staticfiles
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealiot-console
+  labels:
+    app.kubernetes.io/name: dealiot-console
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealiot-console
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealiot-console
+        app.kubernetes.io/component: control-plane
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealiot-console
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealiot-console
+      containers:
+        - name: dealiot-console
+          image: "${IMAGE_DEALIOT_CONSOLE}"
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: MANAGEMENT_CONSOLE_OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: management-console-oidc-client-id
+            - name: MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: management-console-oidc-client-secret
+            - name: KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: kafka-console-username
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: kafka-console-password
+            - name: MQTT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: mqtt-username
+            - name: MQTT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: mqtt-password
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: kafka-ca.crt
+                path: kafka-ca.crt
+              - key: mqtt-ca.crt
+                path: mqtt-ca.crt
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mqtt-kafka-bridge
+  labels:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+    app.kubernetes.io/component: ingestion
+    app.kubernetes.io/part-of: archideal
+spec:
+  serviceName: mqtt-kafka-bridge
+  podManagementPolicy: Parallel
+  revisionHistoryLimit: 5
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mqtt-kafka-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mqtt-kafka-bridge
+        app.kubernetes.io/component: ingestion
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          minDomains: 3
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: mqtt-kafka-bridge
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: mqtt-kafka-bridge
+      containers:
+        - name: bridge
+          image: "${IMAGE_MQTT_KAFKA_BRIDGE}"
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: MQTT_CLIENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MQTT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: mqtt-username
+            - name: MQTT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: mqtt-password
+            - name: KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: kafka-producer-username
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: kafka-producer-password
+          ports:
+            - name: health
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: kafka-ca.crt
+                path: kafka-ca.crt
+              - key: mqtt-ca.crt
+                path: mqtt-ca.crt
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealinterface
+  labels:
+    app.kubernetes.io/name: dealinterface
+    app.kubernetes.io/component: web
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealinterface
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealinterface
+        app.kubernetes.io/component: web
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealinterface
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealinterface
+      containers:
+        - name: dealinterface
+          image: "${IMAGE_DEALINTERFACE}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealhost
+  labels:
+    app.kubernetes.io/name: dealhost
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealhost
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 2000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          minDomains: 3
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealhost
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealhost
+      containers:
+        - name: dealhost
+          image: "${IMAGE_DEALHOST}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - >-
+              python manage.py check --deploy &&
+              python manage.py collectstatic --noinput &&
+              exec granian --host 0.0.0.0 --port 8000 --interface asgi
+              dealhost.asgi:application
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: DJANGO_SETTINGS_MODULE
+              value: dealhost.settings.prod
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-django-secret-key
+            - name: DEALHOST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-database-password
+            - name: VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: valkey-url
+            - name: DEALHOST_API_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-api-tokens
+            - name: DEALHOST_ADMIN_API_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-admin-api-tokens
+            - name: APISIX_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: apisix-admin-key
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: github-token
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: github-webhook-secret
+            - name: DEALHOST_OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-oidc-client-id
+            - name: DEALHOST_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-oidc-client-secret
+          ports:
+            - name: http
+              containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /api/gateway/health/live/
+              port: http
+              httpHeaders:
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: Host
+                  value: dealhost
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/gateway/health/ready/
+              port: http
+              httpHeaders:
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: Host
+                  value: dealhost
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 4
+          livenessProbe:
+            httpGet:
+              path: /api/gateway/health/live/
+              port: http
+              httpHeaders:
+                - name: X-Forwarded-Proto
+                  value: https
+                - name: Host
+                  value: dealhost
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: staticfiles
+              mountPath: /app/staticfiles
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+        - name: staticfiles
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

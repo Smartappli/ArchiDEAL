@@ -534,8 +534,9 @@ class RepositoryUnitTests(unittest.TestCase):
         for forbidden in ["innerHTML", "outerHTML", "document.write", "dataset["]:
             self.assertNotIn(forbidden, app_js)
         self.assertIn("dataAttributeName", app_js)
-        self.assertIn('fetch("/api/architecture"', app_js)
-        self.assertIn('fetch("/api/health"', app_js)
+        self.assertIn('publicBasePath = "/dealiot"', app_js)
+        self.assertIn('fetch(`${publicBasePath}/api/architecture`', app_js)
+        self.assertIn('fetch(`${publicBasePath}/api/health`', app_js)
         self.assertNotIn("fetch(endpoint", app_js)
 
     def test_public_website_is_externalized_to_dealwebsite(self) -> None:

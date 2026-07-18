@@ -18,7 +18,7 @@ request-path dependency on the platform.
 | DEALIoT bridge | Kafka | DEALData Sensor consumer | `raw.sensor` envelope |
 | DEALInterface | HTTP, same origin | APISIX | `/dealhost`, `/dealiot`, `/dealdata/*` |
 | DEALHost | HTTP Admin API | APISIX | idempotent route PUTs |
-| APISIX | HTTP | component services | prefix removed by `proxy-rewrite` |
+| APISIX | HTTP | component services | prefix removed by `proxy-rewrite`; the trusted edge scheme is preserved in `X-Forwarded-Proto` |
 
 DEALData persists Kafka messages through the same ingestion functions as its HTTP ingestion APIs.
 Idempotency is based first on `source + event_id` and then on the normalized payload hash.
@@ -54,5 +54,22 @@ high-availability DEALIoT topology. The original full Compose, Kubernetes and Sw
 `components/DEALIoT`. They cover multi-broker Kafka, clustered MQTT, Flink, Beam, Airflow, Apicurio,
 SeaweedFS and observability, and require their own production capacity and secrets review.
 
-The compact stack is the mandatory cross-component integration gate. A full production profile can
-be added only after it passes the same root contracts and smoke scenario.
+The compact stack is the mandatory cross-component integration gate. Production uses the separate
+root Kubernetes baseline in `deploy/kubernetes`; it does not inherit the development brokers,
+databases or credentials from Compose.
+
+## Production trust boundaries
+
+The supported production profile is a private, operator-only, single-tenant control plane:
+
+1. an Ingress controller terminates TLS from the public network;
+2. oauth2-proxy completes OIDC Authorization Code flow and admits only the configured operator
+   group;
+3. APISIX accepts data-plane traffic only from oauth2-proxy and exposes no public Admin API;
+4. NetworkPolicies allow each workload only the upstreams it owns;
+5. Kafka, MQTT, PostgreSQL, Valkey and etcd are external HA services using authenticated TLS;
+6. External Secrets Operator projects short-lived or rotated credentials into restricted pods;
+7. APISIX exports metrics and traces to the configured monitoring plane.
+
+Anonymous or multi-tenant access is not part of this profile. It requires application-level tenant
+identity and resource authorization in every component before exposure.

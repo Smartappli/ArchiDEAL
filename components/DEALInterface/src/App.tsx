@@ -11,6 +11,7 @@ import { ServiceConnections } from "./components/ServiceConnections";
 import { TopologyMap } from "./components/TopologyMap";
 import { LanguageSelector } from "./components/LanguageSelector";
 import { moduleRuntimeConfig } from "./config/moduleRegistry";
+import { showDemoData } from "./config/runtimeMode";
 import { activityFeed, dashboardMetrics, dealModules, moduleControlProfiles, operatorActions } from "./data/dashboard";
 import { useModuleConnections } from "./hooks/useModuleConnections";
 import { I18nProvider, useI18n } from "./i18n/I18nProvider";
@@ -38,7 +39,9 @@ function AppContent() {
     () =>
       dealModules.map((module) => ({
         ...module,
-        status: connections[module.key]?.status ?? module.status,
+        metrics: showDemoData ? module.metrics : [],
+        status:
+          connections[module.key]?.status ?? (showDemoData ? module.status : "attention"),
       })),
     [connections],
   );
@@ -49,8 +52,11 @@ function AppContent() {
   const activeProfile = moduleControlProfiles[activeModule.key];
   const nextAction = useMemo(
     () =>
-      [...operatorActions].sort((left, right) => actionPriorityRank[left.priority] - actionPriorityRank[right.priority])[0] ??
-      null,
+      showDemoData
+        ? [...operatorActions].sort(
+            (left, right) => actionPriorityRank[left.priority] - actionPriorityRank[right.priority],
+          )[0] ?? null
+        : null,
     [],
   );
   const nextActionModule = nextAction ? liveModules.find((module) => module.key === nextAction.moduleKey) : undefined;
@@ -113,16 +119,22 @@ function AppContent() {
           </div>
 
           <div className="hero-console reveal" style={{ "--order": 1 } as CSSProperties}>
-            <span>{t("hero.consoleTitle")}</span>
-            <strong>84%</strong>
-            <p>{t("hero.consoleDescription")}</p>
-            <div className="hero-console__bar" aria-hidden="true">
-              <span />
-            </div>
+            <span>{showDemoData ? t("hero.consoleTitle") : t("production.liveOnlyTitle")}</span>
+            <strong>{showDemoData ? "84%" : "LIVE"}</strong>
+            <p>
+              {showDemoData
+                ? t("hero.consoleDescription")
+                : t("production.liveOnlyDescription")}
+            </p>
+            {showDemoData ? (
+              <div className="hero-console__bar" aria-hidden="true">
+                <span />
+              </div>
+            ) : null}
           </div>
         </section>
 
-        <MetricsGrid metrics={dashboardMetrics} />
+        {showDemoData ? <MetricsGrid metrics={dashboardMetrics} /> : null}
 
         <section className="module-section" id="modules" aria-labelledby="modules-title">
           <div className="section-heading">
@@ -157,16 +169,18 @@ function AppContent() {
             onSelectModule={setActiveKey}
             runtimes={moduleRuntimeConfig}
           />
-          <OperatorQueue
-            actions={operatorActions}
-            activeKey={activeKey}
-            modules={liveModules}
-            onSelectModule={setActiveKey}
-          />
-          <ControlProfile module={activeModule} profile={activeProfile} />
+          {showDemoData ? (
+            <OperatorQueue
+              actions={operatorActions}
+              activeKey={activeKey}
+              modules={liveModules}
+              onSelectModule={setActiveKey}
+            />
+          ) : null}
+          {showDemoData ? <ControlProfile module={activeModule} profile={activeProfile} /> : null}
           <TopologyMap activeKey={activeKey} modules={liveModules} />
-          <CommandCenter />
-          <ActivityFeed items={activityFeed} />
+          {showDemoData ? <CommandCenter /> : null}
+          {showDemoData ? <ActivityFeed items={activityFeed} /> : null}
         </section>
       </main>
     </div>

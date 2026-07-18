@@ -10,16 +10,18 @@ The GitHub connector can create trees and commits but cannot push Git packfiles,
 does not contain the complete historical commit graphs. The original repositories remain the
 authoritative history for all pre-migration changes and must stay accessible.
 
-## Cutover sequence
+## Cutover status
 
-1. Review and merge the ArchiDEAL bootstrap pull request.
-2. Protect `main` and require the root component and architecture checks.
-3. Move coordinated issues and release planning to ArchiDEAL.
-4. Mark the four source repositories read-only or convert them to documented mirrors only after all
-   consumers, webhooks and package/image automation use ArchiDEAL.
-5. Do not accept independent source changes unless an explicit backport/forward-port procedure is
-   used; otherwise the copies will diverge.
-6. Tag the first compatibility-tested ArchiDEAL release only after the root smoke test passes.
+The bootstrap was merged in ArchiDEAL pull request #1. The four former source repositories now keep
+only a redirect README on `main`; their earlier commits remain the authoritative pre-migration
+history. New code, issues, releases, image automation and coordinated changes belong in ArchiDEAL.
+
+Before the first production tag:
+
+1. protect `main` and require component, architecture, security and production-manifest checks;
+2. build and attest every release image once, then promote the same digests;
+3. pass the root integration smoke and the production acceptance gates;
+4. record backup restoration and rollback evidence for the target environment.
 
 ## Directory ownership
 

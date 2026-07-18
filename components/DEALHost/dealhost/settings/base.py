@@ -7,6 +7,7 @@ from django.utils.translation import gettext_lazy as _
 from .env import (
     apisix_config,
     cache_config,
+    database_config,
     get_csv_env,
     get_env,
     github_config,
@@ -62,14 +63,7 @@ TEMPLATES = [
 
 ASGI_APPLICATION = "dealhost.asgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": Path(
-            get_env("DEALHOST_DB_PATH", str(BASE_DIR / "db.sqlite3")),
-        ),
-    },
-}
+DATABASES = {"default": database_config(BASE_DIR)}
 
 LANGUAGE_CODE = "fr-fr"
 LANGUAGES = [
@@ -99,6 +93,10 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": cache_config().valkey_url,
+        "OPTIONS": {
+            "socket_connect_timeout": 2.0,
+            "socket_timeout": 2.0,
+        },
     },
 }
 
@@ -142,6 +140,22 @@ REST_FRAMEWORK = {
 
 DEALHOST_API_TOKENS = get_csv_env("DEALHOST_API_TOKENS", "")
 DEALHOST_ADMIN_API_TOKENS = get_csv_env("DEALHOST_ADMIN_API_TOKENS", "")
+DEALHOST_OIDC_INTROSPECTION_URL = get_env(
+    "DEALHOST_OIDC_INTROSPECTION_URL",
+    "",
+).strip()
+DEALHOST_OIDC_ISSUER = get_env("DEALHOST_OIDC_ISSUER", "").strip()
+DEALHOST_OIDC_AUDIENCE = get_env("DEALHOST_OIDC_AUDIENCE", "").strip()
+DEALHOST_OIDC_CLIENT_ID = get_env("DEALHOST_OIDC_CLIENT_ID", "").strip()
+DEALHOST_OIDC_CLIENT_SECRET = get_env(
+    "DEALHOST_OIDC_CLIENT_SECRET",
+    "",
+).strip()
+DEALHOST_OIDC_READ_GROUPS = get_csv_env("DEALHOST_OIDC_READ_GROUPS", "")
+DEALHOST_OIDC_ADMIN_GROUPS = get_csv_env("DEALHOST_OIDC_ADMIN_GROUPS", "")
+DEALHOST_OIDC_TIMEOUT_SECONDS = float(
+    get_env("DEALHOST_OIDC_TIMEOUT_SECONDS", "3"),
+)
 
 GITHUB = github_config()
 APISIX = apisix_config()

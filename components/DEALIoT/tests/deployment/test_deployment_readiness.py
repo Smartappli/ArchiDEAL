@@ -957,7 +957,7 @@ class DeploymentReadinessTests(unittest.TestCase):
             "COPY --chown=root:root --chmod=0555 management-console/management_console",
             management_console_dockerfile,
         )
-        self.assertIn("USER appuser", management_console_dockerfile)
+        self.assertIn("USER 10001:10001", management_console_dockerfile)
 
     def test_flink_runtime_logs_suppress_kafka_client_info_noise(self) -> None:
         log4j_config = (REPO_ROOT / "flink" / "log4j-console.properties").read_text(

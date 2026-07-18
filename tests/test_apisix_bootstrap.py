@@ -44,7 +44,9 @@ class ApisixBootstrapTests(unittest.TestCase):
 
         with (
             mock.patch.object(self.bootstrap, "ROUTES_FILE", routes_file),
+            mock.patch.object(self.bootstrap, "PLUGIN_METADATA_FILE", ""),
             mock.patch.object(self.bootstrap, "wait_for_admin_api"),
+            mock.patch.object(self.bootstrap, "remove_stale_managed_routes") as remove,
             mock.patch.object(self.bootstrap, "request", return_value=201) as request,
         ):
             self.bootstrap.main()
@@ -53,6 +55,84 @@ class ApisixBootstrapTests(unittest.TestCase):
             "/apisix/admin/routes/archideal-interface",
             method="PUT",
             payload={"uris": ["/", "/*"], "priority": -100},
+        )
+        remove.assert_called_once_with({"archideal-interface"})
+
+    def test_stale_bootstrap_routes_are_removed_but_dynamic_routes_are_preserved(self) -> None:
+        response = {
+            "total": 3,
+            "list": [
+                {"key": "/apisix/routes/archideal-interface", "value": {}},
+                {"key": "/apisix/routes/archideal-obsolete", "value": {}},
+                {"key": "/apisix/routes/module-dealdata", "value": {}},
+            ],
+        }
+        with (
+            mock.patch.object(
+                self.bootstrap,
+                "request_json",
+                return_value=(200, response),
+            ),
+            mock.patch.object(self.bootstrap, "request", return_value=200) as request,
+        ):
+            self.bootstrap.remove_stale_managed_routes({"archideal-interface"})
+
+        request.assert_called_once_with(
+            "/apisix/admin/routes/archideal-obsolete",
+            method="DELETE",
+        )
+
+    def test_route_listing_follows_pagination(self) -> None:
+        first_page = {
+            "total": 101,
+            "list": [
+                {"key": f"/apisix/routes/module-{index}", "value": {}}
+                for index in range(100)
+            ],
+        }
+        second_page = {
+            "total": 101,
+            "list": [
+                {"key": "/apisix/routes/archideal-stale", "value": {}},
+            ],
+        }
+        with mock.patch.object(
+            self.bootstrap,
+            "request_json",
+            side_effect=[(200, first_page), (200, second_page)],
+        ) as request_json:
+            route_ids = self.bootstrap.installed_managed_route_ids()
+
+        self.assertEqual(route_ids, {"archideal-stale"})
+        self.assertEqual(request_json.call_count, 2)
+
+    def test_plugin_metadata_is_installed_before_routes(self) -> None:
+        metadata_file = mock.Mock()
+        metadata_file.read_text.return_value = json.dumps(
+            {
+                "plugin_metadata": {
+                    "opentelemetry": {
+                        "collector": {"address": "otel:4318"},
+                    },
+                },
+            }
+        )
+
+        with (
+            mock.patch.object(
+                self.bootstrap,
+                "PLUGIN_METADATA_FILE",
+                "/bootstrap/plugin-metadata.json",
+            ),
+            mock.patch.object(self.bootstrap, "Path", return_value=metadata_file),
+            mock.patch.object(self.bootstrap, "request", return_value=201) as request,
+        ):
+            self.bootstrap.install_plugin_metadata()
+
+        request.assert_called_once_with(
+            "/apisix/admin/plugin_metadata/opentelemetry",
+            method="PUT",
+            payload={"collector": {"address": "otel:4318"}},
         )
 
 

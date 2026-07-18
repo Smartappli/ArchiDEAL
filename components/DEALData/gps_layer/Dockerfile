@@ -1,5 +1,5 @@
 # Stage 1: Build with all dependencies
-FROM python:3.14-slim-trixie AS builder
+FROM python:3.14-slim-trixie@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS builder
 
 ARG APP_HOME=/app
 WORKDIR ${APP_HOME}
@@ -28,7 +28,7 @@ RUN pip install --prefix=/install --no-cache-dir --require-hashes --only-binary 
  && find /install -depth -type d -name "__pycache__" -exec rm -rf {} +
 
 # Stage 2: Lightweight runtime image
-FROM python:3.14-slim-trixie AS runtime
+FROM python:3.14-slim-trixie@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS runtime
 
 ARG APP_HOME=/app
 WORKDIR ${APP_HOME}
@@ -43,7 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
- && useradd -m appuser \
+ && groupadd --gid 10001 appuser \
+ && useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser \
  && mkdir -p /app/staticfiles /app/logs /app/static /app/media \
  && chown -R appuser:appuser /app
 
@@ -64,7 +65,7 @@ RUN chmod +x /entrypoint.sh \
     && find /app -depth -type d -name "__pycache__" -exec rm -rf {} + \
     && find /app -depth -name "*.git*" -exec rm -rf {} +
 
-USER appuser
+USER 10001:10001
 
 # Expose the port (optional but handy)
 EXPOSE 7001

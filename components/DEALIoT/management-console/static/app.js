@@ -4,6 +4,8 @@ const state = {
   activePlane: "all",
 };
 
+const publicBasePath = "/dealiot";
+
 async function fetchJson(endpointName, options = {}) {
   const { headers = {}, ...requestOptions } = options;
   const init = {
@@ -13,16 +15,16 @@ async function fetchJson(endpointName, options = {}) {
   let response;
   switch (endpointName) {
     case "architecture":
-      response = await fetch("/api/architecture", init);
+      response = await fetch(`${publicBasePath}/api/architecture`, init);
       break;
     case "health":
-      response = await fetch("/api/health", init);
+      response = await fetch(`${publicBasePath}/api/health`, init);
       break;
     case "zenodoExport":
-      response = await fetch("/api/datasets/zenodo/export", init);
+      response = await fetch(`${publicBasePath}/api/datasets/zenodo/export`, init);
       break;
     case "openaireExport":
-      response = await fetch("/api/datasets/openaire/export", init);
+      response = await fetch(`${publicBasePath}/api/datasets/openaire/export`, init);
       break;
     default:
       throw new Error("Endpoint API non autorise");

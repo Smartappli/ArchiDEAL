@@ -49,4 +49,38 @@ def check_deployment_security(app_configs, **kwargs):
                 id="dealdata.E004",
             ),
         )
+    database = settings.DATABASES["default"]
+    if database.get("ENGINE") != "django.db.backends.postgresql":
+        errors.append(
+            Error(
+                "PostgreSQL is required in production.",
+                hint="Set DATABASE_USE_POSTGRES=true and DATABASE_HOST.",
+                id="dealdata.E005",
+            ),
+        )
+    if not database.get("PASSWORD"):
+        errors.append(
+            Error(
+                "A PostgreSQL password is required in production.",
+                hint="Load DATABASE_PASSWORD from the secret manager.",
+                id="dealdata.E006",
+            ),
+        )
+    database_options = database.get("OPTIONS", {})
+    if database_options.get("sslmode") != "verify-full":
+        errors.append(
+            Error(
+                "PostgreSQL certificate and hostname verification are required.",
+                hint="Set DATABASE_SSLMODE=verify-full.",
+                id="dealdata.E007",
+            ),
+        )
+    if not database_options.get("sslrootcert"):
+        errors.append(
+            Error(
+                "The PostgreSQL CA certificate is required in production.",
+                hint="Set DATABASE_SSLROOTCERT to the mounted CA path.",
+                id="dealdata.E008",
+            ),
+        )
     return errors

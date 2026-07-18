@@ -1,0 +1,383 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dealhost-migrate-${RELEASE_ID}
+  labels:
+    app.kubernetes.io/name: dealhost-migrate
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealhost-migrate
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: archideal
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      serviceAccountName: archideal-migrations
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: "${IMAGE_DEALHOST}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - python manage.py check --deploy && python manage.py migrate --noinput
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: DJANGO_SETTINGS_MODULE
+              value: dealhost.settings.migration
+            - name: DEALHOST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-database-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dealdata-core-migrate-${RELEASE_ID}
+  labels:
+    app.kubernetes.io/name: dealdata-core-migrate
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealdata-core-migrate
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: archideal
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      serviceAccountName: archideal-migrations
+      automountServiceAccountToken: false
+      securityContext: &job-pod-security
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: "${IMAGE_DEALDATA_CORE}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - python manage.py check --deploy && python manage.py migrate --noinput
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-core-django-secret-key
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_CORE_DATABASE_HOST
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_CORE_DATABASE_NAME
+            - name: DATABASE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_CORE_DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-core-database-password
+          resources: &migration-resources
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext: &job-container-security
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts: &migration-mounts
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes: &migration-volumes
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dealdata-gps-migrate-${RELEASE_ID}
+  labels:
+    app.kubernetes.io/name: dealdata-gps-migrate
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealdata-gps-migrate
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: archideal
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      serviceAccountName: archideal-migrations
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: "${IMAGE_DEALDATA_GPS}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - python manage.py check --deploy && python manage.py migrate --noinput
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-gps-django-secret-key
+            - name: DEALDATA_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-ingest-token
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_GPS_DATABASE_HOST
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_GPS_DATABASE_NAME
+            - name: DATABASE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_GPS_DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-gps-database-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dealdata-sensor-migrate-${RELEASE_ID}
+  labels:
+    app.kubernetes.io/name: dealdata-sensor-migrate
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealdata-sensor-migrate
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: archideal
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      serviceAccountName: archideal-migrations
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: "${IMAGE_DEALDATA_SENSOR}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - python manage.py check --deploy && python manage.py migrate --noinput
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-sensor-django-secret-key
+            - name: DEALDATA_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-ingest-token
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_SENSOR_DATABASE_HOST
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_SENSOR_DATABASE_NAME
+            - name: DATABASE_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: archideal-runtime
+                  key: DEALDATA_SENSOR_DATABASE_USER
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-sensor-database-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+        - name: tmp
+          emptyDir: {}

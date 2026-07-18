@@ -79,6 +79,13 @@ def env_float(
 def database_config(base_dir: Path, default_name: str) -> dict[str, object]:
     """Return a SQLite development DB or PostgreSQL production DB."""
     if env_bool("DATABASE_USE_POSTGRES") or os.environ.get("DATABASE_HOST"):
+        options: dict[str, object] = {"connect_timeout": 3}
+        sslmode = os.environ.get("DATABASE_SSLMODE", "").strip()
+        if sslmode:
+            options["sslmode"] = sslmode
+        sslrootcert = os.environ.get("DATABASE_SSLROOTCERT", "").strip()
+        if sslrootcert:
+            options["sslrootcert"] = sslrootcert
         return {
             "ENGINE": "django.db.backends.postgresql",
             "NAME": os.environ.get("DATABASE_NAME", default_name),
@@ -91,6 +98,8 @@ def database_config(base_dir: Path, default_name: str) -> dict[str, object]:
                 default=60,
                 minimum=0,
             ),
+            "CONN_HEALTH_CHECKS": True,
+            "OPTIONS": options,
         }
     return {
         "ENGINE": "django.db.backends.sqlite3",

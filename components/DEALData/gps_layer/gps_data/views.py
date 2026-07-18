@@ -51,19 +51,12 @@ def health_ready(request):
 def metrics(request):
     """Return minimal Prometheus metrics for the GPS service."""
     del request
-    total_events = WildFiGPSFix.objects.count()
-    total_devices = WildFiGPSFix.objects.values("wildfi_device_id").distinct().count()
     return prometheus_metrics_response(
         [
             (
-                "dealdata_gps_wildfi_events_total",
-                "Stored WildFi GPS events.",
-                total_events,
-            ),
-            (
-                "dealdata_gps_wildfi_devices_total",
-                "WildFi GPS devices.",
-                total_devices,
+                "dealdata_gps_service_info",
+                "DEALData GPS service availability marker.",
+                1,
             ),
         ],
     )

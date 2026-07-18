@@ -223,19 +223,10 @@ def test_observability_endpoints_reject_unsafe_methods(path: str) -> None:
     CHECK.assertEqual(response.headers["Allow"], "GET, HEAD")
 
 
-@pytest.mark.django_db
 def test_metrics_exposes_prometheus_counts() -> None:
-    """Metrics endpoint exposes core domain counters."""
-    user = create_test_user(username="metrics-owner")
-    Project.objects.create(
-        project_code="DEAL-METRICS",
-        project_primary_owner=user,
-    )
-    ObservedObject.objects.create(observed_object_code="OBJ-METRICS")
-
+    """Metrics endpoint exposes a cheap service marker without inventory scans."""
     response = Client().get("/metrics/")
     text = response.content.decode()
 
     CHECK.assertEqual(response.status_code, 200)
-    CHECK.assertIn("dealdata_core_projects_total 1", text)
-    CHECK.assertIn("dealdata_core_observed_objects_total 1", text)
+    CHECK.assertIn("dealdata_core_service_info 1", text)
