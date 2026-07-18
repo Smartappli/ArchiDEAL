@@ -70,4 +70,10 @@ describe("PlatformHealth", () => {
 
     expect(onRefresh).toHaveBeenCalledOnce();
   });
+
+  it("keeps rendering when an API returns an invalid check timestamp", () => {
+    renderHealth({ dealhost: { ...onlineConnection, checkedAt: "not-a-date" } });
+
+    expect(screen.getByText("First check in progress")).toBeInTheDocument();
+  });
 });

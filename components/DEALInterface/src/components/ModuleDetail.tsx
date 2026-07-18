@@ -35,7 +35,9 @@ export function ModuleDetail({ module, runtime, connection }: ModuleDetailProps)
         <StatusPill status={connection ? module.status : "pending"} />
       </div>
 
-      <p className="module-detail__summary">{t(statusCopyKeys[module.status])}</p>
+      <p className="module-detail__summary">
+        {connection ? t(statusCopyKeys[module.status]) : t("module.waitingForProbe")}
+      </p>
 
       <div className="runtime-card">
         <span>{connection ? t("module.liveEndpoint") : t("module.runtimeEndpoint")}</span>
