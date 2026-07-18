@@ -204,11 +204,10 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
     metrics.set_kafka_ready(true);
     let mut mqtt_options = MqttOptions::new(
         config.mqtt_client_id.clone(),
-        config.mqtt_host.clone(),
-        config.mqtt_port,
+        (config.mqtt_host.clone(), config.mqtt_port),
     );
     mqtt_options
-        .set_keep_alive(Duration::from_secs(30))
+        .set_keep_alive(30)
         .set_clean_session(config.mqtt_clean_session)
         .set_manual_acks(true);
 
@@ -220,7 +219,7 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
         configure_mqtt_tls(config, &mut mqtt_options)?;
     }
 
-    let (client, mut eventloop) = AsyncClient::new(mqtt_options, 100);
+    let (client, mut eventloop) = AsyncClient::builder(mqtt_options).capacity(100).build();
     for topic in &config.mqtt_topics {
         client
             .subscribe(topic.clone(), QoS::AtLeastOnce)
@@ -589,7 +588,7 @@ mod tests {
     }
 
     fn mqtt_options() -> MqttOptions {
-        MqttOptions::new("unit-test", "localhost", 8883)
+        MqttOptions::new("unit-test", ("localhost", 8883))
     }
 
     fn write_tls_file(directory: &Path, name: &str) -> String {
