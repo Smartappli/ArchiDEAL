@@ -5,7 +5,7 @@ FROM rust:1.89-bookworm@sha256:948f9b08a66e7fe01b03a98ef1c7568292e07ec2e4fe90d88
 WORKDIR /src
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates cmake musl-tools perl pkg-config \
+ && apt-get install -y --no-install-recommends ca-certificates cmake g++ musl-tools perl pkg-config \
  && rm -rf /var/lib/apt/lists/*
 
 RUN rustup target add x86_64-unknown-linux-musl
@@ -21,7 +21,8 @@ COPY --chmod=0444 stream-normalizer/src /src/stream-normalizer/src
 COPY --chmod=0444 wildfi-decoder-runner/Cargo.toml /src/wildfi-decoder-runner/Cargo.toml
 COPY --chmod=0444 wildfi-decoder-runner/src /src/wildfi-decoder-runner/src
 
-ENV CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
+ENV CARGO_BUILD_TARGET=x86_64-unknown-linux-musl \
+    CXX_x86_64_unknown_linux_musl=g++
 
 RUN cargo build --release --locked -p dealiot-mqtt-kafka-bridge
 
