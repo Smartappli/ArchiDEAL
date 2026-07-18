@@ -29,7 +29,9 @@ export function PlatformHealth({ connections, isRefreshing, modules, onRefresh }
   const observedConnections = modules
     .map((module) => connections[module.key])
     .filter((connection): connection is ModuleConnection => Boolean(connection));
-  const operationalCount = observedConnections.filter((connection) => connection.status === "online").length;
+  const operationalCount = observedConnections.filter(
+    (connection) => connection.status === "online" || connection.status === "protected",
+  ).length;
   const issueCount = observedConnections.length - operationalCount;
   const isPending = observedConnections.length < modules.length;
   const status: DisplayStatus = isPending

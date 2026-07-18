@@ -158,6 +158,29 @@ describe("fetchModuleConnection", () => {
     });
   });
 
+  it("reports authentication challenges as protected services, not offline services", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(textResponse("authentication required", 401))
+      .mockResolvedValueOnce(textResponse("forbidden", 403));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const connection = await fetchModuleConnection(
+      runtimeConfig({
+        probes: [
+          { id: "gateway", label: "Gateway API", path: "/gateway/health" },
+          { id: "admin", label: "Admin API", path: "/admin/health" },
+        ],
+      }),
+    );
+
+    expect(connection.status).toBe("protected");
+    expect(connection.probes).toMatchObject([
+      { id: "gateway", status: "protected", httpStatus: 401, detail: "HTTP 401" },
+      { id: "admin", status: "protected", httpStatus: 403, detail: "HTTP 403" },
+    ]);
+  });
+
   it("returns an offline probe result when the network request fails", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockRejectedValueOnce(new Error("connection refused"));
     vi.stubGlobal("fetch", fetchMock);

@@ -20,6 +20,7 @@ const probeStatusLabels: Record<ProbeStatus, MessageKey> = {
   online: "service.statusOnline",
   degraded: "service.statusDegraded",
   attention: "service.statusAttention",
+  protected: "service.statusProtected",
 };
 
 const probeSummaryLabels: Partial<Record<string, MessageKey>> = {
@@ -37,7 +38,12 @@ function formatCheckedAt(value: string | undefined, locale: string) {
     return undefined;
   }
 
-  return new Date(value).toLocaleTimeString(locale, {
+  const checkedAt = new Date(value);
+  if (Number.isNaN(checkedAt.getTime())) {
+    return undefined;
+  }
+
+  return checkedAt.toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -59,7 +65,7 @@ function formatProbeDetail(probe: ModuleProbeResult, t: (key: MessageKey, params
 }
 
 function countOnline(probes: ModuleProbeResult[]) {
-  return probes.filter((probe) => probe.status === "online").length;
+  return probes.filter((probe) => probe.status === "online" || probe.status === "protected").length;
 }
 
 export function ServiceConnections({

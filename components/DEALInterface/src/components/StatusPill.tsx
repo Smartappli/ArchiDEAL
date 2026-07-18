@@ -5,6 +5,7 @@ const statusLabelKeys = {
   online: "status.online",
   degraded: "status.degraded",
   attention: "status.attention",
+  protected: "status.protected",
   pending: "status.pending",
 } as const;
 

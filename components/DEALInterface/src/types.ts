@@ -1,12 +1,12 @@
 ﻿export type ModuleKey = "dealhost" | "dealiot" | "dealdata";
 
-export type ModuleHealth = "online" | "degraded" | "attention";
+export type ModuleHealth = "online" | "degraded" | "attention" | "protected";
 
 export type ActionPriority = "critical" | "high" | "normal";
 
 export type ActionState = "open" | "in_progress" | "blocked" | "scheduled";
 
-export type ProbeStatus = "online" | "degraded" | "attention";
+export type ProbeStatus = "online" | "degraded" | "attention" | "protected";
 
 export interface DealModule {
   key: ModuleKey;
