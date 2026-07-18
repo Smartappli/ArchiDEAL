@@ -265,6 +265,33 @@ def test_deployment_checks_accept_hardened_ingestion_configuration() -> None:
     )
 
 
+@override_settings(
+    DEBUG=False,
+    SECURE_SSL_REDIRECT=True,
+    SECURE_HSTS_SECONDS=31536000,
+    SECURE_HSTS_INCLUDE_SUBDOMAINS=True,
+    DEALDATA_REQUIRE_INGEST_TOKEN=False,
+    DATABASES={
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "PASSWORD": "database-secret",  # nosec B106 - test fixture.
+            "OPTIONS": None,
+        },
+    },
+)
+def test_deployment_checks_handle_null_database_options() -> None:
+    """A null OPTIONS mapping reports TLS errors instead of crashing checks."""
+    error_ids = {
+        message.id
+        for message in run_checks(
+            tags=[Tags.security],
+            include_deployment_checks=True,
+        )
+    }
+
+    CHECK.assertTrue({"dealdata.E007", "dealdata.E008"} <= error_ids)
+
+
 def test_gps_sensor_string_representation() -> None:
     """GPS sensors are represented by their code."""
     gps_sensor = GPSSensor(gps_sensors_code="GPS-001")

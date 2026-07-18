@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "archideal.upstream-pins/v1",
+  "images": [
+    {
+      "name": "apisix",
+      "values_key": "IMAGE_APISIX",
+      "expected_repository": "apache/apisix",
+      "source_repository": "https://github.com/apache/apisix",
+      "build_repository": "https://github.com/apache/apisix-docker",
+      "source_release_prefix": "https://github.com/apache/apisix/releases/tag/",
+      "minimum_version": "3.14.1",
+      "image_tag_suffix": "-debian",
+      "runtime_contract": "apisix-version-non-root-v1",
+      "image": "apache/apisix@sha256:6cbf65f3085d1386bfd636b7e88400c163c3641841909e674af7896a5766b092",
+      "source_release": "https://github.com/apache/apisix/releases/tag/3.17.0"
+    },
+    {
+      "name": "oauth2-proxy",
+      "values_key": "IMAGE_OAUTH2_PROXY",
+      "expected_repository": "quay.io/oauth2-proxy/oauth2-proxy",
+      "source_repository": "https://github.com/oauth2-proxy/oauth2-proxy",
+      "build_repository": "https://github.com/oauth2-proxy/oauth2-proxy",
+      "source_release_prefix": "https://github.com/oauth2-proxy/oauth2-proxy/releases/tag/",
+      "minimum_version": "7.15.3",
+      "image_tag_suffix": "",
+      "runtime_contract": "oauth2-proxy-sensitive-flags-v1",
+      "image": "quay.io/oauth2-proxy/oauth2-proxy@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561",
+      "source_release": "https://github.com/oauth2-proxy/oauth2-proxy/releases/tag/v7.15.3"
+    }
+  ]
+}

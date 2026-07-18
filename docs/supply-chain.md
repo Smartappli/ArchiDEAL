@@ -29,14 +29,24 @@ required checks.
 
 ## Upstream inputs
 
-Configure these non-secret GitHub repository variables before releasing:
+The reviewed upstream coordinates are immutable, version-controlled entries in
+`deploy/kubernetes/upstream-images.json`; the release does not depend on mutable or absent GitHub
+repository variables. The current pins select APISIX 3.17.0 from `apache/apisix:3.17.0-debian`
+and oauth2-proxy v7.15.3 from `quay.io/oauth2-proxy/oauth2-proxy:v7.15.3`, always by their complete
+multi-platform manifest digest.
 
-| Variable | Required form | Enforced release contract |
-| --- | --- | --- |
-| `ARCHIDEAL_APISIX_IMAGE` | `apache/apisix@sha256:<64 lowercase hex>` | APISIX 3.14.1 or newer |
-| `ARCHIDEAL_APISIX_SOURCE_RELEASE` | `https://github.com/apache/apisix/releases/tag/<tag>` | The registry tag is exactly `<tag>-debian` |
-| `ARCHIDEAL_OAUTH2_PROXY_IMAGE` | `quay.io/oauth2-proxy/oauth2-proxy@sha256:<64 lowercase hex>` | oauth2-proxy 7.15.3 or newer |
-| `ARCHIDEAL_OAUTH2_PROXY_SOURCE_RELEASE` | `https://github.com/oauth2-proxy/oauth2-proxy/releases/tag/<tag>` | The registry tag is exactly `<tag>` |
+The `Validate release configuration` job runs before any first-party build or upstream scan. It
+fails explicitly if either required image is absent, uses a zero placeholder, does not have a
+lowercase SHA-256 digest, selects the wrong repository or release URL, falls below the policy
+floor, or names an unsupported runtime contract. Such a failure is an operator/configuration
+blocker: development validation may remain green, but no production release evidence is emitted.
+
+Upgrade a pin only through a reviewed commit to `upstream-images.json`; update
+`supply-chain-policy.yaml` in the same change if the approved repository, minimum version or
+runtime contract also changes. Before merging, review the upstream release and build repositories
+and confirm the official tag's registry manifest digest.
+The workflow then independently repeats the tag-to-digest binding, runtime contract and blocking
+vulnerability scan; a checked-in digest does not bypass those controls.
 
 The two upstream publishers are not assumed to provide a compatible Cosign identity. The release
 workflow therefore applies an explicit compensating contract to the exact upstream digests. Only

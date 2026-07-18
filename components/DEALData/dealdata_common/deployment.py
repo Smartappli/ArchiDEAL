@@ -66,7 +66,7 @@ def check_deployment_security(app_configs, **kwargs):
                 id="dealdata.E006",
             ),
         )
-    database_options = database.get("OPTIONS", {})
+    database_options = database.get("OPTIONS") or {}
     if database_options.get("sslmode") != "verify-full":
         errors.append(
             Error(

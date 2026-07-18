@@ -83,8 +83,10 @@ def installed_managed_route_ids() -> set[str]:
         if status != 200:
             raise RuntimeError(f"Unexpected APISIX route-list status {status}")
         items = payload.get("list")
+        if items is None:
+            items = []
         if not isinstance(items, list):
-            raise RuntimeError("APISIX route-list response has no list")
+            raise RuntimeError("APISIX route-list response has an invalid list format")
         for item in items:
             if not isinstance(item, dict):
                 continue

@@ -18,6 +18,8 @@ VERIFY = ROOT / "deploy/kubernetes/verify-release.py"
 POLICY = ROOT / "deploy/kubernetes/supply-chain-policy.yaml"
 EXAMPLE_VALUES = ROOT / "deploy/kubernetes/values.example.yaml"
 RELEASE_WORKFLOW = ROOT / ".github/workflows/release-images.yml"
+UPSTREAM_CONFIG = ROOT / "deploy/kubernetes/upstream-images.json"
+UPSTREAM_CONFIG_VALIDATOR = ROOT / "scripts/release-upstream-config.py"
 
 
 class ReleaseVerifierTests(unittest.TestCase):
@@ -34,6 +36,7 @@ class ReleaseVerifierTests(unittest.TestCase):
     def test_release_matrix_matches_ten_image_policy(self) -> None:
         policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))["images"]
         workflow = yaml.safe_load(RELEASE_WORKFLOW.read_text(encoding="utf-8"))
+        upstream_config = json.loads(UPSTREAM_CONFIG.read_text(encoding="utf-8"))
         jobs = workflow["jobs"]
         first_party = {
             item["values_key"]: item
@@ -41,7 +44,7 @@ class ReleaseVerifierTests(unittest.TestCase):
         }
         upstream = {
             item["values_key"]: item
-            for item in jobs["verify-upstream"]["strategy"]["matrix"]["include"]
+            for item in upstream_config["images"]
         }
         self.assertEqual(
             set(first_party),
@@ -79,6 +82,49 @@ class ReleaseVerifierTests(unittest.TestCase):
             self.assertEqual(
                 matrix["runtime_contract"], policy[values_key]["runtimeContract"]
             )
+        self.assertEqual(jobs["build-scan-sign"]["needs"], ["release-config"])
+        self.assertEqual(jobs["verify-upstream"]["needs"], ["release-config"])
+        self.assertEqual(
+            jobs["verify-upstream"]["strategy"]["matrix"],
+            "${{ fromJSON(needs.release-config.outputs.matrix) }}",
+        )
+
+    def test_reviewed_upstream_pins_are_validated_before_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "github-output"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(UPSTREAM_CONFIG_VALIDATOR),
+                    str(UPSTREAM_CONFIG),
+                    "--github-output",
+                    str(output),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            matrix = json.loads(output.read_text(encoding="utf-8").split("=", 1)[1])
+            self.assertEqual(
+                {item["values_key"] for item in matrix["include"]},
+                {"IMAGE_APISIX", "IMAGE_OAUTH2_PROXY"},
+            )
+
+    def test_upstream_pin_validator_rejects_placeholder_digest(self) -> None:
+        payload = json.loads(UPSTREAM_CONFIG.read_text(encoding="utf-8"))
+        payload["images"][0]["image"] = "apache/apisix@sha256:" + "0" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            invalid = Path(directory) / "upstream-images.json"
+            invalid.write_text(json.dumps(payload), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(UPSTREAM_CONFIG_VALIDATOR), str(invalid)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("placeholder digest", result.stderr)
 
     def test_release_workflow_binds_a_dns_safe_execution_id(self) -> None:
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")

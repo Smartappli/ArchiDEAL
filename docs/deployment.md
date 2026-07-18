@@ -55,9 +55,10 @@ Nested `.github/workflows` files under `components/` are retained as provenance 
 by GitHub; root workflows are authoritative.
 
 The authoritative `Release images` workflow assembles a signed record for all eight first-party
-images and the two approved upstream images. Configure its four non-secret upstream repository
-variables, evidence contract and retention procedure as described in
-[supply-chain.md](supply-chain.md). Do not construct a production release manifest by hand.
+images and the two approved upstream images. Its reviewed immutable upstream pins, fail-fast
+configuration gate, evidence contract and retention procedure are described in
+[supply-chain.md](supply-chain.md). Do not construct a production release manifest by hand or
+replace a reviewed digest with a tag.
 
 ## Production deployment
 
