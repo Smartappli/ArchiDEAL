@@ -10,7 +10,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Copy and install Python dependencies
 COPY ./core_layer/requirements.lock ./
-RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r requirements.lock
+RUN apk add --no-cache lz4-libs \
+    && apk add --no-cache --virtual .lz4-build-deps build-base linux-headers lz4-dev \
+    && pip install --no-cache-dir --require-hashes --only-binary :all: --no-binary lz4 -r requirements.lock \
+    && apk del .lz4-build-deps
 
 # Copy only application files needed at runtime.
 COPY ./dealdata_common/*.py ./dealdata_common/
