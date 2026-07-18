@@ -279,8 +279,13 @@ async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Resul
             event = eventloop.poll() => match event {
             Ok(Event::Incoming(Incoming::Publish(publish))) => {
                 metrics.received_total.fetch_add(1, Ordering::Relaxed);
+                let topic = String::from_utf8(publish.topic.to_vec()).map_err(|error| {
+                    BridgeError::Config(format!(
+                        "MQTT publish topic is not valid UTF-8: {error}"
+                    ))
+                })?;
                 let msg = MqttMessage {
-                    topic: publish.topic.clone(),
+                    topic,
                     payload: publish.payload.to_vec(),
                     qos: qos_number(publish.qos),
                     retain: publish.retain,
