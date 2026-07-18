@@ -5,7 +5,7 @@ FROM rust:1.89-bookworm@sha256:948f9b08a66e7fe01b03a98ef1c7568292e07ec2e4fe90d88
 WORKDIR /src
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates cmake g++ musl-tools perl pkg-config \
+ && apt-get install -y --no-install-recommends ca-certificates cmake g++ libcurl4-openssl-dev musl-tools perl pkg-config \
  && rm -rf /var/lib/apt/lists/*
 
 RUN rustup target add x86_64-unknown-linux-musl
