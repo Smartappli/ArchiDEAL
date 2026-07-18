@@ -22,6 +22,7 @@ COPY --chmod=0444 wildfi-decoder-runner/Cargo.toml /src/wildfi-decoder-runner/Ca
 COPY --chmod=0444 wildfi-decoder-runner/src /src/wildfi-decoder-runner/src
 
 ENV CARGO_BUILD_TARGET=x86_64-unknown-linux-musl \
+    CFLAGS_x86_64_unknown_linux_musl=-I/usr/include/x86_64-linux-gnu \
     CXX_x86_64_unknown_linux_musl=g++
 
 RUN cargo build --release --locked -p dealiot-mqtt-kafka-bridge
