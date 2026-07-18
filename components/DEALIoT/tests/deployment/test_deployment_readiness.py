@@ -922,7 +922,9 @@ class DeploymentReadinessTests(unittest.TestCase):
         self.assertIn("FROM rust:", bridge_dockerfile)
         self.assertIn("cargo build --release", bridge_dockerfile)
         self.assertIn("FROM scratch", bridge_dockerfile)
-        self.assertIn("dpkg-query -s ca-certificates libc6 libgcc-s1 libssl3", bridge_dockerfile)
+        self.assertIn("x86_64-unknown-linux-musl", bridge_dockerfile)
+        self.assertIn("ssl-vendored", (REPO_ROOT / "mqtt-kafka-bridge" / "Cargo.toml").read_text(encoding="utf-8"))
+        self.assertNotIn("dpkg-query", bridge_dockerfile)
         self.assertNotIn("libsasl2-2 wget", bridge_dockerfile)
         self.assertIn("--healthcheck", bridge_dockerfile)
         self.assertIn(

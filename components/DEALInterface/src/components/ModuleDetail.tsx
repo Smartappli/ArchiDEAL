@@ -7,6 +7,7 @@ const statusCopyKeys = {
   online: "status.copyOnline",
   degraded: "status.copyDegraded",
   attention: "status.copyAttention",
+  protected: "status.copyProtected",
 } as const;
 
 interface ModuleDetailProps {

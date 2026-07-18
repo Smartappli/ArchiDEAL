@@ -103,6 +103,14 @@ function classifyPayload(payload: unknown, responseOk: boolean): ProbeStatus {
   return "online";
 }
 
+function classifyResponse(payload: unknown, response: Response): ProbeStatus {
+  if (response.status === 401 || response.status === 403) {
+    return "protected";
+  }
+
+  return classifyPayload(payload, response.ok);
+}
+
 function summarizePayload(payload: unknown, httpStatus: number) {
   if (!isRecord(payload)) {
     return `HTTP ${httpStatus}`;
@@ -130,6 +138,9 @@ function overallStatus(probes: ModuleProbeResult[]): ProbeStatus {
   }
   if (probes.every((probe) => probe.status === "online")) {
     return "online";
+  }
+  if (probes.every((probe) => probe.status === "online" || probe.status === "protected")) {
+    return "protected";
   }
   if (probes.some((probe) => probe.status === "online" || probe.status === "degraded")) {
     return "degraded";
@@ -173,7 +184,7 @@ async function fetchProbe(runtime: ModuleRuntimeConfig, probe: ModuleProbeConfig
       id: probe.id,
       label: probe.label,
       url,
-      status: classifyPayload(payload, response.ok),
+      status: classifyResponse(payload, response),
       httpStatus: response.status,
       responseTimeMs,
       detail: summarizePayload(payload, response.status),

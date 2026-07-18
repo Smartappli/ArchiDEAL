@@ -61,7 +61,7 @@ class ProductionImageContracts(unittest.TestCase):
         self.assertFalse(rdkafka["default-features"])
         self.assertEqual(
             set(rdkafka["features"]),
-            {"cmake-build", "libz-static", "ssl", "tokio"},
+            {"cmake-build", "libz-static", "ssl-vendored", "tokio"},
         )
         smoke_script = (ROOT / "scripts/smoke-architecture.sh").read_text(
             encoding="utf-8"

@@ -690,6 +690,11 @@ h2 {
   background: rgba(95, 103, 91, 0.13);
 }
 
+.status-pill--protected {
+  color: #285c8f;
+  background: rgba(40, 92, 143, 0.13);
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(20rem, 0.9fr);
@@ -997,6 +1002,10 @@ h2 {
 
 .probe-card--degraded {
   border-left-color: var(--amber);
+}
+
+.probe-card--protected {
+  border-left-color: #285c8f;
 }
 
 .probe-card--attention,
