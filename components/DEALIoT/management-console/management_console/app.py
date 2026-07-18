@@ -406,6 +406,7 @@ def endpoint_probe(env_name: str, path: str | None = None) -> str | None:
 
 PROBE_OVERRIDES = {
     "vernemq": mqtt_probe,
+    "mqtt-kafka-bridge": lambda: endpoint_probe("MQTT_KAFKA_BRIDGE_HEALTH_URL"),
     "kafka": kafka_probe,
     "apicurio": apicurio_probe,
     "seaweedfs": lambda: endpoint_probe("S3_ENDPOINT_URL"),
@@ -449,33 +450,93 @@ def probe_component(component: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def health_payload() -> dict[str, Any]:
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(COMPONENTS)) as executor:
-        checks = list(executor.map(probe_component, COMPONENTS))
+def configured_component_ids(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return tuple(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+
+
+def components_for_ids(component_ids: tuple[str, ...]) -> list[dict[str, Any]]:
+    components_by_id = {component["id"]: component for component in COMPONENTS}
+    return [
+        components_by_id.get(component_id, {"id": component_id, "probe": None})
+        for component_id in component_ids
+    ]
+
+
+def probe_components(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not components:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(components)) as executor:
+        return list(executor.map(probe_component, components))
+
+
+def status_counts(checks: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for check in checks:
         counts[check["status"]] = counts.get(check["status"], 0) + 1
+    return counts
+
+
+def required_component_checks(component_ids: tuple[str, ...]) -> list[dict[str, Any]]:
+    if component_ids:
+        return probe_components(components_for_ids(component_ids))
+    return [
+        {
+            "id": "management-console-health-scope",
+            "status": "unknown",
+            "detail": "MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS must not be empty",
+            "checked_at": now_iso(),
+        }
+    ]
+
+
+def health_payload() -> dict[str, Any]:
+    catalog_ids = tuple(component["id"] for component in COMPONENTS)
+    required_ids = configured_component_ids(
+        "MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS",
+        catalog_ids,
+    )
+    optional_ids = tuple(
+        component_id
+        for component_id in configured_component_ids(
+            "MANAGEMENT_CONSOLE_OPTIONAL_COMPONENT_IDS",
+            (),
+        )
+        if component_id not in required_ids
+    )
+    required_checks = required_component_checks(required_ids)
+    optional_checks = probe_components(components_for_ids(optional_ids))
+    selected_ids = set(required_ids) | set(optional_ids)
 
     return {
         "checked_at": now_iso(),
-        "summary": counts,
-        "checks": checks,
+        # Keep the existing top-level contract focused on required dependencies so
+        # clients do not mistake an unavailable optional subsystem for a module outage.
+        "summary": status_counts(required_checks),
+        "checks": required_checks,
+        "optional_summary": status_counts(optional_checks),
+        "optional_checks": optional_checks,
+        "scope": {
+            "required": list(required_ids),
+            "optional": list(optional_ids),
+            "excluded": [
+                component_id for component_id in catalog_ids if component_id not in selected_ids
+            ],
+        },
     }
 
 
 def readiness_payload() -> tuple[HTTPStatus, dict[str, Any]]:
-    components_by_id = {component["id"]: component for component in COMPONENTS}
-    components = [
-        components_by_id[component_id]
-        for component_id in READINESS_COMPONENT_IDS
-        if component_id in components_by_id
-    ]
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=len(READINESS_COMPONENT_IDS),
-    ) as executor:
-        checks = list(executor.map(probe_component, components))
+    component_ids = configured_component_ids(
+        "MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS",
+        READINESS_COMPONENT_IDS,
+    )
+    checks = required_component_checks(component_ids)
     ready = (
-        len(checks) == len(READINESS_COMPONENT_IDS)
+        bool(component_ids)
+        and len(checks) == len(component_ids)
         and all(check["status"] == "healthy" for check in checks)
     )
     status = HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE
@@ -483,6 +544,7 @@ def readiness_payload() -> tuple[HTTPStatus, dict[str, Any]]:
         "status": "ready" if ready else "not_ready",
         "checked_at": now_iso(),
         "checks": checks,
+        "scope": {"required": list(component_ids)},
     }
 
 

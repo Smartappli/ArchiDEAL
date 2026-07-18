@@ -148,6 +148,16 @@ def validate_compose() -> None:
     if sensor_env.get("DEALDATA_SENSOR_KAFKA_TOPIC") != "raw.sensor":
         fail("Sensor topic contract drifted")
 
+    dealiot_env = services["dealiot"]["environment"]
+    if dealiot_env.get("MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS") != (
+        "vernemq,mqtt-kafka-bridge,kafka"
+    ):
+        fail("compact DEALIoT health scope must require VerneMQ, the bridge and Kafka")
+    if dealiot_env.get("MQTT_KAFKA_BRIDGE_HEALTH_URL") != (
+        "http://mqtt-kafka-bridge:8080/readyz"
+    ):
+        fail("compact DEALIoT bridge health probe must use the bridge readiness endpoint")
+
     # This root stack is intentionally HTTP-only development infrastructure.
     # DEALData entrypoints run `check --deploy` when DEBUG is false, which would
     # correctly reject the disabled SSL redirect and stop every API/consumer.
@@ -163,8 +173,25 @@ def validate_compose() -> None:
             fail(f"{service_name} must remain in development mode in root Compose")
 
     bridge_health = services["mqtt-kafka-bridge"]["healthcheck"]["test"]
-    if not any("/readyz" in str(part) for part in bridge_health):
-        fail("the Rust MQTT bridge readiness probe must check /readyz")
+    expected_bridge_health = [
+        "CMD",
+        "/usr/local/bin/dealiot-mqtt-kafka-bridge",
+        "--healthcheck",
+    ]
+    if bridge_health != expected_bridge_health:
+        fail("the Rust MQTT bridge must use its package-free readiness command")
+    bridge_source = (
+        ROOT / "components/DEALIoT/mqtt-kafka-bridge/src/main.rs"
+    ).read_text(encoding="utf-8")
+    if 'b"GET /readyz HTTP/1.1' not in bridge_source:
+        fail("the Rust MQTT bridge health command must check /readyz")
+    smoke_script = (ROOT / "scripts/smoke-architecture.sh").read_text(
+        encoding="utf-8"
+    )
+    if "mqtt-kafka-bridge --healthcheck" not in smoke_script:
+        fail("the architecture smoke test must use the bridge health command")
+    if "mqtt-kafka-bridge \\\n    wget" in smoke_script:
+        fail("the architecture smoke test must not require wget in the bridge image")
 
     host_env = services["dealhost"]["environment"]
     if host_env.get("GITHUB_REPOSITORY") != "ArchiDEAL":

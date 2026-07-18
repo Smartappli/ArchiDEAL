@@ -80,6 +80,56 @@ describe("fetchModuleConnection", () => {
     expect(secondHeaders.get("Authorization")).toBe("Bearer local-management-token");
   });
 
+  it("keeps DEALIoT online when required components are healthy and optional ones are absent", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ status: "ok", service: "management" }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          summary: { healthy: 3 },
+          checks: [
+            { id: "vernemq", status: "healthy" },
+            { id: "mqtt-kafka-bridge", status: "healthy" },
+            { id: "kafka", status: "healthy" },
+          ],
+          optional_summary: { unreachable: 11 },
+          optional_checks: [{ id: "airflow", status: "unreachable" }],
+          scope: {
+            required: ["vernemq", "mqtt-kafka-bridge", "kafka"],
+            optional: ["airflow"],
+            excluded: [],
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const connection = await fetchModuleConnection(runtimeConfig());
+
+    expect(connection.status).toBe("online");
+    expect(connection.probes[1]).toMatchObject({
+      id: "platform-components",
+      status: "online",
+      detail: "3 healthy",
+    });
+  });
+
+  it("degrades DEALIoT when a required component is unreachable", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ status: "ok", service: "management" }))
+      .mockResolvedValueOnce(jsonResponse({ summary: { healthy: 2, unreachable: 1 } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const connection = await fetchModuleConnection(runtimeConfig());
+
+    expect(connection.status).toBe("degraded");
+    expect(connection.probes[1]).toMatchObject({
+      id: "platform-components",
+      status: "degraded",
+      detail: "2 healthy, 1 unreachable",
+    });
+  });
+
   it("marks non-OK HTTP responses as attention", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse({ status: "down" }, 503));
     vi.stubGlobal("fetch", fetchMock);

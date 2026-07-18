@@ -4,7 +4,10 @@ use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, SubAck, SubscribeReasonCode};
+use std::ffi::OsStr;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -29,6 +32,8 @@ const KAFKA_HEALTH_INTERVAL: Duration = Duration::from_secs(15);
 const KAFKA_QUEUE_TIMEOUT: Duration = Duration::from_secs(5);
 const KAFKA_DELIVERY_TIMEOUT_MS: &str = "30000";
 const KAFKA_SOCKET_TIMEOUT_MS: &str = "10000";
+const LOCAL_HEALTHCHECK_ARGUMENT: &str = "--healthcheck";
+const LOCAL_HEALTHCHECK_TIMEOUT: Duration = Duration::from_secs(3);
 
 struct DurationHistogram {
     buckets: [AtomicU64; KAFKA_DELIVERY_BUCKETS.len()],
@@ -171,6 +176,10 @@ impl BridgeMetrics {
 
 #[tokio::main]
 async fn main() -> Result<(), BridgeError> {
+    if std::env::args_os().nth(1).as_deref() == Some(OsStr::new(LOCAL_HEALTHCHECK_ARGUMENT)) {
+        return run_local_readiness_check();
+    }
+
     env_logger::init();
     let config = BridgeConfig::from_env()?;
     validate_auth_config(&config)?;
@@ -193,6 +202,39 @@ async fn main() -> Result<(), BridgeError> {
             }
         }
     }
+}
+
+fn run_local_readiness_check() -> Result<(), BridgeError> {
+    let port = std::env::var("BRIDGE_HEALTH_PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse::<u16>()
+        .map_err(|error| BridgeError::Config(format!("invalid BRIDGE_HEALTH_PORT: {error}")))?;
+    let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
+    let mut stream = TcpStream::connect_timeout(&address.into(), LOCAL_HEALTHCHECK_TIMEOUT)?;
+    stream.set_read_timeout(Some(LOCAL_HEALTHCHECK_TIMEOUT))?;
+    stream.set_write_timeout(Some(LOCAL_HEALTHCHECK_TIMEOUT))?;
+    stream.write_all(b"GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+
+    let mut response = Vec::with_capacity(128);
+    while response.len() < 128 && !response.contains(&b'\n') {
+        let mut chunk = [0_u8; 32];
+        let bytes_read = stream.read(&mut chunk)?;
+        if bytes_read == 0 {
+            break;
+        }
+        response.extend_from_slice(&chunk[..bytes_read]);
+    }
+    if readiness_response_is_success(&response) {
+        Ok(())
+    } else {
+        Err(BridgeError::Config(
+            "bridge readiness endpoint did not return HTTP 200".to_string(),
+        ))
+    }
+}
+
+fn readiness_response_is_success(response: &[u8]) -> bool {
+    response.starts_with(b"HTTP/1.1 200 ") || response.starts_with(b"HTTP/1.0 200 ")
 }
 
 async fn run_bridge(config: &BridgeConfig, metrics: Arc<BridgeMetrics>) -> Result<(), BridgeError> {
@@ -414,6 +456,9 @@ fn apply_kafka_security_config(client_config: &mut ClientConfig) -> Result<(), B
     client_config.set("security.protocol", security_protocol.trim());
 
     if security_protocol.starts_with("SASL_") {
+        let sasl_mechanism = supported_kafka_sasl_mechanism(
+            &std::env::var("KAFKA_SASL_MECHANISM").unwrap_or_else(|_| "SCRAM-SHA-512".to_string()),
+        )?;
         let username = std::env::var("KAFKA_SASL_USERNAME").ok();
         let password = dealiot_mqtt_kafka_bridge::env_or_secret_file("KAFKA_SASL_PASSWORD")?;
         let (Some(username), Some(password)) = (username, password) else {
@@ -423,11 +468,7 @@ fn apply_kafka_security_config(client_config: &mut ClientConfig) -> Result<(), B
             ));
         };
         client_config
-            .set(
-                "sasl.mechanisms",
-                std::env::var("KAFKA_SASL_MECHANISM")
-                    .unwrap_or_else(|_| "SCRAM-SHA-512".to_string()),
-            )
+            .set("sasl.mechanisms", sasl_mechanism)
             .set("sasl.username", username)
             .set("sasl.password", password);
     }
@@ -446,6 +487,16 @@ fn apply_kafka_security_config(client_config: &mut ClientConfig) -> Result<(), B
     }
 
     Ok(())
+}
+
+fn supported_kafka_sasl_mechanism(value: &str) -> Result<String, BridgeError> {
+    let normalized = value.trim().to_ascii_uppercase();
+    match normalized.as_str() {
+        "PLAIN" | "SCRAM-SHA-256" | "SCRAM-SHA-512" => Ok(normalized),
+        _ => Err(BridgeError::Config(format!(
+            "unsupported KAFKA_SASL_MECHANISM {value:?}; use PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512"
+        ))),
+    }
 }
 
 fn set_optional(client_config: &mut ClientConfig, property: &str, env_name: &str) {
@@ -699,6 +750,36 @@ mod tests {
 
         metrics.reset_readiness();
         assert_eq!(metrics.errors_total.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn local_healthcheck_only_accepts_http_200() {
+        assert!(readiness_response_is_success(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+        ));
+        assert!(!readiness_response_is_success(
+            b"HTTP/1.1 503 Service Unavailable\r\n\r\n"
+        ));
+        assert!(!readiness_response_is_success(b""));
+    }
+
+    #[test]
+    fn kafka_sasl_support_is_limited_to_builtin_non_gssapi_mechanisms() {
+        for mechanism in ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"] {
+            assert_eq!(
+                supported_kafka_sasl_mechanism(mechanism).expect("mechanism must be supported"),
+                mechanism
+            );
+            let _producer = ClientConfig::new()
+                .set("bootstrap.servers", "127.0.0.1:1")
+                .set("security.protocol", "SASL_SSL")
+                .set("sasl.mechanisms", mechanism)
+                .set("sasl.username", "test-user")
+                .set("sasl.password", "test-password")
+                .create::<FutureProducer>()
+                .unwrap_or_else(|error| panic!("{mechanism} must be compiled in: {error}"));
+        }
+        assert!(supported_kafka_sasl_mechanism("GSSAPI").is_err());
     }
 
     #[test]

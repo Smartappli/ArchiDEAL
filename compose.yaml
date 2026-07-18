@@ -101,7 +101,7 @@ services:
       - event
       - api
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/readyz"]
+      test: ["CMD", "/usr/local/bin/dealiot-mqtt-kafka-bridge", "--healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -390,6 +390,8 @@ services:
     environment:
       MANAGEMENT_CONSOLE_PORT: "8080"
       MANAGEMENT_CONSOLE_PROBE_TIMEOUT_SECONDS: "0.5"
+      MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS: vernemq,mqtt-kafka-bridge,kafka
+      MQTT_KAFKA_BRIDGE_HEALTH_URL: http://mqtt-kafka-bridge:8080/readyz
       MQTT_HOST: vernemq
       MQTT_PORT: "1883"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092

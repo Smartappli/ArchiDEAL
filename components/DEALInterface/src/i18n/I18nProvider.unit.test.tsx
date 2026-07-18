@@ -42,7 +42,7 @@ describe("I18nProvider", () => {
     expect(screen.getByText("fr")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", {
-        name: "Pilotez DEALHost, DEALIot et DEALData depuis une interface unifiee.",
+        name: "Pilotez DEALHost, DEALIot et DEALData depuis une interface unifiée.",
       }),
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("fr");

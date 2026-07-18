@@ -148,6 +148,7 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
             "os.environ",
             {
                 "APICURIO_REGISTRY_URL": "https://apicurio.example/api",
+                "MQTT_KAFKA_BRIDGE_HEALTH_URL": "https://bridge.example/readyz",
                 "S3_ENDPOINT_URL": "https://s3.example",
                 "FLINK_REST_URL": "https://flink.example",
                 "PROMETHEUS_URL": "https://prometheus.example",
@@ -155,6 +156,10 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
             },
             clear=True,
         ):
+            self.assertEqual(
+                app.configured_probe({"id": "mqtt-kafka-bridge", "probe": None}),
+                "https://bridge.example/readyz",
+            )
             self.assertEqual(
                 app.configured_probe({"id": "apicurio", "probe": None}),
                 "https://apicurio.example/api/system/info",
@@ -221,10 +226,81 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
         with (
             patch("management_console.app.COMPONENTS", components),
             patch("management_console.app.probe_component", side_effect=fake_probe),
+            patch.dict("os.environ", {}, clear=True),
         ):
             payload = app.health_payload()
         self.assertEqual(payload["summary"], {"healthy": 1, "unreachable": 2})
         self.assertEqual(len(payload["checks"]), 3)
+
+    def test_health_payload_separates_required_optional_and_excluded_components(self) -> None:
+        components = [
+            {"id": "required"},
+            {"id": "optional"},
+            {"id": "not-deployed"},
+        ]
+
+        def fake_probe(component: dict[str, str]) -> dict[str, str]:
+            status = "unreachable" if component["id"] == "required" else "healthy"
+            return {"id": component["id"], "status": status, "detail": "test"}
+
+        with (
+            patch("management_console.app.COMPONENTS", components),
+            patch("management_console.app.probe_component", side_effect=fake_probe) as probe,
+            patch.dict(
+                "os.environ",
+                {
+                    "MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS": "required",
+                    "MANAGEMENT_CONSOLE_OPTIONAL_COMPONENT_IDS": "optional,required",
+                },
+                clear=True,
+            ),
+        ):
+            payload = app.health_payload()
+
+        self.assertEqual(payload["summary"], {"unreachable": 1})
+        self.assertEqual(payload["optional_summary"], {"healthy": 1})
+        self.assertEqual([check["id"] for check in payload["checks"]], ["required"])
+        self.assertEqual([check["id"] for check in payload["optional_checks"]], ["optional"])
+        self.assertEqual(
+            payload["scope"],
+            {
+                "required": ["required"],
+                "optional": ["optional"],
+                "excluded": ["not-deployed"],
+            },
+        )
+        self.assertEqual(probe.call_count, 2)
+
+    def test_unknown_required_component_fails_closed(self) -> None:
+        with (
+            patch("management_console.app.COMPONENTS", [{"id": "known"}]),
+            patch.dict(
+                "os.environ",
+                {"MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS": "configuration-typo"},
+                clear=True,
+            ),
+        ):
+            payload = app.health_payload()
+
+        self.assertEqual(payload["summary"], {"unknown": 1})
+        self.assertEqual(payload["checks"][0]["id"], "configuration-typo")
+        self.assertEqual(payload["checks"][0]["detail"], "no probe configured")
+
+    def test_empty_required_component_scope_fails_closed(self) -> None:
+        with (
+            patch("management_console.app.COMPONENTS", [{"id": "known"}]),
+            patch.dict(
+                "os.environ",
+                {"MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS": " , "},
+                clear=True,
+            ),
+        ):
+            payload = app.health_payload()
+
+        self.assertEqual(payload["summary"], {"unknown": 1})
+        self.assertEqual(payload["scope"]["required"], [])
+        self.assertEqual(payload["checks"][0]["id"], "management-console-health-scope")
+        self.assertIn("must not be empty", payload["checks"][0]["detail"])
 
     def test_readiness_requires_healthy_mqtt_and_kafka(self) -> None:
         components = [{"id": "vernemq"}, {"id": "kafka"}]
@@ -239,6 +315,7 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
         with (
             patch("management_console.app.COMPONENTS", components),
             patch("management_console.app.probe_component", side_effect=fake_probe),
+            patch.dict("os.environ", {}, clear=True),
         ):
             status, payload = app.readiness_payload()
         self.assertEqual(status, HTTPStatus.SERVICE_UNAVAILABLE)
@@ -254,10 +331,53 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
                     "detail": "test",
                 },
             ),
+            patch.dict("os.environ", {}, clear=True),
         ):
             status, payload = app.readiness_payload()
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload["status"], "ready")
+
+    def test_readiness_uses_explicit_required_scope_including_bridge(self) -> None:
+        components = [
+            {"id": "vernemq"},
+            {"id": "mqtt-kafka-bridge"},
+            {"id": "kafka"},
+        ]
+
+        def fake_probe(component: dict[str, str]) -> dict[str, str]:
+            return {
+                "id": component["id"],
+                "status": (
+                    "unreachable" if component["id"] == "mqtt-kafka-bridge" else "healthy"
+                ),
+                "detail": "test",
+            }
+
+        with (
+            patch("management_console.app.COMPONENTS", components),
+            patch("management_console.app.probe_component", side_effect=fake_probe),
+            patch.dict(
+                "os.environ",
+                {
+                    "MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS": (
+                        "vernemq,mqtt-kafka-bridge,kafka"
+                    )
+                },
+                clear=True,
+            ),
+        ):
+            status, payload = app.readiness_payload()
+
+        self.assertEqual(status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(payload["status"], "not_ready")
+        self.assertEqual(
+            payload["scope"]["required"],
+            ["vernemq", "mqtt-kafka-bridge", "kafka"],
+        )
+        self.assertEqual(
+            {check["id"] for check in payload["checks"]},
+            {"vernemq", "mqtt-kafka-bridge", "kafka"},
+        )
 
     def test_airflow_trigger_handles_credentials_url_success_and_failures(self) -> None:
         with patch.dict("os.environ", {}, clear=True):

@@ -78,6 +78,7 @@ jobs:
       - name: Generate repository vulnerability report
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.72.0
           scan-type: fs
           scan-ref: .
           scanners: vuln
@@ -90,6 +91,7 @@ jobs:
       - name: Enforce repository vulnerability policy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.72.0
           scan-type: fs
           scan-ref: .
           scanners: vuln

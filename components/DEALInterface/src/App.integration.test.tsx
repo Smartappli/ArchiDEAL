@@ -222,8 +222,8 @@ describe("App live module integrations", () => {
 
     await user.selectOptions(languageSelect, "fr");
 
-    expect(screen.getByRole("heading", { name: "Pilotez DEALHost, DEALIot et DEALData depuis une interface unifiee." })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Rafraichir" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Pilotez DEALHost, DEALIot et DEALData depuis une interface unifiée." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rafraîchir" })).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("fr");
     expect(window.localStorage.getItem("dealinterface.language")).toBe("fr");
   });

@@ -36,9 +36,13 @@ docker compose logs --timestamps mqtt-kafka-bridge dealdata-gps-consumer dealdat
 docker compose down --remove-orphans
 ```
 
-The DEALIoT `/api/health` response is expected to mark Kafka and MQTT healthy while optional full
-platform services such as Airflow, Flink, Apicurio and Prometheus remain absent or degraded in the
-compact profile.
+The compact root Compose profile explicitly requires VerneMQ, `mqtt-kafka-bridge` and Kafka.
+DEALIoT `/api/health` summarizes those required dependencies; full-platform services such as
+Airflow, Flink, Apicurio and Prometheus are excluded unless an operator explicitly adds them to the
+optional or required scope. A healthy compact response and a successful MQTT → Kafka → DEALData →
+APISIX smoke test validate development or staging integration only. They do not certify
+production readiness or replace the signed-image, infrastructure, admission, HA, backup, TLS and
+authenticated Kubernetes promotion prerequisites below.
 
 ## Release discipline
 

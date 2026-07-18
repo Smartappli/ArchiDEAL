@@ -5,6 +5,8 @@ from django.urls import reverse
 
 
 class GatewayHealthTests(TestCase):
+    invalid_basic_auth = "Basic YXJjaGlkZWFsOnN0YWdpbmc="
+
     def test_readiness_uses_the_configured_database_and_cache_backends(self):
         response = self.client.get(reverse("gateway-health-ready"))
 
@@ -67,3 +69,30 @@ class GatewayHealthTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["database"], "available")
         self.assertEqual(response.json()["cache"], "available")
+
+    @patch("apps.gateway.views._cache_is_ready", return_value=True)
+    @patch("apps.gateway.views._database_is_ready", return_value=True)
+    def test_health_endpoints_ignore_invalid_basic_auth_from_reverse_proxy(
+        self,
+        *_checks,
+    ):
+        for route_name in (
+            "gateway-health",
+            "gateway-health-live",
+            "gateway-health-ready",
+        ):
+            with self.subTest(route_name=route_name):
+                response = self.client.get(
+                    reverse(route_name),
+                    HTTP_AUTHORIZATION=self.invalid_basic_auth,
+                )
+
+                self.assertEqual(response.status_code, 200)
+
+    def test_invalid_basic_auth_remains_rejected_on_protected_endpoints(self):
+        response = self.client.get(
+            reverse("github-repositories"),
+            HTTP_AUTHORIZATION=self.invalid_basic_auth,
+        )
+
+        self.assertEqual(response.status_code, 401)

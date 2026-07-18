@@ -57,7 +57,7 @@ services:
       DEFAULT_KAFKA_TOPIC: raw.sensor
       BRIDGE_HEALTH_BIND: 0.0.0.0
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
+      test: ["CMD", "/usr/local/bin/dealiot-mqtt-kafka-bridge", "--healthcheck"]
       interval: 5s
       timeout: 3s
       retries: 30
