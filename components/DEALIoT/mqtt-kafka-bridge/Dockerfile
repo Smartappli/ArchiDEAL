@@ -6,6 +6,7 @@ WORKDIR /src
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates cmake g++ libcurl4-openssl-dev musl-tools perl pkg-config \
+ && ln -s /usr/include/x86_64-linux-gnu/curl /usr/include/x86_64-linux-musl/curl \
  && rm -rf /var/lib/apt/lists/*
 
 RUN rustup target add x86_64-unknown-linux-musl
@@ -22,7 +23,6 @@ COPY --chmod=0444 wildfi-decoder-runner/Cargo.toml /src/wildfi-decoder-runner/Ca
 COPY --chmod=0444 wildfi-decoder-runner/src /src/wildfi-decoder-runner/src
 
 ENV CARGO_BUILD_TARGET=x86_64-unknown-linux-musl \
-    CFLAGS_x86_64_unknown_linux_musl=-I/usr/include/x86_64-linux-gnu \
     CXX_x86_64_unknown_linux_musl=g++
 
 RUN cargo build --release --locked -p dealiot-mqtt-kafka-bridge
