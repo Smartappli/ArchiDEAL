@@ -1,0 +1,78 @@
+schemaVersion: archideal.supply-chain-policy/v1
+
+release:
+  repository: Smartappli/ArchiDEAL
+  workflowPath: .github/workflows/release-images.yml
+  workflowRef: refs/heads/main
+  certificateIssuer: https://token.actions.githubusercontent.com
+  certificateIdentity: https://github.com/Smartappli/ArchiDEAL/.github/workflows/release-images.yml@refs/heads/main
+
+images:
+  IMAGE_APISIX:
+    component: apisix
+    kind: upstream
+    repository: apache/apisix
+    sourceRepository: https://github.com/apache/apisix
+    buildRepository: https://github.com/apache/apisix-docker
+    sourceReleasePrefix: https://github.com/apache/apisix/releases/tag/
+    minimumVersion: "3.14.1"
+    imageTagSuffix: -debian
+    runtimeContract: apisix-version-non-root-v1
+  IMAGE_OAUTH2_PROXY:
+    component: oauth2-proxy
+    kind: upstream
+    repository: quay.io/oauth2-proxy/oauth2-proxy
+    sourceRepository: https://github.com/oauth2-proxy/oauth2-proxy
+    buildRepository: https://github.com/oauth2-proxy/oauth2-proxy
+    sourceReleasePrefix: https://github.com/oauth2-proxy/oauth2-proxy/releases/tag/
+    minimumVersion: "7.15.3"
+    imageTagSuffix: ""
+    runtimeContract: oauth2-proxy-sensitive-flags-v1
+  IMAGE_APISIX_BOOTSTRAP:
+    component: apisix-bootstrap
+    kind: first-party
+    repository: ghcr.io/smartappli/archideal-apisix-bootstrap
+    context: ./deploy/apisix
+    dockerfile: ./deploy/apisix/Dockerfile
+  IMAGE_MQTT_KAFKA_BRIDGE:
+    component: mqtt-kafka-bridge
+    kind: first-party
+    repository: ghcr.io/smartappli/archideal-mqtt-kafka-bridge
+    context: ./components/DEALIoT
+    dockerfile: ./components/DEALIoT/mqtt-kafka-bridge/Dockerfile
+  IMAGE_DEALIOT_CONSOLE:
+    component: dealiot-console
+    kind: first-party
+    repository: ghcr.io/smartappli/archideal-dealiot-console
+    context: ./components/DEALIoT
+    dockerfile: ./components/DEALIoT/management-console/Dockerfile
+  IMAGE_DEALHOST:
+    component: dealhost
+    kind: first-party
+    repository: ghcr.io/smartappli/archideal-dealhost
+    context: ./components/DEALHost
+    dockerfile: ./components/DEALHost/Dockerfile
+  IMAGE_DEALDATA_CORE:
+    component: dealdata-core
+    kind: first-party
+    repository: ghcr.io/smartappli/archideal-dealdata-core
+    context: ./components/DEALData
+    dockerfile: ./components/DEALData/core_layer/Dockerfile
+  IMAGE_DEALDATA_GPS:
+    component: dealdata-gps
+    kind: first-party
+    repository: ghcr.io/smartappli/archideal-dealdata-gps
+    context: ./components/DEALData
+    dockerfile: ./components/DEALData/gps_layer/Dockerfile
+  IMAGE_DEALDATA_SENSOR:
+    component: dealdata-sensor
+    kind: first-party
+    repository: ghcr.io/smartappli/archideal-dealdata-sensor
+    context: ./components/DEALData
+    dockerfile: ./components/DEALData/sensor_layer/Dockerfile
+  IMAGE_DEALINTERFACE:
+    component: dealinterface
+    kind: first-party
+    repository: ghcr.io/smartappli/archideal-dealinterface
+    context: ./components/DEALInterface
+    dockerfile: ./components/DEALInterface/Dockerfile

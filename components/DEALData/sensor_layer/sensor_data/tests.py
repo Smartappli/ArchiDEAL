@@ -98,6 +98,52 @@ def test_wildfi_sensor_ingest_is_idempotent() -> None:
 
 
 @pytest.mark.django_db
+def test_repeated_measurements_are_kept_while_source_redelivery_is_deduplicated() -> None:
+    """Equal values at different times are events; one stable source ID is a retry."""
+    client = APIClient()
+    measurement = {
+        "device_id": "wildfi-17",
+        "payload": {
+            "sensor_type": "temperature",
+            "value": 20,
+            "unit": "C",
+        },
+    }
+
+    first = client.post(
+        "/api/ingest/wildfi/sensor/",
+        {**measurement, "timestamp": "2026-05-24T12:30:00Z"},
+        format="json",
+    )
+    second = client.post(
+        "/api/ingest/wildfi/sensor/",
+        {**measurement, "timestamp": "2026-05-24T12:31:00Z"},
+        format="json",
+    )
+    source_delivery = {
+        **measurement,
+        "event_id": "a" * 64,
+        "timestamp": "2026-05-24T12:32:00Z",
+    }
+    first_delivery = client.post(
+        "/api/ingest/wildfi/sensor/",
+        source_delivery,
+        format="json",
+    )
+    redelivery = client.post(
+        "/api/ingest/wildfi/sensor/",
+        {**source_delivery, "ingested_at": "2026-05-24T12:32:05Z"},
+        format="json",
+    )
+
+    CHECK.assertEqual((first.status_code, second.status_code), (201, 201))
+    CHECK.assertEqual(first_delivery.status_code, 201)
+    CHECK.assertEqual(redelivery.status_code, 200)
+    CHECK.assertIs(redelivery.data["duplicate"], True)
+    CHECK.assertEqual(WildFiDecodedSensorEvent.objects.count(), 3)
+
+
+@pytest.mark.django_db
 def test_wildfi_sensor_type_is_inferred_from_dealiot_mqtt_topic() -> None:
     """Sensor ingestion infers a stable type when DEALIoT omits sensor_type."""
     client = APIClient()
@@ -395,25 +441,12 @@ def test_wildfi_sensor_list_rejects_reversed_time_window() -> None:
     CHECK.assertEqual(response.data["detail"], INVALID_LIST_QUERY_PARAMETERS_DETAIL)
 
 
-@pytest.mark.django_db
 def test_sensor_metrics_exposes_prometheus_counts() -> None:
-    """Metrics endpoint exposes stored sensor event counters."""
-    client = APIClient()
-    event = {
-        "event_id": "sensor-metric-1",
-        "device_id": "wildfi-17",
-        "timestamp": "2026-05-24T12:30:00Z",
-        "payload": {"sensor_type": "temperature", "value": 18.5},
-    }
-    client.post("/api/ingest/wildfi/sensor/", event, format="json")
-
+    """Metrics endpoint exposes a cheap service marker without inventory scans."""
     response = Client().get("/metrics/")
 
     CHECK.assertEqual(response.status_code, 200)
-    CHECK.assertIn(
-        "dealdata_sensor_wildfi_events_total 1",
-        response.content.decode(),
-    )
+    CHECK.assertIn("dealdata_sensor_service_info 1", response.content.decode())
 
 
 @pytest.mark.django_db

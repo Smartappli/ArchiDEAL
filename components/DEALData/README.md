@@ -156,6 +156,19 @@ Pour un cluster securise, configurer `DEALDATA_KAFKA_SECURITY_PROTOCOL` sur
 dans `.env.example`. Les variables generiques `KAFKA_*` de DEALIoT sont aussi
 acceptees comme valeurs de repli.
 
+Dans le deploiement Kubernetes ArchiDEAL, chaque worker expose en interne le port
+`9100`: `/healthz` ne verifie que le processus, `/readyz` exige un poll Kafka
+recent et sain ainsi qu'une base joignable, et `/metrics` publie les
+resultats, erreurs de poll/commit/base ainsi que les histogrammes de duree de
+persistance et d'age de premier enregistrement. Les variables
+`DEALDATA_CONSUMER_METRICS_PORT`, `DEALDATA_CONSUMER_STALE_AFTER_SECONDS` et
+`DEALDATA_CONSUMER_DATABASE_CHECK_INTERVAL_SECONDS` permettent d'adapter ce
+contrat. Les labels restent bornes a `service` et `result`; aucun identifiant
+d'evenement ou de device n'est exporte. Un replica en attente sans partition
+reste donc ready pour ne pas bloquer un RollingUpdate; la jauge
+`dealdata_consumer_kafka_assigned` et l'alerte de capacite signalent uniquement
+le cas ou aucun replica du service ne possede de partition.
+
 ## Contrats d'ingestion
 
 Exemple minimal `raw.gps`:
@@ -220,6 +233,11 @@ L'ingestion est idempotente. Si `event_id` est fourni, l'unicite est controlee
 par couple `source` + `event_id`. Sinon, un `payload_hash` stable est calcule
 sur le contenu de l'evenement.
 
+Le preflight de production exige aussi `min.insync.replicas >= 2` et
+`unclean.leader.election.enable=false` sur chaque topic runtime. Le compte Kafka utilise par le Job
+doit donc disposer de `Describe`, `DescribeConfigs` et de la lecture des metadonnees, sans droit de
+production ni de modification de topic.
+
 ## Lecture des evenements
 
 Les endpoints de lecture acceptent des filtres par device et intervalle
@@ -230,21 +248,22 @@ Invoke-RestMethod "http://localhost:7001/api/wildfi/gps/?device_id=wildfi-17&fro
 Invoke-RestMethod "http://localhost:7002/api/wildfi/sensor/?device_id=wildfi-17&sensor_type=temperature&from=2026-05-24T12:00:00Z&to=2026-05-24T13:00:00Z&limit=10"
 ```
 
-## Production
+## Profil Compose durci
 
-Renseigner les variables de `.env.example`, puis lancer avec l'override:
+Ce profil sert aux validations locales ou de preproduction de DEALData. Il ne
+constitue pas le deploiement de production unifie: celui-ci se fait depuis la
+racine d'ArchiDEAL avec `deploy/kubernetes/`, comme decrit dans
+`../../docs/deployment.md`.
 
-```powershell
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
-```
-
-Avec la consommation Kafka DEALIoT:
+Pour exercer le profil Compose avec la consommation Kafka DEALIoT, exporter les
+variables documentees dans `.env.example` depuis le gestionnaire de secrets puis
+lancer:
 
 ```powershell
 docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile dealiot up --build
 ```
 
-Variables obligatoires en production:
+Variables obligatoires pour ce profil durci:
 
 - `CORE_DJANGO_SECRET_KEY`, `GPS_DJANGO_SECRET_KEY`,
   `SENSOR_DJANGO_SECRET_KEY`.
@@ -254,22 +273,32 @@ Variables obligatoires en production:
 - `CORE_DATABASE_USER`, `GPS_DATABASE_USER`, `SENSOR_DATABASE_USER`.
 - `CORE_DATABASE_PASSWORD`, `GPS_DATABASE_PASSWORD`,
   `SENSOR_DATABASE_PASSWORD`.
+- `DATABASE_SSLMODE=verify-full` et `DATABASE_SSLROOTCERT_SOURCE`, chemin de la
+  CA PostgreSQL fournie par le gestionnaire de secrets.
 - `DEALDATA_INGEST_TOKEN` pour les endpoints d'ingestion GPS et Sensor.
+- `DEALDATA_KAFKA_BOOTSTRAP_SERVERS`,
+  `DEALDATA_KAFKA_SASL_USERNAME`, `DEALDATA_KAFKA_SASL_PASSWORD` et
+  `DEALDATA_KAFKA_SSL_CAFILE_SOURCE`.
 
 Le demarrage d'un conteneur de production execute `python manage.py check
---deploy` avant les migrations. Il exige HTTPS, HSTS et un jeton d'ingestion
-pour les services GPS et Sensor.
+--deploy` avant les migrations. Il exige HTTPS, HSTS, PostgreSQL avec verification
+du certificat et du nom d'hote, ainsi qu'un jeton d'ingestion pour les services
+GPS et Sensor.
+
+`docker-compose.prod.yml` monte les CA PostgreSQL et Kafka en lecture seule sous
+`/run/secrets`. Il impose `SASL_SSL`, la verification du nom d'hote Kafka et des
+identifiants SASL non vides. Les mots de passe doivent etre injectes dans
+l'environnement du processus Compose par le gestionnaire de secrets; ils ne
+doivent jamais etre ecrits dans `.env` ou dans le depot.
 
 Variables optionnelles ou avec valeur par defaut:
 
 - `CORE_DATABASE_NAME`, `GPS_DATABASE_NAME`, `SENSOR_DATABASE_NAME`.
-- `DEALDATA_KAFKA_BOOTSTRAP_SERVERS`,
-  `DEALDATA_KAFKA_AUTO_OFFSET_RESET`, `DEALDATA_KAFKA_MAX_RECORDS`,
+- `DEALDATA_KAFKA_AUTO_OFFSET_RESET`, `DEALDATA_KAFKA_MAX_RECORDS`,
   `DEALDATA_KAFKA_POLL_TIMEOUT_MS`.
-- `DEALDATA_KAFKA_SECURITY_PROTOCOL`, `DEALDATA_KAFKA_SASL_MECHANISM`,
-  `DEALDATA_KAFKA_SASL_USERNAME`, `DEALDATA_KAFKA_SASL_PASSWORD`.
-- `DEALDATA_KAFKA_SSL_CAFILE`, `DEALDATA_KAFKA_SSL_CERTFILE`,
-  `DEALDATA_KAFKA_SSL_KEYFILE`, `DEALDATA_KAFKA_SSL_CHECK_HOSTNAME`.
+- `DEALDATA_KAFKA_SASL_MECHANISM` (defaut `SCRAM-SHA-512`).
+- `DEALDATA_KAFKA_SSL_CERTFILE`, `DEALDATA_KAFKA_SSL_KEYFILE` pour une
+  identite cliente TLS optionnelle hors du profil Compose standard.
 - `DEALDATA_GPS_KAFKA_TOPIC`, `DEALDATA_GPS_KAFKA_GROUP_ID`,
   `DEALDATA_SENSOR_KAFKA_TOPIC`, `DEALDATA_SENSOR_KAFKA_GROUP_ID`.
 - `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE`,
@@ -290,9 +319,9 @@ entre `0` et `1`.
 - Les metriques exposees par `/metrics/` utilisent un format compatible
   Prometheus.
 - Les migrations doivent etre appliquees par couche avant ouverture du trafic.
-- `.env.example` contient les variables attendues avec des valeurs vides.
-  Renseigner `.env` localement ou via le gestionnaire de secrets de
-  l'environnement cible.
+- `.env.example` documente les variables attendues avec des valeurs vides. Un
+  fichier `.env` peut etre utilise localement, mais les secrets de production
+  doivent etre injectes par le gestionnaire de secrets sans fichier persistant.
 - `docker-compose.dev.yml` et `docker-compose.staging.yml` sont actuellement
   vides. Ils ne modifient donc pas le comportement tant qu'ils ne sont pas
   completes.

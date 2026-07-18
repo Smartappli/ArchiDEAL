@@ -1,0 +1,190 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: oauth2-proxy
+  ports:
+    - name: http
+      port: 4180
+      targetPort: http
+    - name: metrics
+      port: 44180
+      targetPort: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apisix
+  labels:
+    app.kubernetes.io/name: apisix
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: apisix
+  ports:
+    - name: proxy
+      port: 9080
+      targetPort: proxy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apisix-admin
+  labels:
+    app.kubernetes.io/name: apisix
+    app.kubernetes.io/component: admin
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: apisix
+  ports:
+    - name: admin
+      port: 9180
+      targetPort: admin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apisix-metrics
+  labels:
+    app.kubernetes.io/name: apisix
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: apisix
+  ports:
+    - name: metrics
+      port: 9091
+      targetPort: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dealinterface
+  labels:
+    app.kubernetes.io/name: dealinterface
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dealinterface
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dealhost
+  labels:
+    app.kubernetes.io/name: dealhost
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dealhost
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dealdata-core
+  labels:
+    app.kubernetes.io/name: dealdata-core
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dealdata-core
+  ports:
+    - name: http
+      port: 7000
+      targetPort: http
+    - name: metrics
+      port: 9101
+      targetPort: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dealdata-gps
+  labels:
+    app.kubernetes.io/name: dealdata-gps
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dealdata-gps
+  ports:
+    - name: http
+      port: 7001
+      targetPort: http
+    - name: metrics
+      port: 9101
+      targetPort: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dealdata-sensor
+  labels:
+    app.kubernetes.io/name: dealdata-sensor
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dealdata-sensor
+  ports:
+    - name: http
+      port: 7002
+      targetPort: http
+    - name: metrics
+      port: 9101
+      targetPort: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dealiot
+  labels:
+    app.kubernetes.io/name: dealiot-console
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dealiot-console
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mqtt-kafka-bridge
+  labels:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+    app.kubernetes.io/part-of: archideal
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+  ports:
+    - name: health
+      port: 8080
+      targetPort: health

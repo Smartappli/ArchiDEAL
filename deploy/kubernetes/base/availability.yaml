@@ -1,0 +1,142 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oauth2-proxy
+  labels:
+    app.kubernetes.io/name: oauth2-proxy
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: apisix
+  labels:
+    app.kubernetes.io/name: apisix
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealinterface
+  labels:
+    app.kubernetes.io/name: dealinterface
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealinterface
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealhost
+  labels:
+    app.kubernetes.io/name: dealhost
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealdata-core
+  labels:
+    app.kubernetes.io/name: dealdata-core
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealdata-core
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealdata-gps
+  labels:
+    app.kubernetes.io/name: dealdata-gps
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealdata-gps
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealdata-sensor
+  labels:
+    app.kubernetes.io/name: dealdata-sensor
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealdata-sensor
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealiot-console
+  labels:
+    app.kubernetes.io/name: dealiot-console
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealiot-console
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mqtt-kafka-bridge
+  labels:
+    app.kubernetes.io/name: mqtt-kafka-bridge
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mqtt-kafka-bridge
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealdata-gps-consumer
+  labels:
+    app.kubernetes.io/name: dealdata-gps-consumer
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealdata-gps-consumer
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealdata-sensor-consumer
+  labels:
+    app.kubernetes.io/name: dealdata-sensor-consumer
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealdata-sensor-consumer

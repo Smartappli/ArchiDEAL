@@ -11,6 +11,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use uuid::Uuid;
 
 const DEFAULT_MQTT_TOPICS: &str = "$share/ingestors/devices/#,$share/ingestors/wildfi/#";
 const MQTT_TLS_DEFAULT_PORT: u16 = 8883;
@@ -359,7 +360,7 @@ pub fn build_event(msg: &MqttMessage, config: &BridgeConfig) -> BuiltEvent {
     let ingested_at = now_iso();
     let timestamp = pick_event_timestamp(&decoded, &ingested_at);
     let source = event_source_for_topic(&msg.topic, &config.wildfi_topic_prefixes);
-    let event_id = deterministic_event_id(source, &msg.topic, &msg.payload);
+    let event_id = event_id_for_delivery(source, &msg.topic, &device_id, &decoded);
 
     let mut event = Map::new();
     if kafka_topic == RAW_SENSOR_TOPIC {
@@ -368,10 +369,7 @@ pub fn build_event(msg: &MqttMessage, config: &BridgeConfig) -> BuiltEvent {
             .cloned()
             .map_or_else(|| json!({ "value": decoded }), Value::Object);
         event.insert("device_id".to_string(), Value::String(device_id));
-        event.insert(
-            "timestamp".to_string(),
-            Value::String(timestamp.clone()),
-        );
+        event.insert("timestamp".to_string(), Value::String(timestamp.clone()));
         event.insert("ingested_at".to_string(), Value::String(ingested_at));
         event.insert("payload".to_string(), payload);
     } else if kafka_topic == RAW_GPS_TOPIC {
@@ -443,7 +441,59 @@ pub fn deterministic_event_id(source: &str, source_topic: &str, payload: &[u8]) 
     material.push(0);
     material.extend_from_slice(payload);
 
-    digest(&SHA256, &material)
+    sha256_hex(&material)
+}
+
+/// Build an idempotency key without conflating equal measurements.
+///
+/// A source-provided delivery/measurement identity is stable across a redelivery. If the
+/// source does not provide one, every MQTT delivery receives a fresh identifier: accepting a
+/// possible duplicate is safer than silently discarding a legitimate repeated measurement.
+pub fn event_id_for_delivery(
+    source: &str,
+    source_topic: &str,
+    device_id: &str,
+    decoded: &Value,
+) -> String {
+    if let Some((field, identity)) = source_event_identity(decoded) {
+        let material = format!("{field}\0{device_id}\0{identity}");
+        return deterministic_event_id(source, source_topic, material.as_bytes());
+    }
+
+    deterministic_event_id(source, source_topic, Uuid::new_v4().as_bytes())
+}
+
+fn source_event_identity(decoded: &Value) -> Option<(&'static str, String)> {
+    let object = decoded.as_object()?;
+    for field in [
+        "event_id",
+        "eventId",
+        "message_id",
+        "messageId",
+        "measurement_id",
+        "measurementId",
+        "sequence",
+        "sequence_id",
+        "sequenceId",
+        "counter",
+    ] {
+        let Some(value) = object.get(field) else {
+            continue;
+        };
+        let identity = match value {
+            Value::String(value) => value.trim().to_string(),
+            Value::Number(value) => value.to_string(),
+            _ => continue,
+        };
+        if !identity.is_empty() {
+            return Some((field, identity));
+        }
+    }
+    None
+}
+
+fn sha256_hex(material: &[u8]) -> String {
+    digest(&SHA256, material)
         .as_ref()
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -617,12 +667,45 @@ mod tests {
     }
 
     #[test]
-    fn event_identity_is_stable_and_payload_sensitive() {
-        let first = deterministic_event_id("mqtt-bridge", "devices/a", b"one");
-        let replay = deterministic_event_id("mqtt-bridge", "devices/a", b"one");
-        let changed = deterministic_event_id("mqtt-bridge", "devices/a", b"two");
+    fn identical_measurements_without_source_identity_get_distinct_delivery_ids() {
+        let decoded = json!({"temperature": 20});
+        let first = event_id_for_delivery("mqtt-bridge", "devices/a", "a", &decoded);
+        let second = event_id_for_delivery("mqtt-bridge", "devices/a", "a", &decoded);
+
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 64);
+        assert_eq!(second.len(), 64);
+    }
+
+    #[test]
+    fn source_identity_deduplicates_redelivery_with_device_scoped_keys() {
+        let first = event_id_for_delivery(
+            "mqtt-bridge",
+            "devices/a",
+            "a",
+            &json!({"message_id": "delivery-42", "temperature": 20}),
+        );
+        let replay = event_id_for_delivery(
+            "mqtt-bridge",
+            "devices/a",
+            "a",
+            &json!({"message_id": "delivery-42", "temperature": 21}),
+        );
+        let changed = event_id_for_delivery(
+            "mqtt-bridge",
+            "devices/a",
+            "a",
+            &json!({"message_id": "delivery-43", "temperature": 20}),
+        );
+        let other_device = event_id_for_delivery(
+            "mqtt-bridge",
+            "devices/a",
+            "b",
+            &json!({"message_id": "delivery-42", "temperature": 20}),
+        );
 
         assert_eq!(first, replay);
         assert_ne!(first, changed);
+        assert_ne!(first, other_device);
     }
 }

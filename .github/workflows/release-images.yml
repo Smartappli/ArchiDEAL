@@ -1,0 +1,620 @@
+name: Release images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-images-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build-scan-sign:
+    name: Build, scan and sign ${{ matrix.name }}
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mqtt-kafka-bridge
+            values_key: IMAGE_MQTT_KAFKA_BRIDGE
+            context: ./components/DEALIoT
+            dockerfile: ./components/DEALIoT/mqtt-kafka-bridge/Dockerfile
+          - name: dealdata-core
+            values_key: IMAGE_DEALDATA_CORE
+            context: ./components/DEALData
+            dockerfile: ./components/DEALData/core_layer/Dockerfile
+          - name: dealdata-gps
+            values_key: IMAGE_DEALDATA_GPS
+            context: ./components/DEALData
+            dockerfile: ./components/DEALData/gps_layer/Dockerfile
+          - name: dealdata-sensor
+            values_key: IMAGE_DEALDATA_SENSOR
+            context: ./components/DEALData
+            dockerfile: ./components/DEALData/sensor_layer/Dockerfile
+          - name: dealhost
+            values_key: IMAGE_DEALHOST
+            context: ./components/DEALHost
+            dockerfile: ./components/DEALHost/Dockerfile
+          - name: dealiot-console
+            values_key: IMAGE_DEALIOT_CONSOLE
+            context: ./components/DEALIoT
+            dockerfile: ./components/DEALIoT/management-console/Dockerfile
+          - name: dealinterface
+            values_key: IMAGE_DEALINTERFACE
+            context: ./components/DEALInterface
+            dockerfile: ./components/DEALInterface/Dockerfile
+          - name: apisix-bootstrap
+            values_key: IMAGE_APISIX_BOOTSTRAP
+            context: ./deploy/apisix
+            dockerfile: ./deploy/apisix/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve immutable image reference
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="ghcr.io/${owner}/archideal-${{ matrix.name }}"
+          tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "reference=${image}:${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push with BuildKit attestations
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.reference }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Scan the published digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+          exit-code: "1"
+          ignore-unfixed: false
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+
+      - name: Upload vulnerability results
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.name)) != ''
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # releases/v4
+        with:
+          sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-image-${{ matrix.name }}
+
+      - name: Generate CycloneDX evidence
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx
+          output: sbom-${{ matrix.name }}.cdx.json
+          exit-code: "0"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign image, SBOM and build provenance
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          CONTEXT: ${{ matrix.context }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        run: |
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg revision "$GITHUB_SHA" \
+            --arg context "$CONTEXT" \
+            --arg dockerfile "$DOCKERFILE" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '{
+              buildDefinition: {
+                buildType: "https://github.com/Attestations/GitHubActionsWorkflow@v1",
+                externalParameters: {
+                  repository: $repository,
+                  revision: $revision,
+                  workflow: ".github/workflows/release-images.yml",
+                  context: $context,
+                  dockerfile: $dockerfile,
+                  platform: "linux/amd64"
+                },
+                internalParameters: {},
+                resolvedDependencies: [{
+                  uri: ("git+https://github.com/" + $repository),
+                  digest: {gitCommit: $revision}
+                }]
+              },
+              runDetails: {
+                builder: {id: "https://github.com/docker/build-push-action"},
+                metadata: {
+                  invocationId: (
+                    "https://github.com/" + $repository + "/actions/runs/" +
+                    $run_id + "/attempts/" + $run_attempt
+                  )
+                }
+              }
+            }' > "provenance-${{ matrix.name }}.json"
+          cosign sign --yes \
+            --bundle "signature-${{ matrix.name }}.sigstore.json" \
+            "${IMAGE}@${DIGEST}"
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate "sbom-${{ matrix.name }}.cdx.json" \
+            --bundle "attestation-cyclonedx-${{ matrix.name }}.sigstore.json" \
+            "${IMAGE}@${DIGEST}"
+          cosign attest --yes \
+            --type slsaprovenance1 \
+            --predicate "provenance-${{ matrix.name }}.json" \
+            --bundle "attestation-provenance-${{ matrix.name }}.sigstore.json" \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Create release fragment
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          sbom_sha="$(sha256sum "sbom-${{ matrix.name }}.cdx.json" | cut -d' ' -f1)"
+          scan_sha="$(sha256sum "trivy-${{ matrix.name }}.sarif" | cut -d' ' -f1)"
+          provenance_sha="$(sha256sum "provenance-${{ matrix.name }}.json" | cut -d' ' -f1)"
+          signature_bundle_sha="$(sha256sum "signature-${{ matrix.name }}.sigstore.json" | cut -d' ' -f1)"
+          sbom_bundle_sha="$(sha256sum "attestation-cyclonedx-${{ matrix.name }}.sigstore.json" | cut -d' ' -f1)"
+          provenance_bundle_sha="$(sha256sum "attestation-provenance-${{ matrix.name }}.sigstore.json" | cut -d' ' -f1)"
+          jq -n \
+            --arg values_key "${{ matrix.values_key }}" \
+            --arg component "${{ matrix.name }}" \
+            --arg reference "${IMAGE}@${DIGEST}" \
+            --arg revision "$GITHUB_SHA" \
+            --arg sbom_sha "$sbom_sha" \
+            --arg scan_sha "$scan_sha" \
+            --arg provenance_sha "$provenance_sha" \
+            --arg signature_bundle_sha "$signature_bundle_sha" \
+            --arg sbom_bundle_sha "$sbom_bundle_sha" \
+            --arg provenance_bundle_sha "$provenance_bundle_sha" \
+            '{
+              valuesKey: $values_key,
+              component: $component,
+              kind: "first-party",
+              reference: $reference,
+              revision: $revision,
+              evidence: {
+                signature: {
+                  issuer: "https://token.actions.githubusercontent.com",
+                  identity: "https://github.com/Smartappli/ArchiDEAL/.github/workflows/release-images.yml@refs/heads/main"
+                },
+                attestations: ["cyclonedx", "slsaprovenance1"],
+                scanPolicy: "trivy:HIGH,CRITICAL:no-unfixed-exception",
+                sbom: {file: ("sbom-" + $component + ".cdx.json"), sha256: $sbom_sha},
+                scan: {file: ("trivy-" + $component + ".sarif"), sha256: $scan_sha},
+                provenance: {file: ("provenance-" + $component + ".json"), sha256: $provenance_sha},
+                signatureBundle: {file: ("signature-" + $component + ".sigstore.json"), sha256: $signature_bundle_sha},
+                sbomAttestationBundle: {file: ("attestation-cyclonedx-" + $component + ".sigstore.json"), sha256: $sbom_bundle_sha},
+                provenanceAttestationBundle: {file: ("attestation-provenance-" + $component + ".sigstore.json"), sha256: $provenance_bundle_sha}
+              }
+            }' \
+            > "release-${{ matrix.name }}.json"
+
+      - name: Upload image evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-fragment-${{ matrix.name }}
+          path: |
+            release-${{ matrix.name }}.json
+            sbom-${{ matrix.name }}.cdx.json
+            trivy-${{ matrix.name }}.sarif
+            provenance-${{ matrix.name }}.json
+            signature-${{ matrix.name }}.sigstore.json
+            attestation-cyclonedx-${{ matrix.name }}.sigstore.json
+            attestation-provenance-${{ matrix.name }}.sigstore.json
+          if-no-files-found: error
+          retention-days: 90
+
+  verify-upstream:
+    name: Verify upstream ${{ matrix.name }}
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: apisix
+            values_key: IMAGE_APISIX
+            expected_repository: apache/apisix
+            source_repository: https://github.com/apache/apisix
+            build_repository: https://github.com/apache/apisix-docker
+            source_release_prefix: https://github.com/apache/apisix/releases/tag/
+            minimum_version: "3.14.1"
+            image_tag_suffix: -debian
+            runtime_contract: apisix-version-non-root-v1
+            image: ${{ vars.ARCHIDEAL_APISIX_IMAGE }}
+            source_release: ${{ vars.ARCHIDEAL_APISIX_SOURCE_RELEASE }}
+          - name: oauth2-proxy
+            values_key: IMAGE_OAUTH2_PROXY
+            expected_repository: quay.io/oauth2-proxy/oauth2-proxy
+            source_repository: https://github.com/oauth2-proxy/oauth2-proxy
+            build_repository: https://github.com/oauth2-proxy/oauth2-proxy
+            source_release_prefix: https://github.com/oauth2-proxy/oauth2-proxy/releases/tag/
+            minimum_version: "7.15.3"
+            image_tag_suffix: ""
+            runtime_contract: oauth2-proxy-sensitive-flags-v1
+            image: ${{ vars.ARCHIDEAL_OAUTH2_PROXY_IMAGE }}
+            source_release: ${{ vars.ARCHIDEAL_OAUTH2_PROXY_SOURCE_RELEASE }}
+    steps:
+      - name: Set up Docker Buildx for registry inspection
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Validate approved upstream coordinates
+        id: upstream
+        env:
+          IMAGE: ${{ matrix.image }}
+          EXPECTED_REPOSITORY: ${{ matrix.expected_repository }}
+          SOURCE_RELEASE: ${{ matrix.source_release }}
+          SOURCE_RELEASE_PREFIX: ${{ matrix.source_release_prefix }}
+          MINIMUM_VERSION: ${{ matrix.minimum_version }}
+          IMAGE_TAG_SUFFIX: ${{ matrix.image_tag_suffix }}
+        run: |
+          set -euo pipefail
+          image_repository="${IMAGE%@sha256:*}"
+          image_digest="${IMAGE##*@sha256:}"
+          if [[ "$image_repository" != "$EXPECTED_REPOSITORY" ]] || \
+             [[ ! "$image_digest" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "The upstream image repository variable must contain the approved repository and a sha256 digest." >&2
+            exit 1
+          fi
+          source_tag="${SOURCE_RELEASE#"$SOURCE_RELEASE_PREFIX"}"
+          if [[ "$SOURCE_RELEASE" != "${SOURCE_RELEASE_PREFIX}${source_tag}" ]] || \
+             [[ ! "$source_tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "The upstream source release variable must identify a stable semantic release URL." >&2
+            exit 1
+          fi
+          release_version="${source_tag#v}"
+          python3 - "$release_version" "$MINIMUM_VERSION" <<'PY'
+          import re
+          import sys
+
+          current, minimum = sys.argv[1:]
+          if not all(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", item) for item in (current, minimum)):
+              raise SystemExit("Invalid upstream semantic version policy")
+          if tuple(map(int, current.split("."))) < tuple(map(int, minimum.split("."))):
+              raise SystemExit(f"Upstream version {current} is below required minimum {minimum}")
+          PY
+          approved_tag="${source_tag}${IMAGE_TAG_SUFFIX}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "source_release=$SOURCE_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "source_tag=$source_tag" >> "$GITHUB_OUTPUT"
+          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "approved_tag=$approved_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Bind approved source tag to the scanned digest
+        env:
+          IMAGE: ${{ steps.upstream.outputs.image }}
+          SOURCE_RELEASE: ${{ steps.upstream.outputs.source_release }}
+          SOURCE_TAG: ${{ steps.upstream.outputs.source_tag }}
+          APPROVED_TAG: ${{ steps.upstream.outputs.approved_tag }}
+          EXPECTED_REPOSITORY: ${{ matrix.expected_repository }}
+        run: |
+          set -euo pipefail
+          tagged_reference="${EXPECTED_REPOSITORY}:${APPROVED_TAG}"
+          registry_manifest="registry-manifest-${{ matrix.name }}.json"
+          docker buildx imagetools inspect "$tagged_reference" \
+            --format '{{json .Manifest}}' > "$registry_manifest"
+          resolved_digest="$(jq -er '.digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' "$registry_manifest")"
+          expected_digest="sha256:${IMAGE##*@sha256:}"
+          if [[ "$resolved_digest" != "$expected_digest" ]]; then
+            echo "The approved upstream tag resolves to ${resolved_digest}, not the configured ${expected_digest}." >&2
+            exit 1
+          fi
+          jq -n \
+            --arg component "${{ matrix.name }}" \
+            --arg source_release "$SOURCE_RELEASE" \
+            --arg source_tag "$SOURCE_TAG" \
+            --arg approved_tag "$APPROVED_TAG" \
+            --arg tagged_reference "$tagged_reference" \
+            --arg resolved_digest "$resolved_digest" \
+            --arg immutable_reference "$IMAGE" \
+            --slurpfile registry_manifest "$registry_manifest" \
+            '{
+              schemaVersion: "archideal.registry-tag-proof/v1",
+              component: $component,
+              sourceRelease: $source_release,
+              sourceTag: $source_tag,
+              approvedImageTag: $approved_tag,
+              taggedReference: $tagged_reference,
+              resolvedDigest: $resolved_digest,
+              immutableReference: $immutable_reference,
+              registryManifest: $registry_manifest[0]
+            }' > "registry-tag-proof-${{ matrix.name }}.json"
+          rm "$registry_manifest"
+
+      - name: Validate upstream runtime contract
+        env:
+          IMAGE: ${{ steps.upstream.outputs.image }}
+          RELEASE_VERSION: ${{ steps.upstream.outputs.release_version }}
+          RUNTIME_CONTRACT: ${{ matrix.runtime_contract }}
+        run: |
+          set -euo pipefail
+          output="runtime-output-${{ matrix.name }}.txt"
+          case "$RUNTIME_CONTRACT" in
+            apisix-version-non-root-v1)
+              docker run --rm --platform linux/amd64 --user 636:636 \
+                --entrypoint apisix "$IMAGE" version > "$output" 2>&1
+              grep -F -- "$RELEASE_VERSION" "$output" >/dev/null
+              ;;
+            oauth2-proxy-sensitive-flags-v1)
+              docker run --rm --platform linux/amd64 "$IMAGE" --help > "$output" 2>&1
+              for flag in \
+                provider oidc-issuer-url oidc-groups-claim oidc-extra-audience \
+                allowed-group scope code-challenge-method email-domain reverse-proxy \
+                upstream http-address metrics-address redirect-url proxy-prefix \
+                skip-provider-button silence-ping-logging \
+                trusted-proxy-ip skip-auth-route bearer-token-login-fallback \
+                extra-jwt-issuers session-store-type skip-jwt-bearer-tokens \
+                pass-authorization-header set-authorization-header pass-access-token \
+                set-xauthrequest pass-user-headers cookie-name cookie-path cookie-secure \
+                cookie-httponly cookie-samesite cookie-refresh cookie-expire \
+                cookie-csrf-per-request cookie-csrf-expire; do
+                grep -F -- "--${flag}" "$output" >/dev/null
+              done
+              ;;
+            *)
+              echo "Unsupported upstream runtime contract: $RUNTIME_CONTRACT" >&2
+              exit 1
+              ;;
+          esac
+          test -s "$output"
+          test "$(stat -c '%s' "$output")" -le 1048576
+
+      - name: Scan the exact upstream digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.upstream.outputs.image }}
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+          exit-code: "1"
+          ignore-unfixed: false
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+
+      - name: Upload upstream vulnerability results
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.name)) != ''
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # releases/v4
+        with:
+          sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-upstream-${{ matrix.name }}
+
+      - name: Generate independent upstream CycloneDX evidence
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.upstream.outputs.image }}
+          format: cyclonedx
+          output: sbom-${{ matrix.name }}.cdx.json
+          exit-code: "0"
+
+      - name: Create upstream review and release fragment
+        env:
+          IMAGE: ${{ steps.upstream.outputs.image }}
+          SOURCE_RELEASE: ${{ steps.upstream.outputs.source_release }}
+          APPROVED_TAG: ${{ steps.upstream.outputs.approved_tag }}
+        run: |
+          jq -n \
+            --arg component "${{ matrix.name }}" \
+            --arg reference "$IMAGE" \
+            --arg source_repository "${{ matrix.source_repository }}" \
+            --arg build_repository "${{ matrix.build_repository }}" \
+            --arg source_release "$SOURCE_RELEASE" \
+            --arg approved_tag "$APPROVED_TAG" \
+            --arg minimum_version "${{ matrix.minimum_version }}" \
+            --arg runtime_contract "${{ matrix.runtime_contract }}" \
+            '{
+              schemaVersion: "archideal.upstream-review/v2",
+              component: $component,
+              reference: $reference,
+              sourceRepository: $source_repository,
+              buildRepository: $build_repository,
+              sourceRelease: $source_release,
+              approvedImageTag: $approved_tag,
+              checks: {
+                officialImageRepository: true,
+                digestPinned: true,
+                sourceVersionAtLeast: $minimum_version,
+                registryTagResolvesToDigest: true,
+                runtimeCompatibility: $runtime_contract,
+                independentTrivyScan: "HIGH,CRITICAL",
+                independentCycloneDxSbom: true,
+                upstreamCryptographicSignature: "not-assumed"
+              }
+            }' > "upstream-review-${{ matrix.name }}.json"
+          sbom_sha="$(sha256sum "sbom-${{ matrix.name }}.cdx.json" | cut -d' ' -f1)"
+          scan_sha="$(sha256sum "trivy-${{ matrix.name }}.sarif" | cut -d' ' -f1)"
+          review_sha="$(sha256sum "upstream-review-${{ matrix.name }}.json" | cut -d' ' -f1)"
+          registry_tag_proof_sha="$(sha256sum "registry-tag-proof-${{ matrix.name }}.json" | cut -d' ' -f1)"
+          runtime_output_sha="$(sha256sum "runtime-output-${{ matrix.name }}.txt" | cut -d' ' -f1)"
+          jq -n \
+            --arg values_key "${{ matrix.values_key }}" \
+            --arg component "${{ matrix.name }}" \
+            --arg reference "$IMAGE" \
+            --arg source_repository "${{ matrix.source_repository }}" \
+            --arg build_repository "${{ matrix.build_repository }}" \
+            --arg source_release "$SOURCE_RELEASE" \
+            --arg sbom_sha "$sbom_sha" \
+            --arg scan_sha "$scan_sha" \
+            --arg review_sha "$review_sha" \
+            --arg registry_tag_proof_sha "$registry_tag_proof_sha" \
+            --arg runtime_output_sha "$runtime_output_sha" \
+            '{
+              valuesKey: $values_key,
+              component: $component,
+              kind: "upstream",
+              reference: $reference,
+              sourceRepository: $source_repository,
+              buildRepository: $build_repository,
+              sourceRelease: $source_release,
+              evidence: {
+                scanPolicy: "trivy:HIGH,CRITICAL:no-unfixed-exception",
+                sbom: {file: ("sbom-" + $component + ".cdx.json"), sha256: $sbom_sha},
+                scan: {file: ("trivy-" + $component + ".sarif"), sha256: $scan_sha},
+                upstreamReview: {file: ("upstream-review-" + $component + ".json"), sha256: $review_sha},
+                registryTagProof: {file: ("registry-tag-proof-" + $component + ".json"), sha256: $registry_tag_proof_sha},
+                runtimeOutput: {file: ("runtime-output-" + $component + ".txt"), sha256: $runtime_output_sha}
+              }
+            }' > "release-${{ matrix.name }}.json"
+
+      - name: Upload upstream evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-fragment-${{ matrix.name }}
+          path: |
+            release-${{ matrix.name }}.json
+            sbom-${{ matrix.name }}.cdx.json
+            trivy-${{ matrix.name }}.sarif
+            upstream-review-${{ matrix.name }}.json
+            registry-tag-proof-${{ matrix.name }}.json
+            runtime-output-${{ matrix.name }}.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  release-manifest:
+    name: Assemble signed release manifest
+    needs: [build-scan-sign, verify-upstream]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout release policy
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download image evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: release-fragment-*
+          path: release-evidence
+          merge-multiple: true
+
+      - name: Assemble release manifest
+        run: |
+          policy_sha="$(sha256sum deploy/kubernetes/supply-chain-policy.yaml | cut -d' ' -f1)"
+          release_id_hash="$(
+            printf '%s:%s:%s' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+              | sha256sum | cut -c1-32
+          )"
+          release_id="r-${release_id_hash}"
+          if [[ ! "$release_id" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] \
+            || (( ${#release_id} > 39 )); then
+            printf 'Generated release ID is not a valid ArchiDEAL DNS label.\n' >&2
+            exit 1
+          fi
+          jq -s \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg revision "$GITHUB_SHA" \
+            --arg release_id "$release_id" \
+            --arg generated_at "$(date --utc +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg policy_sha "$policy_sha" \
+            '{
+              schemaVersion: "archideal.release/v2",
+              repository: $repository,
+              revision: $revision,
+              releaseId: $release_id,
+              generatedAt: $generated_at,
+              workflow: {
+                path: ".github/workflows/release-images.yml",
+                ref: "refs/heads/main",
+                runId: $run_id,
+                runAttempt: $run_attempt,
+                event: $event
+              },
+              policySha256: $policy_sha,
+              images: sort_by(.valuesKey)
+            }' \
+            release-evidence/release-*.json > release-manifest.json
+          test "$(jq '.images | length' release-manifest.json)" -eq 10
+          test "$(jq '[.images[].valuesKey] | unique | length' release-manifest.json)" -eq 10
+          test "$(jq -r '.releaseId' release-manifest.json)" = "$release_id"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign release manifest
+        run: |
+          cosign sign-blob --yes \
+            --bundle release-manifest.sigstore.json \
+            release-manifest.json
+
+      - name: Package durable promotion evidence
+        run: |
+          mkdir release-package
+          find release-evidence -maxdepth 1 -type f ! -name 'release-*.json' \
+            -exec cp '{}' release-package/ \;
+          cp release-manifest.json release-manifest.sigstore.json \
+            deploy/kubernetes/supply-chain-policy.yaml release-package/
+          tar -czf release-evidence.tar.gz -C release-package .
+
+      - name: Upload signed release manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: archideal-release-${{ github.sha }}
+          path: |
+            release-manifest.json
+            release-manifest.sigstore.json
+            release-evidence.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish durable GitHub Release evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          short_sha="${GITHUB_SHA:0:12}"
+          release_tag="archideal-${short_sha}-run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$release_tag" \
+            release-manifest.json \
+            release-manifest.sigstore.json \
+            release-evidence.tar.gz \
+            --target "$GITHUB_SHA" \
+            --title "ArchiDEAL ${short_sha} (run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT})" \
+            --notes "Signed production evidence for commit ${GITHUB_SHA}. Promotion remains subject to cluster go-live gates."

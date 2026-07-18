@@ -1,4 +1,7 @@
+from unittest.mock import Mock, patch
+
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework.test import APITestCase
 
@@ -50,6 +53,74 @@ class IamSecurityTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    @override_settings(
+        DEALHOST_OIDC_INTROSPECTION_URL="https://identity.example.test/introspect",
+        DEALHOST_OIDC_ISSUER="https://identity.example.test",
+        DEALHOST_OIDC_AUDIENCE="archideal-production",
+        DEALHOST_OIDC_CLIENT_ID="dealhost",
+        DEALHOST_OIDC_CLIENT_SECRET="test-client-secret",
+        DEALHOST_OIDC_READ_GROUPS=("archideal-readers",),
+        DEALHOST_OIDC_ADMIN_GROUPS=("archideal-operators",),
+        DEALHOST_OIDC_TIMEOUT_SECONDS=2.0,
+    )
+    @patch("apps.common.authentication.httpx.post")
+    def test_iam_api_accepts_oidc_operator_group(self, post: Mock) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "active": True,
+            "iss": "https://identity.example.test",
+            "aud": ["archideal-production"],
+            "preferred_username": "operator",
+            "groups": ["archideal-operators"],
+        }
+        post.return_value = response
+
+        result = self.client.get(
+            reverse("iam-users-list"),
+            HTTP_AUTHORIZATION="Bearer oidc-id-token",
+        )
+
+        self.assertEqual(result.status_code, 200)
+        post.assert_called_once_with(
+            "https://identity.example.test/introspect",
+            data={"token": "oidc-id-token"},
+            auth=("dealhost", "test-client-secret"),
+            headers={"Accept": "application/json"},
+            timeout=2.0,
+        )
+
+    @override_settings(
+        DEALHOST_OIDC_INTROSPECTION_URL="https://identity.example.test/introspect",
+        DEALHOST_OIDC_ISSUER="https://identity.example.test",
+        DEALHOST_OIDC_AUDIENCE="archideal-production",
+        DEALHOST_OIDC_CLIENT_ID="dealhost",
+        DEALHOST_OIDC_CLIENT_SECRET="test-client-secret",
+        DEALHOST_OIDC_READ_GROUPS=("archideal-readers",),
+        DEALHOST_OIDC_ADMIN_GROUPS=("archideal-operators",),
+        DEALHOST_OIDC_TIMEOUT_SECONDS=2.0,
+    )
+    @patch("apps.common.authentication.httpx.post")
+    def test_iam_api_rejects_oidc_token_without_allowed_group(
+        self,
+        post: Mock,
+    ) -> None:
+        response = Mock()
+        response.json.return_value = {
+            "active": True,
+            "iss": "https://identity.example.test",
+            "aud": "archideal-production",
+            "sub": "unprivileged-user",
+            "groups": ["another-group"],
+        }
+        post.return_value = response
+
+        result = self.client.get(
+            reverse("iam-users-list"),
+            HTTP_AUTHORIZATION="Bearer oidc-id-token",
+        )
+
+        self.assertEqual(result.status_code, 401)
 
     def test_iam_manage_requires_login(self) -> None:
         response = self.client.get(reverse("iam-management"))

@@ -2,6 +2,10 @@
 
 Internal web console for operating the DEALIoT platform.
 
+The unified gateway publishes the console below `/dealiot`; its static assets and API client use
+that stable prefix. The embedded HTTP server accepts both prefixed requests and internal
+prefix-stripped requests from APISIX.
+
 It exposes:
 
 - platform topology and component ownership,
@@ -24,3 +28,17 @@ It exposes:
 
 The console intentionally does not mount the Docker socket. Host-level start/stop/restart remains a
 CLI or orchestrator responsibility.
+
+## Authentication boundary
+
+Development keeps the historical local behavior: when neither a bearer token nor OIDC is configured,
+the console is accessible without authentication. Production deployments must set
+`MANAGEMENT_CONSOLE_PRODUCTION_MODE=true` and configure either `MANAGEMENT_CONSOLE_TOKEN` or
+`MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL` with its HTTPS issuer, audience, client credentials and
+role mappings. Production startup rejects an incomplete OIDC boundary. Introspection responses must
+be active and match both `MANAGEMENT_CONSOLE_OIDC_ISSUER` and
+`MANAGEMENT_CONSOLE_OIDC_AUDIENCE`.
+
+Production mode fails closed when authentication is missing. Only `GET /healthz` remains anonymous
+for orchestrator probes; static assets, API reads, and all write operations require an authorized
+bearer token. Prefer OIDC for production and reserve the static token for controlled migrations.

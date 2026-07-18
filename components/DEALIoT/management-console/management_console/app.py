@@ -46,7 +46,9 @@ STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 DEFAULT_TIMEOUT_SECONDS = 2.0
 MAX_REQUEST_BYTES = 65536
 TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+PUBLIC_BASE_PATH = "/dealiot"
 LOGGER = logging.getLogger("dealiot.management_console")
+READINESS_COMPONENT_IDS = ("vernemq", "kafka")
 
 
 def management_console_token() -> str | None:
@@ -60,6 +62,9 @@ def csv_env(name: str, default: str) -> set[str]:
 
 def token_roles(claims: dict[str, Any]) -> set[str]:
     roles = set(claims.get("roles", [])) if isinstance(claims.get("roles"), list) else set()
+    groups = claims.get("groups")
+    if isinstance(groups, list):
+        roles.update(str(group) for group in groups)
     realm_access = claims.get("realm_access")
     if isinstance(realm_access, dict) and isinstance(realm_access.get("roles"), list):
         roles.update(str(role) for role in realm_access["roles"])
@@ -106,6 +111,19 @@ def introspect_oidc_token(token: str) -> dict[str, Any] | None:
         return {}
     if not isinstance(claims, dict) or claims.get("active") is not True:
         return {}
+    expected_issuer = os.getenv("MANAGEMENT_CONSOLE_OIDC_ISSUER", "").strip()
+    if expected_issuer and claims.get("iss") != expected_issuer:
+        return {}
+    expected_audience = os.getenv("MANAGEMENT_CONSOLE_OIDC_AUDIENCE", "").strip()
+    audience = claims.get("aud")
+    if isinstance(audience, str):
+        audiences = {audience}
+    elif isinstance(audience, list):
+        audiences = {str(value) for value in audience}
+    else:
+        audiences = set()
+    if expected_audience and expected_audience not in audiences:
+        return {}
     return claims
 
 
@@ -146,6 +164,70 @@ def authorization_level(authorization: str | None) -> str | None:
 
 def bool_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in TRUTHY_ENV_VALUES
+
+
+def management_console_production_mode() -> bool:
+    """Return whether the console must enforce its production auth boundary."""
+    return bool_env("MANAGEMENT_CONSOLE_PRODUCTION_MODE")
+
+
+def management_console_auth_configured() -> bool:
+    """Return whether bearer-token or OIDC authentication is configured."""
+    return bool(
+        management_console_token()
+        or os.getenv("MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL", "").strip()
+    )
+
+
+def validate_production_auth_config() -> None:
+    """Reject an incomplete production identity boundary before serving traffic."""
+    if not management_console_production_mode():
+        return
+    if management_console_token():
+        return
+
+    required = {
+        "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": os.getenv(
+            "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL",
+            "",
+        ).strip(),
+        "MANAGEMENT_CONSOLE_OIDC_ISSUER": os.getenv(
+            "MANAGEMENT_CONSOLE_OIDC_ISSUER",
+            "",
+        ).strip(),
+        "MANAGEMENT_CONSOLE_OIDC_AUDIENCE": os.getenv(
+            "MANAGEMENT_CONSOLE_OIDC_AUDIENCE",
+            "",
+        ).strip(),
+        "MANAGEMENT_CONSOLE_OIDC_CLIENT_ID": os.getenv(
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_ID",
+            "",
+        ).strip(),
+        "MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET": os.getenv(
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET",
+            "",
+        ).strip(),
+        "MANAGEMENT_CONSOLE_OIDC_READ_ROLES": os.getenv(
+            "MANAGEMENT_CONSOLE_OIDC_READ_ROLES",
+            "",
+        ).strip(),
+        "MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES": os.getenv(
+            "MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES",
+            "",
+        ).strip(),
+    }
+    missing = sorted(name for name, value in required.items() if not value)
+    if missing:
+        raise RuntimeError(
+            "Incomplete production authentication configuration: " + ", ".join(missing),
+        )
+    for name in (
+        "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL",
+        "MANAGEMENT_CONSOLE_OIDC_ISSUER",
+    ):
+        if not required[name].startswith("https://"):
+            message = f"{name} must use HTTPS in production"
+            raise RuntimeError(message)
 
 
 def is_wildcard_bind(host: str) -> bool:
@@ -275,6 +357,16 @@ def endpoint_with_path(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
+def internal_request_path(path: str) -> str:
+    """Map the unified public prefix to the console's internal route space."""
+    request_path = urlparse(path).path
+    if request_path == PUBLIC_BASE_PATH:
+        return "/"
+    if request_path.startswith(f"{PUBLIC_BASE_PATH}/"):
+        return request_path.removeprefix(PUBLIC_BASE_PATH)
+    return request_path
+
+
 def mqtt_probe() -> str | None:
     mqtt_host = os.getenv("MQTT_HOST")
     mqtt_port = os.getenv("MQTT_PORT", "1883")
@@ -371,6 +463,29 @@ def health_payload() -> dict[str, Any]:
     }
 
 
+def readiness_payload() -> tuple[HTTPStatus, dict[str, Any]]:
+    components_by_id = {component["id"]: component for component in COMPONENTS}
+    components = [
+        components_by_id[component_id]
+        for component_id in READINESS_COMPONENT_IDS
+        if component_id in components_by_id
+    ]
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=len(READINESS_COMPONENT_IDS),
+    ) as executor:
+        checks = list(executor.map(probe_component, components))
+    ready = (
+        len(checks) == len(READINESS_COMPONENT_IDS)
+        and all(check["status"] == "healthy" for check in checks)
+    )
+    status = HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE
+    return status, {
+        "status": "ready" if ready else "not_ready",
+        "checked_at": now_iso(),
+        "checks": checks,
+    }
+
+
 def airflow_auth_header() -> str | None:
     username = os.getenv("AIRFLOW_API_USERNAME")
     password = os.getenv("AIRFLOW_API_PASSWORD")
@@ -442,13 +557,31 @@ def read_json_body(handler: Any) -> dict[str, Any]:
 
 class ManagementConsoleHandler(BaseHTTPRequestHandler):
     server_version = "DEALIoTManagementConsole/1.0"
+    sys_version = ""
+
+    def send_security_headers(self) -> None:
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; base-uri 'self'; connect-src 'self'; "
+            "form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; "
+            "object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
+        )
+        self.send_header(
+            "Permissions-Policy",
+            "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
+        )
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        if management_console_production_mode():
+            self.send_header(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )
 
     def request_authorized(self, required_level: str = "read") -> bool:
-        if (
-            not os.getenv("MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL", "").strip()
-            and management_console_token() is None
-        ):
-            return True
+        if not management_console_auth_configured():
+            return not management_console_production_mode()
         level = authorization_level(self.headers.get("Authorization"))
         return level == "write" or (level == "read" and required_level == "read")
 
@@ -471,7 +604,11 @@ class ManagementConsoleHandler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:
-        if self.path.startswith("/api/") and not self.require_authorization():
+        path = internal_request_path(self.path)
+        requires_authorization = path.startswith("/api/") or (
+            management_console_production_mode() and path not in {"/healthz", "/readyz"}
+        )
+        if requires_authorization and not self.require_authorization():
             return
 
         routes = {
@@ -492,8 +629,9 @@ class ManagementConsoleHandler(BaseHTTPRequestHandler):
             "/api/runbooks": lambda: self.respond_json({"runbooks": catalog_payload()["runbooks"]}),
             "/api/security-resilience": lambda: self.respond_json(security_resilience_payload()),
             "/healthz": lambda: self.respond_json({"status": "ok", "checked_at": now_iso()}),
+            "/readyz": self.respond_readiness,
         }
-        route = routes.get(self.path)
+        route = routes.get(path)
         if route is not None:
             route()
             return
@@ -515,7 +653,7 @@ class ManagementConsoleHandler(BaseHTTPRequestHandler):
                 export_dataset_to_zenodo(payload),
             ),
         }
-        action = actions.get(self.path)
+        action = actions.get(internal_request_path(self.path))
         if action is None:
             self.respond_json({"error": "not_found"}, status=HTTPStatus.NOT_FOUND)
             return
@@ -540,8 +678,13 @@ class ManagementConsoleHandler(BaseHTTPRequestHandler):
 
         self.respond_json(response_payload, status=status)
 
+    def respond_readiness(self) -> None:
+        status, payload = readiness_payload()
+        self.respond_json(payload, status=status)
+
     def serve_static(self) -> None:
-        relative_path = "index.html" if self.path in {"/", ""} else self.path.lstrip("/")
+        path = internal_request_path(self.path)
+        relative_path = "index.html" if path in {"/", ""} else path.lstrip("/")
         target = (STATIC_DIR / relative_path).resolve()
         if not target.is_relative_to(STATIC_DIR.resolve()) or not target.is_file():
             self.respond_json({"error": "not_found"}, status=HTTPStatus.NOT_FOUND)
@@ -558,6 +701,7 @@ class ManagementConsoleHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
+        self.send_security_headers()
         self.end_headers()
         self.wfile.write(content)
 
@@ -567,6 +711,7 @@ class ManagementConsoleHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
+        self.send_security_headers()
         self.end_headers()
         self.wfile.write(content)
 
@@ -588,6 +733,7 @@ class ManagementConsoleHandler(BaseHTTPRequestHandler):
 
 
 def run() -> None:
+    validate_production_auth_config()
     host = configured_bind_host()
     port = int(os.getenv("MANAGEMENT_CONSOLE_PORT", "8080"))
     with ThreadingHTTPServer((host, port), ManagementConsoleHandler) as server:

@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: archideal-platform-contract
+  labels:
+    app.kubernetes.io/part-of: archideal
+data:
+  contract.yaml: |
+    version: 1
+    topology: kubernetes-multi-az
+    ownership: platform-team
+    public_edge:
+      entrypoint: oauth2-proxy
+      tls_only: true
+      oidc_allowed_group: "${OIDC_ALLOWED_GROUP}"
+      auth_bypass_routes:
+        - method: POST
+          path: /dealhost/api/gateway/github/webhook/
+          compensating_control: github-hmac-repository-event-delivery-validation
+      tenancy: single-tenant-operator-only
+      multi_tenant_public_exposure: unsupported_without_application_rbac
+    kafka:
+      endpoints: "${KAFKA_BOOTSTRAP_SERVERS}"
+      minimum_brokers: 3
+      availability_zones: 3
+      replication_factor: 3
+      minimum_in_sync_replicas: 2
+      transport: SASL_SSL
+      authorization: least-privilege-acls
+      disaster_recovery: cross-region-replication
+      runtime_preflight_topics:
+        - raw.sensor
+        - raw.gps
+        - raw.image2d.meta
+        - raw.image3d.meta
+        - raw.video2d.meta
+        - raw.video3d.meta
+        - dlq.events
+      extended_catalog: components/DEALIoT/deploy/kafka/topics.yaml
+    mqtt:
+      endpoint: "${MQTT_HOST}:8883"
+      minimum_nodes: 3
+      availability_zones: 3
+      transport: tls-or-mtls
+      authorization: per-device-and-ingestor-acls
+      persistent_sessions: required
+    postgresql:
+      metadata_endpoint: "${POSTGRES_METADATA_HOST}:5432"
+      data_endpoint: "${POSTGRES_DATA_HOST}:5432"
+      synchronous_multi_az_standby: required
+      point_in_time_recovery: required
+      rpo: 5m
+      rto: 60m
+    valkey:
+      endpoint: "${VALKEY_HOST}:6380"
+      topology: managed-ha-or-three-node-sentinel
+      transport: tls
+      persistence: aof-or-provider-equivalent
+    etcd:
+      endpoints:
+        - "${ETCD_ENDPOINT_1}"
+        - "${ETCD_ENDPOINT_2}"
+        - "${ETCD_ENDPOINT_3}"
+      members: 3
+      availability_zones: 3
+      transport: mutual-tls
+      authentication: required
+      snapshot_rpo: 1h
+      restore_rto: 30m
+    storage:
+      encryption_at_rest: required
+      backup_immutability: required
+      cross_region_copy: required
+    validation:
+      restore_test: monthly
+      disaster_recovery_exercise: quarterly

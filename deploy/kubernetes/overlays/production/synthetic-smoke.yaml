@@ -1,0 +1,81 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: production-smoke-${RELEASE_ID}
+  labels:
+    app.kubernetes.io/name: production-smoke
+    app.kubernetes.io/component: synthetic-check
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: production-smoke
+        app.kubernetes.io/component: synthetic-check
+        app.kubernetes.io/part-of: archideal
+        archideal.io/release: "${RELEASE_ID}"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      serviceAccountName: archideal-runtime
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: publish
+          image: "${IMAGE_DEALIOT_CONSOLE}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "management_console.synthetic_publish"]
+          env:
+            - name: MQTT_HOST
+              value: "${MQTT_HOST}"
+            - name: MQTT_PORT
+              value: "8883"
+            - name: MQTT_CA_FILE
+              value: /var/run/archideal-ca/mqtt-ca.crt
+            - name: SMOKE_DEVICE_ID
+              value: "archideal-smoke-${RELEASE_ID}"
+            - name: MQTT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: mqtt-smoke-username
+            - name: MQTT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: mqtt-smoke-password
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: mqtt-ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+      volumes:
+        - name: mqtt-ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: mqtt-ca.crt
+                path: mqtt-ca.crt

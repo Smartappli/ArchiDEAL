@@ -1,0 +1,485 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: archideal-oauth2-proxy
+  labels:
+    app.kubernetes.io/part-of: archideal
+    monitoring.archideal.io/enabled: "true"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: job
+          replacement: archideal-oauth2-proxy
+        - targetLabel: environment
+          replacement: production
+        - sourceLabels: [__meta_kubernetes_pod_annotation_archideal_io_release]
+          targetLabel: revision
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: archideal-apisix
+  labels:
+    app.kubernetes.io/part-of: archideal
+    monitoring.archideal.io/enabled: "true"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      path: /apisix/prometheus/metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: job
+          replacement: archideal-apisix
+        - targetLabel: environment
+          replacement: production
+        - sourceLabels: [__meta_kubernetes_pod_annotation_archideal_io_release]
+          targetLabel: revision
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: archideal-dealdata-api
+  labels:
+    app.kubernetes.io/part-of: archideal
+    monitoring.archideal.io/enabled: "true"
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealdata-core
+          - dealdata-gps
+          - dealdata-sensor
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: job
+          replacement: archideal-dealdata-api
+        - targetLabel: environment
+          replacement: production
+        - sourceLabels: [__meta_kubernetes_pod_annotation_archideal_io_release]
+          targetLabel: revision
+        - sourceLabels: [__meta_kubernetes_service_label_app_kubernetes_io_name]
+          targetLabel: workload
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: archideal-mqtt-kafka-bridge
+  labels:
+    app.kubernetes.io/part-of: archideal
+    monitoring.archideal.io/enabled: "true"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mqtt-kafka-bridge
+  podMetricsEndpoints:
+    - port: health
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: job
+          replacement: archideal-mqtt-kafka-bridge
+        - targetLabel: environment
+          replacement: production
+        - sourceLabels: [__meta_kubernetes_pod_annotation_archideal_io_release]
+          targetLabel: revision
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: archideal-dealdata-consumers
+  labels:
+    app.kubernetes.io/part-of: archideal
+    monitoring.archideal.io/enabled: "true"
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealdata-gps-consumer
+          - dealdata-sensor-consumer
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: job
+          replacement: archideal-dealdata-consumer
+        - targetLabel: environment
+          replacement: production
+        - sourceLabels: [__meta_kubernetes_pod_annotation_archideal_io_release]
+          targetLabel: revision
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+          targetLabel: workload
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: archideal-production-slo
+  labels:
+    app.kubernetes.io/part-of: archideal
+    monitoring.archideal.io/enabled: "true"
+spec:
+  groups:
+    - name: archideal-slo-recording
+      interval: 30s
+      rules:
+        - record: archideal:edge_requests:rate5m
+          expr: |
+            sum(rate(apisix_http_status{route=~"archideal-.+",code=~"2..|3..|5.."}[5m]))
+        - record: archideal:edge_errors:rate5m
+          expr: |
+            sum(rate(apisix_http_status{route=~"archideal-.+",code=~"5.."}[5m]))
+        - record: archideal:edge_error_ratio:ratio5m
+          expr: |
+            archideal:edge_errors:rate5m
+            /
+            clamp_min(archideal:edge_requests:rate5m, 0.000001)
+        - record: archideal:edge_error_ratio:ratio1h
+          expr: |
+            sum(rate(apisix_http_status{route=~"archideal-.+",code=~"5.."}[1h]))
+            /
+            clamp_min(
+              sum(rate(apisix_http_status{route=~"archideal-.+",code=~"2..|3..|5.."}[1h])),
+              0.000001
+            )
+        - record: archideal:edge_error_ratio:ratio24h
+          expr: |
+            sum(rate(apisix_http_status{route=~"archideal-.+",code=~"5.."}[24h]))
+            /
+            clamp_min(
+              sum(rate(apisix_http_status{route=~"archideal-.+",code=~"2..|3..|5.."}[24h])),
+              0.000001
+            )
+        - record: archideal:edge_request_latency_seconds:p95_5m
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(apisix_http_latency_bucket{route=~"archideal-.+",type="request"}[5m])
+              )
+            ) / 1000
+
+    - name: archideal-edge-alerts
+      rules:
+        - alert: ArchiDEALEdgeErrorBudgetFastBurn
+          expr: |
+            (archideal:edge_error_ratio:ratio5m > 0.072)
+            and
+            (archideal:edge_error_ratio:ratio1h > 0.072)
+            and
+            (archideal:edge_requests:rate5m > 0.0166667)
+          for: 5m
+          labels:
+            service: archideal-edge
+            severity: critical
+            owner: platform-on-call
+            slo: edge-availability-99.9
+          annotations:
+            summary: ArchiDEAL edge is consuming the monthly error budget rapidly
+            description: More than 10% of the 30-day 99.9% error budget is projected to be consumed in one hour.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-edge-error-budget-burn
+        - alert: ArchiDEALEdgeErrorBudgetSlowBurn
+          expr: |
+            (archideal:edge_error_ratio:ratio1h > 0.0075)
+            and
+            (archideal:edge_error_ratio:ratio24h > 0.0075)
+            and
+            (archideal:edge_requests:rate5m > 0.0166667)
+          for: 30m
+          labels:
+            service: archideal-edge
+            severity: warning
+            owner: platform-on-call
+            slo: edge-availability-99.9
+          annotations:
+            summary: ArchiDEAL edge is steadily consuming the monthly error budget
+            description: More than 25% of the 30-day 99.9% error budget is projected to be consumed in 24 hours.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-edge-error-budget-burn
+        - alert: ArchiDEALEdgeLatencyHigh
+          expr: |
+            archideal:edge_request_latency_seconds:p95_5m > 0.75
+          for: 15m
+          labels:
+            service: archideal-edge
+            severity: warning
+            owner: platform-on-call
+            slo: edge-latency-p95-750ms
+          annotations:
+            summary: ArchiDEAL public request latency exceeds its initial objective
+            description: APISIX request latency p95 has exceeded 750 ms for fifteen minutes.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-edge-latency-high
+        - alert: ArchiDEALAPISIXUnavailable
+          expr: |
+            (sum(up{job="archideal-apisix"}) == 0)
+            or absent(up{job="archideal-apisix"})
+          for: 2m
+          labels:
+            service: apisix
+            severity: critical
+            owner: platform-on-call
+            slo: edge-availability-99.9
+          annotations:
+            summary: No APISIX metrics target is reachable
+            description: Prometheus cannot scrape any APISIX production target.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-monitoring-target-unavailable
+        - alert: ArchiDEALOAuth2ProxyUnavailable
+          expr: |
+            (sum(up{job="archideal-oauth2-proxy"}) == 0)
+            or absent(up{job="archideal-oauth2-proxy"})
+          for: 2m
+          labels:
+            service: oauth2-proxy
+            severity: critical
+            owner: platform-on-call
+            slo: edge-availability-99.9
+          annotations:
+            summary: No oauth2-proxy metrics target is reachable
+            description: Prometheus cannot scrape any identity-edge target; authentication availability is unknown or lost.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-monitoring-target-unavailable
+        - alert: ArchiDEALAPISIXEtcdUnavailable
+          expr: |
+            min(apisix_etcd_reachable) == 0
+          for: 2m
+          labels:
+            service: apisix
+            severity: critical
+            owner: platform-on-call
+            slo: edge-control-plane
+          annotations:
+            summary: APISIX cannot reach its etcd control plane
+            description: At least one APISIX instance reports that etcd is unreachable.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-apisix-etcd-unavailable
+
+    - name: archideal-ingestion-alerts
+      rules:
+        - alert: ArchiDEALBridgeUnavailable
+          expr: |
+            (max(dealiot_bridge_ready) == 0)
+            or absent(dealiot_bridge_ready)
+          for: 3m
+          labels:
+            service: mqtt-kafka-bridge
+            severity: critical
+            owner: ingestion-on-call
+            slo: ingestion-durability-99.9
+          annotations:
+            summary: No MQTT-to-Kafka bridge replica is ready
+            description: No bridge has both its MQTT subscriptions and Kafka metadata path ready.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-bridge-unavailable-or-degraded
+        - alert: ArchiDEALBridgeReplicaDegraded
+          expr: |
+            (sum(dealiot_bridge_ready) < 2)
+            and
+            (sum(dealiot_bridge_ready) > 0)
+          for: 10m
+          labels:
+            service: mqtt-kafka-bridge
+            severity: warning
+            owner: ingestion-on-call
+            slo: ingestion-zone-resilience
+          annotations:
+            summary: Fewer than two MQTT-to-Kafka bridge replicas are ready
+            description: Ingestion is serving without the required replica redundancy.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-bridge-unavailable-or-degraded
+        - alert: ArchiDEALBridgeDeliveryErrors
+          expr: |
+            sum(increase(dealiot_bridge_errors_total[10m])) > 0
+          for: 2m
+          labels:
+            service: mqtt-kafka-bridge
+            severity: warning
+            owner: ingestion-on-call
+            slo: ingestion-durability-99.9
+          annotations:
+            summary: MQTT-to-Kafka bridge delivery loop errors detected
+            description: At least one bridge delivery or reconnect loop failed in the last ten minutes.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-bridge-delivery-errors
+        - alert: ArchiDEALBridgeDlqRatioHigh
+          expr: |
+            (
+              sum(increase(dealiot_bridge_dlq_total[10m]))
+              /
+              clamp_min(sum(increase(dealiot_bridge_forwarded_total[10m])), 1)
+            ) > 0.005
+            and
+            sum(increase(dealiot_bridge_forwarded_total[10m])) >= 100
+          for: 10m
+          labels:
+            service: mqtt-kafka-bridge
+            severity: warning
+            owner: data-contract-owner
+            slo: invalid-event-dlq-ratio-0.5
+          annotations:
+            summary: MQTT bridge DLQ ratio exceeds 0.5 percent
+            description: The bridge is routing an elevated ratio of invalid events to dlq.events.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-invalid-event-ratio-high
+        - alert: ArchiDEALBridgeKafkaLatencyHigh
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (
+                rate(dealiot_bridge_kafka_delivery_duration_seconds_bucket[5m])
+              )
+            ) > 1
+            and
+            sum(increase(dealiot_bridge_kafka_delivery_duration_seconds_count[5m])) >= 20
+          for: 10m
+          labels:
+            service: mqtt-kafka-bridge
+            severity: warning
+            owner: ingestion-on-call
+            slo: mqtt-to-kafka-latency
+          annotations:
+            summary: Bridge Kafka acknowledgement latency is elevated
+            description: Kafka delivery acknowledgement p95 exceeds one second; this is an operational sub-path alert, not the end-to-end freshness SLI.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-bridge-kafka-latency-high
+
+    - name: archideal-dealdata-consumer-alerts
+      rules:
+        - alert: ArchiDEALGPSConsumerUnavailable
+          expr: |
+            (max(dealdata_consumer_ready{service="gps"}) == 0)
+            or absent(dealdata_consumer_ready{service="gps"})
+          for: 3m
+          labels:
+            service: dealdata-gps-consumer
+            severity: critical
+            owner: data-platform-on-call
+            slo: event-freshness-p95-60s
+          annotations:
+            summary: No DEALData GPS consumer is ready
+            description: No GPS consumer reports a reachable database and healthy fresh Kafka poll loop.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-dealdata-consumer-unavailable
+        - alert: ArchiDEALSensorConsumerUnavailable
+          expr: |
+            (max(dealdata_consumer_ready{service="sensor"}) == 0)
+            or absent(dealdata_consumer_ready{service="sensor"})
+          for: 3m
+          labels:
+            service: dealdata-sensor-consumer
+            severity: critical
+            owner: data-platform-on-call
+            slo: event-freshness-p95-60s
+          annotations:
+            summary: No DEALData sensor consumer is ready
+            description: No sensor consumer reports a reachable database and healthy fresh Kafka poll loop.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-dealdata-consumer-unavailable
+        - alert: ArchiDEALConsumerNoAssignedCapacity
+          expr: |
+            max by (service) (dealdata_consumer_kafka_assigned) == 0
+          for: 10m
+          labels:
+            severity: warning
+            owner: data-platform-on-call
+            slo: ingestion-capacity
+          annotations:
+            summary: No DEALData consumer replica has a Kafka partition assignment
+            description: All observed replicas for this consumer service are healthy standbys without an active partition assignment.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-dealdata-consumer-unavailable
+        - alert: ArchiDEALConsumerCommitFailure
+          expr: |
+            sum by (service) (
+              increase(dealdata_consumer_commits_total{result="failure"}[10m])
+            ) > 0
+          for: 1m
+          labels:
+            severity: critical
+            owner: data-platform-on-call
+            slo: ingestion-durability-99.9
+          annotations:
+            summary: DEALData Kafka consumer offset commit failed
+            description: A consumer could not durably commit a processed Kafka batch.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-dealdata-commit-or-database-errors
+        - alert: ArchiDEALConsumerDatabaseErrors
+          expr: |
+            sum by (service) (
+              increase(dealdata_consumer_database_errors_total[10m])
+            ) > 0
+          for: 2m
+          labels:
+            severity: critical
+            owner: data-platform-on-call
+            slo: event-freshness-p95-60s
+          annotations:
+            summary: DEALData consumer database errors detected
+            description: A database readiness check or persistence operation failed.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-dealdata-commit-or-database-errors
+        - alert: ArchiDEALConsumerFreshnessHigh
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (service, le) (
+                rate(dealdata_consumer_event_age_seconds_bucket[10m])
+              )
+            ) > 60
+            and
+            sum by (service) (
+              increase(dealdata_consumer_event_age_seconds_count[10m])
+            ) >= 20
+          for: 10m
+          labels:
+            severity: critical
+            owner: data-platform-on-call
+            slo: event-freshness-p95-60s
+          annotations:
+            summary: DEALData first-persistence event freshness exceeds 60 seconds
+            description: Source timestamp to successful first database persistence p95 is above the initial freshness objective.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-dealdata-freshness-high
+        - alert: ArchiDEALConsumerRejectedRatioHigh
+          expr: |
+            (
+              sum by (service) (
+                increase(dealdata_consumer_records_total{result="rejected"}[10m])
+              )
+              /
+              clamp_min(
+                sum by (service) (increase(dealdata_consumer_records_total[10m])),
+                1
+              )
+            ) > 0.005
+            and
+            sum by (service) (increase(dealdata_consumer_records_total[10m])) >= 100
+          for: 10m
+          labels:
+            severity: warning
+            owner: data-contract-owner
+            slo: invalid-event-rejection-ratio-0.5
+          annotations:
+            summary: DEALData consumer rejection ratio exceeds 0.5 percent
+            description: This detects post-Kafka consumer rejection; it is distinct from the bridge DLQ ratio.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-invalid-event-ratio-high
+        - alert: ArchiDEALConsumerInvalidEventClock
+          expr: |
+            sum by (service) (
+              increase(dealdata_consumer_invalid_event_clock_total[10m])
+            ) > 0
+          for: 1m
+          labels:
+            severity: warning
+            owner: data-contract-owner
+            slo: event-freshness-clock-validity
+          annotations:
+            summary: DEALData cannot calculate event age from one or more source timestamps
+            description: Missing, invalid, naive or future timestamps were excluded from the event-age histogram and counted explicitly.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-invalid-event-clock

@@ -6,11 +6,19 @@ from argparse import ArgumentTypeError
 from importlib import import_module
 import json
 import os
+import time
 from typing import Any, Callable
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db import close_old_connections, connection
+from django.db import DatabaseError, close_old_connections, connection
 from rest_framework import status
+
+from dealdata_common.consumer_observability import (
+    ConsumerMetrics,
+    positive_float,
+    positive_float_env,
+    start_consumer_metrics_server,
+)
 
 KafkaIngestEvent = Callable[[dict[str, Any]], tuple[dict[str, Any], int]]
 
@@ -157,7 +165,7 @@ def decode_json(value: bytes) -> dict[str, Any] | None:
     """Decode a Kafka message value into a JSON object payload."""
     try:
         decoded = json.loads(value.decode("utf-8"))
-    except UnicodeDecodeError, json.JSONDecodeError:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None
     return decoded if isinstance(decoded, dict) else None
 
@@ -194,6 +202,7 @@ class DealIotKafkaCommand(BaseCommand):
     auto_offset_reset_env = ""
     default_topic = ""
     default_group_id = ""
+    service_key = ""
     event_label = ""
     ingest_event: KafkaIngestEvent
 
@@ -235,6 +244,14 @@ class DealIotKafkaCommand(BaseCommand):
             default=env("DEALDATA_KAFKA_MAX_RECORDS", default="100"),
         )
         parser.add_argument(
+            "--database-check-interval-seconds",
+            type=positive_float,
+            default=positive_float_env(
+                "DEALDATA_CONSUMER_DATABASE_CHECK_INTERVAL_SECONDS",
+                15.0,
+            ),
+        )
+        parser.add_argument(
             "--once",
             action="store_true",
             help="Poll once, process available records, then exit.",
@@ -242,16 +259,23 @@ class DealIotKafkaCommand(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         del args
-        consumer = self._build_consumer(options)
+        metrics, metrics_server = start_consumer_metrics_server(self.service_key)
+        consumer = None
         self.stdout.write(
             f"Consuming DEALIoT {self.event_label} events "
             f"topic={options['topic']} group_id={options['group_id']}",
         )
 
         try:
-            self._consume_batches(consumer, options)
+            consumer = self._build_consumer(options)
+            self._consume_batches(consumer, options, metrics)
         finally:
-            consumer.close()
+            metrics.mark_not_ready()
+            try:
+                if consumer is not None:
+                    consumer.close()
+            finally:
+                metrics_server.stop()
 
     @staticmethod
     def _build_consumer(options):
@@ -275,19 +299,43 @@ class DealIotKafkaCommand(BaseCommand):
             **kafka_security_options(),
         )
 
-    def _consume_batches(self, consumer, options) -> None:
+    def _consume_batches(
+        self,
+        consumer,
+        options,
+        metrics: ConsumerMetrics,
+    ) -> None:
+        database_ready = False
+        next_database_check = 0.0
         while True:
-            records = consumer.poll(
-                timeout_ms=options["poll_timeout_ms"],
-                max_records=options["max_records"],
+            now = time.monotonic()
+            if now >= next_database_check:
+                database_ready = self._database_is_ready(metrics)
+                next_database_check = now + options["database_check_interval_seconds"]
+            try:
+                records = consumer.poll(
+                    timeout_ms=options["poll_timeout_ms"],
+                    max_records=options["max_records"],
+                )
+            except Exception:
+                metrics.record_poll_error()
+                raise
+            metrics.record_poll(
+                kafka_assigned=self._has_partition_assignment(consumer),
+                database_ready=database_ready,
             )
             if not records:
                 if options["once"]:
                     return
                 continue
 
-            counts = self._process_records(records)
-            consumer.commit()
+            counts = self._process_records(records, metrics)
+            try:
+                consumer.commit()
+            except Exception:
+                metrics.record_commit("failure")
+                raise
+            metrics.record_commit("success")
             self.stdout.write(
                 f"Processed DEALIoT {self.event_label} Kafka batch "
                 f"inserted={counts['inserted']} "
@@ -297,28 +345,78 @@ class DealIotKafkaCommand(BaseCommand):
             if options["once"]:
                 return
 
-    def _process_records(self, records) -> dict[str, int]:
+    @staticmethod
+    def _has_partition_assignment(consumer) -> bool:
+        assignment = getattr(consumer, "assignment", None)
+        if not callable(assignment):
+            # Lightweight test doubles and older integrations do not expose
+            # assignment(); a successful poll remains the best available signal.
+            return True
+        return bool(assignment())
+
+    @staticmethod
+    def _database_is_ready(metrics: ConsumerMetrics) -> bool:
+        try:
+            close_stale_connections()
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+        except DatabaseError:
+            metrics.record_database_error()
+            return False
+        return True
+
+    def _process_records(
+        self,
+        records,
+        metrics: ConsumerMetrics,
+    ) -> dict[str, int]:
         counts = {"inserted": 0, "duplicates": 0, "rejected": 0}
         for message in iter_messages(records):
-            counts[self._process_message(message)] += 1
+            counts[self._process_message(message, metrics)] += 1
         return counts
 
-    def _process_message(self, message) -> str:
+    def _process_message(self, message, metrics: ConsumerMetrics) -> str:
+        started_at = time.perf_counter()
         payload = decode_json(message.value)
         if payload is None:
             self._write_rejected_json(message)
+            metrics.record_event(
+                "rejected",
+                payload=None,
+                persistence_duration_seconds=time.perf_counter() - started_at,
+            )
             return "rejected"
 
         close_stale_connections()
-        body, response_status = self.ingest_event(payload)
+        try:
+            body, response_status = self.ingest_event(payload)
+        except DatabaseError:
+            metrics.record_database_error()
+            raise
         if response_status == status.HTTP_201_CREATED:
+            metrics.record_event(
+                "inserted",
+                payload=payload,
+                persistence_duration_seconds=time.perf_counter() - started_at,
+            )
             return "inserted"
         if response_status == status.HTTP_200_OK and body.get("duplicate"):
+            metrics.record_event(
+                "duplicate",
+                payload=payload,
+                persistence_duration_seconds=time.perf_counter() - started_at,
+            )
             return "duplicates"
         if response_status == status.HTTP_400_BAD_REQUEST:
             self.stderr.write(
                 f"Rejected DEALIoT {self.event_label} event "
                 f"offset={message.offset} detail={body.get('detail')}",
+            )
+            metrics.record_event(
+                "rejected",
+                payload=payload,
+                persistence_duration_seconds=time.perf_counter() - started_at,
             )
             return "rejected"
 
@@ -355,6 +453,7 @@ def build_dealiot_kafka_command(
         "auto_offset_reset_env": auto_offset_reset_env,
         "default_topic": f"raw.{service_key}",
         "default_group_id": f"dealdata-{service_key}-ingest",
+        "service_key": service_key,
         "event_label": event_label,
         "ingest_event": staticmethod(ingest_event),
     }

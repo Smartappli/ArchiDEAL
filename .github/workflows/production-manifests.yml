@@ -1,0 +1,171 @@
+name: Production manifests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "components/**"
+      - "deploy/apisix/**"
+      - "deploy/kubernetes/**"
+      - "scripts/validate-monorepo.py"
+      - "tests/test_production_renderer.py"
+      - "tests/test_private_network_preflight.py"
+      - "tests/test_ingress_controller_preflight.py"
+      - "tests/test_prepare_invocation_jobs.py"
+      - "tests/test_release_verifier.py"
+      - ".github/workflows/release-images.yml"
+      - ".github/workflows/production-manifests.yml"
+  pull_request:
+    paths:
+      - "components/**"
+      - "deploy/apisix/**"
+      - "deploy/kubernetes/**"
+      - "scripts/validate-monorepo.py"
+      - "tests/test_production_renderer.py"
+      - "tests/test_private_network_preflight.py"
+      - "tests/test_ingress_controller_preflight.py"
+      - "tests/test_prepare_invocation_jobs.py"
+      - "tests/test_release_verifier.py"
+      - ".github/workflows/release-images.yml"
+      - ".github/workflows/production-manifests.yml"
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-manifests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render-and-validate:
+    name: Render and validate production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4.0.1
+        with:
+          version: "v1.35.0"
+
+      - name: Install validation dependencies
+        env:
+          GOBIN: /tmp/archideal-bin
+        run: |
+          python -m pip install --disable-pip-version-check "PyYAML==6.0.3"
+          mkdir -p "$GOBIN"
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
+          echo "$GOBIN" >> "$GITHUB_PATH"
+
+      - name: Validate monorepo contracts
+        run: python scripts/validate-monorepo.py
+
+      - name: Test production renderer and signed release gate
+        run: |
+          python -m unittest -v \
+            tests.test_production_renderer \
+            tests.test_private_network_preflight \
+            tests.test_ingress_controller_preflight \
+            tests.test_prepare_invocation_jobs \
+            tests.test_release_verifier
+
+      - name: Example values must be rejected in strict mode
+        run: |
+          set -euo pipefail
+          if python deploy/kubernetes/render.py \
+            --values deploy/kubernetes/values.example.yaml \
+            --output /tmp/archideal-k8s-strict \
+            --force; then
+            echo "The production renderer accepted example digests or endpoints without --allow-example." >&2
+            exit 1
+          fi
+
+      - name: Render the reviewable example production overlay
+        run: |
+          python deploy/kubernetes/render.py \
+            --values deploy/kubernetes/values.example.yaml \
+            --output /tmp/archideal-k8s \
+            --allow-example \
+            --force
+          kubectl kustomize /tmp/archideal-k8s/overlays/production > /tmp/archideal-production.yaml
+
+      - name: Validate YAML and immutable image references
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import re
+          from pathlib import Path
+
+          import yaml
+
+          manifest = Path("/tmp/archideal-production.yaml")
+          documents = [
+              document
+              for document in yaml.safe_load_all(manifest.read_text(encoding="utf-8"))
+              if document is not None
+          ]
+          if not documents:
+              raise SystemExit("The rendered production manifest is empty.")
+
+          images: list[str] = []
+
+          def visit(value: object) -> None:
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      if key == "image" and isinstance(child, str):
+                          images.append(child)
+                      visit(child)
+              elif isinstance(value, list):
+                  for child in value:
+                      visit(child)
+
+          for document in documents:
+              visit(document)
+
+          if not images:
+              raise SystemExit("No container image was found in the production manifest.")
+
+          digest = re.compile(r"@sha256:[0-9a-f]{64}$")
+          invalid = sorted({image for image in images if not digest.search(image)})
+          if invalid:
+              raise SystemExit(
+                  "Production images must be pinned by sha256 digest: " + ", ".join(invalid),
+              )
+
+          print(
+              f"Validated {len(documents)} Kubernetes objects and "
+              f"{len(set(images))} immutable image references.",
+          )
+          PY
+
+      - name: Validate Kubernetes schemas
+        run: |
+          kubeconform \
+            -strict \
+            -summary \
+            -ignore-missing-schemas \
+            /tmp/archideal-production.yaml
+
+      - name: Upload rendered production manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: archideal-production-example-render-${{ github.sha }}
+          path: /tmp/archideal-production.yaml
+          if-no-files-found: error
+          retention-days: 30

@@ -6,6 +6,15 @@
 **/__pycache__
 **/*.pyc
 **/.env
+**/.env.*
+!**/.env.example
+**/secrets/
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519
 **/*.sqlite3
 **/db.sqlite3
 **/logs

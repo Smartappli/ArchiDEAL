@@ -1,13 +1,14 @@
 # ArchiDEAL
 
-ArchiDEAL is the integration monorepo for the operational DEAL suite. It contains coordinated
-snapshots of DEALIoT, DEALHost, DEALData, and DEALInterface, plus one root-level development stack
-that exercises their real communication contracts.
+ArchiDEAL is the operational monorepo for the DEAL suite. It contains coordinated snapshots of
+DEALIoT, DEALHost, DEALData, and DEALInterface, a compact development stack, and a hardened
+Kubernetes production reference that keeps their communication contracts in one release boundary.
 
-> **Status:** the root Compose stack is for development and cross-repository integration testing.
-> It is not a production topology: Kafka and MQTT are single-node/plaintext, DEALHost uses SQLite,
-> TLS is not terminated, and IAM is not unified. Production deployment remains gated by the
-> checklist in [docs/deployment.md](docs/deployment.md).
+> **Status:** `compose.yaml` remains development-only. The supported production target is the
+> operator-only, single-tenant Kubernetes baseline under `deploy/kubernetes`, with external HA
+> data services, TLS, OIDC, external secrets and digest-pinned images. A concrete environment is
+> not a GO until every gate in [docs/production-readiness.md](docs/production-readiness.md) has
+> recorded evidence.
 
 ## Repository layout
 
@@ -18,6 +19,7 @@ components/
   DEALData/       Core, GPS and Sensor persistence services and Kafka consumers
   DEALInterface/  same-origin React control plane
 deploy/apisix/    traditional APISIX configuration and idempotent route bootstrap
+deploy/kubernetes production renderer, base and multi-AZ production overlay
 docs/             architecture, deployment and migration decisions
 scripts/          environment bootstrap, validation and end-to-end smoke test
 compose.yaml      compact integration stack
@@ -83,8 +85,12 @@ make down
 - the PyFlink dependency is aligned with the Flink 2.2.1 runtime;
 - root CI replaces the inactive nested repository workflows for coordinated changes.
 
-See [docs/architecture.md](docs/architecture.md), [docs/deployment.md](docs/deployment.md), and
-[docs/migration.md](docs/migration.md) before changing ownership or release processes.
+See [docs/architecture.md](docs/architecture.md), [docs/deployment.md](docs/deployment.md),
+[docs/supply-chain.md](docs/supply-chain.md), and
+[docs/production-readiness.md](docs/production-readiness.md) before changing ownership or release
+processes. The production overlay includes Prometheus Operator discovery and alert rules; its
+measured indicators and deliberate coverage gaps are tracked in [docs/slo.md](docs/slo.md), with
+actions in [the observability runbook](docs/runbooks/observability-alerts.md).
 
 ## Licensing
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlsplit
 
 PLACEHOLDER_VALUES = {
     "",
@@ -132,10 +134,31 @@ def apisix_config(*, require_secrets: bool = False) -> ApisixConfig:
     )
 
 
-def cache_config() -> CacheConfig:
-    return CacheConfig(
-        valkey_url=get_env("VALKEY_URL", "redis://valkey:6379/1"),
-    )
+def cache_config(*, require_tls: bool = False) -> CacheConfig:
+    valkey_url = get_env("VALKEY_URL", "redis://valkey:6379/1").strip()
+    if require_tls:
+        try:
+            parsed = urlsplit(valkey_url)
+            hostname = parsed.hostname
+            port = parsed.port
+        except ValueError as exc:
+            raise RuntimeError("VALKEY_URL is not a valid URL.") from exc
+        if (
+            parsed.scheme.lower() != "rediss"
+            or not hostname
+            or port != 6380
+            or not parsed.password
+            or not parsed.path.startswith("/")
+            or not parsed.path[1:].isdigit()
+            or parsed.query
+            or parsed.fragment
+            or any(character.isspace() for character in valkey_url)
+        ):
+            raise RuntimeError(
+                "VALKEY_URL must use authenticated rediss:// on port 6380 with a numeric "
+                "database and no query or fragment in production."
+            )
+    return CacheConfig(valkey_url=valkey_url)
 
 
 def nats_config() -> NatsConfig:
@@ -145,3 +168,54 @@ def nats_config() -> NatsConfig:
         subject_prefix=get_env("NATS_SUBJECT_PREFIX", "dealhost"),
         enabled=get_env("NATS_ENABLED", "false").lower() == "true",
     )
+
+
+def database_config(
+    base_dir: Path,
+    *,
+    require_postgres: bool = False,
+) -> dict[str, object]:
+    """Build the development SQLite or production PostgreSQL configuration."""
+    engine = get_env("DEALHOST_DATABASE_ENGINE", "sqlite").strip().lower()
+    if engine == "sqlite":
+        if require_postgres:
+            raise RuntimeError(
+                "DEALHOST_DATABASE_ENGINE must be postgresql in production."
+            )
+        return {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": Path(
+                get_env("DEALHOST_DB_PATH", str(base_dir / "db.sqlite3")),
+            ),
+        }
+
+    if engine not in {"postgres", "postgresql"}:
+        raise RuntimeError("DEALHOST_DATABASE_ENGINE must be sqlite or postgresql.")
+
+    sslmode = get_env("DEALHOST_DATABASE_SSLMODE", "prefer").strip().lower()
+    if require_postgres and sslmode != "verify-full":
+        raise RuntimeError(
+            "DEALHOST_DATABASE_SSLMODE must be verify-full in production."
+        )
+    options: dict[str, object] = {"sslmode": sslmode, "connect_timeout": 3}
+    sslrootcert = get_env("DEALHOST_DATABASE_SSLROOTCERT", "").strip()
+    if sslrootcert:
+        options["sslrootcert"] = sslrootcert
+    elif require_postgres:
+        raise RuntimeError("DEALHOST_DATABASE_SSLROOTCERT is required in production.")
+
+    return {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": get_env("DEALHOST_DATABASE_NAME", "dealhost"),
+        "USER": get_env("DEALHOST_DATABASE_USER", "dealhost"),
+        "PASSWORD": get_secret_env(
+            "DEALHOST_DATABASE_PASSWORD",
+            "",
+            allow_placeholder=not require_postgres,
+        ),
+        "HOST": get_env("DEALHOST_DATABASE_HOST", "localhost"),
+        "PORT": get_env("DEALHOST_DATABASE_PORT", "5432"),
+        "CONN_MAX_AGE": int(get_env("DEALHOST_DATABASE_CONN_MAX_AGE", "60")),
+        "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": options,
+    }

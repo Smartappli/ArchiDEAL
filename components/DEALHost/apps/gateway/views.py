@@ -1,6 +1,8 @@
 import hashlib
+import uuid
 
-from django.core.cache import cache
+from django.core.cache import cache, caches
+from django.db import connections
 from django.utils.translation import gettext as _
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
@@ -33,11 +35,56 @@ def _github_delivery_cache_key(delivery_id: str) -> str:
     return f"gateway:github-webhook:{digest}"
 
 
-class HealthView(APIView):
+def _database_is_ready() -> bool:
+    with connections["default"].cursor() as cursor:
+        cursor.execute("SELECT 1")
+        row = cursor.fetchone()
+    return bool(row and row[0] == 1)
+
+
+def _cache_is_ready() -> bool:
+    readiness_cache = caches["default"]
+    token = uuid.uuid4().hex
+    key = f"gateway:health:{token}"
+    readiness_cache.set(key, token, timeout=5)
+    return readiness_cache.get(key) == token
+
+
+class LiveHealthView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
         return Response({"status": "ok", "service": "gateway"})
+
+
+class ReadyHealthView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        dependencies = {}
+        for name, check in (
+            ("database", _database_is_ready),
+            ("cache", _cache_is_ready),
+        ):
+            try:
+                available = check()
+            except Exception:  # Dependency clients expose heterogeneous failures.
+                available = False
+            dependencies[name] = "available" if available else "unavailable"
+
+        ready = all(value == "available" for value in dependencies.values())
+        return Response(
+            {
+                "status": "ok" if ready else "unavailable",
+                "service": "gateway",
+                **dependencies,
+            },
+            status=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
+class HealthView(ReadyHealthView):
+    """Backward-compatible readiness endpoint used by existing integrations."""
 
 
 class SyncGitHubView(APIView):

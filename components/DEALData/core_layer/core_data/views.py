@@ -11,8 +11,6 @@ from dealdata_common.observability import (
     readiness_response,
 )
 
-from .models import Experiment, ObservedObject, Project
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -41,19 +39,9 @@ def metrics(request):
     return prometheus_metrics_response(
         [
             (
-                "dealdata_core_projects_total",
-                "Stored projects.",
-                Project.objects.count(),
-            ),
-            (
-                "dealdata_core_observed_objects_total",
-                "Stored observed objects.",
-                ObservedObject.objects.count(),
-            ),
-            (
-                "dealdata_core_experiments_total",
-                "Stored experiments.",
-                Experiment.objects.count(),
+                "dealdata_core_service_info",
+                "DEALData core service availability marker.",
+                1,
             ),
         ],
     )

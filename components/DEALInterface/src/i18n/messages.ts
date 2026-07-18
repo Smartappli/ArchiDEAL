@@ -69,6 +69,9 @@ export const englishMessages = {
   "operator.stateOpen": "Open",
   "operator.stateScheduled": "Scheduled",
   "operator.title": "Actions requiring decision",
+  "production.liveOnlyDescription":
+    "Fixture metrics and operator actions are disabled. This view reports only live service probes.",
+  "production.liveOnlyTitle": "Production live-health mode",
   "service.checking": "Checking",
   "service.connectedApis": "Connected module APIs",
   "service.endpointListAria": "{module} live endpoints",
@@ -175,6 +178,9 @@ export const localizedMessages: Partial<Record<SupportedLanguageCode, PartialMes
     "operator.stateOpen": "Ouvert",
     "operator.stateScheduled": "Planifie",
     "operator.title": "Actions necessitant une decision",
+    "production.liveOnlyDescription":
+      "Les metriques fictives et actions de demonstration sont desactivees. Cette vue affiche uniquement les sondes de service en direct.",
+    "production.liveOnlyTitle": "Mode production avec sante en direct",
     "service.checking": "Verification",
     "service.connectedApis": "APIs de modules connectees",
     "service.endpointListAria": "Endpoints live {module}",

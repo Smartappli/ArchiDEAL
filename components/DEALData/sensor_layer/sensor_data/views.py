@@ -51,21 +51,12 @@ def health_ready(request):
 def metrics(request):
     """Return minimal Prometheus metrics for the sensor service."""
     del request
-    total_events = WildFiDecodedSensorEvent.objects.count()
-    total_devices = (
-        WildFiDecodedSensorEvent.objects.values("wildfi_device_id").distinct().count()
-    )
     return prometheus_metrics_response(
         [
             (
-                "dealdata_sensor_wildfi_events_total",
-                "Stored WildFi sensor events.",
-                total_events,
-            ),
-            (
-                "dealdata_sensor_wildfi_devices_total",
-                "WildFi sensor devices.",
-                total_devices,
+                "dealdata_sensor_service_info",
+                "DEALData sensor service availability marker.",
+                1,
             ),
         ],
     )

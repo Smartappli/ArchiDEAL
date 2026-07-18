@@ -1,5 +1,5 @@
 # Base Python slim image
-FROM python:3.14-slim
+FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015
 
 ARG APP_HOME=/app
 WORKDIR ${APP_HOME}
@@ -31,9 +31,10 @@ COPY ./sensor_layer/entrypoint.sh /entrypoint.sh
 
 # User non-root
 RUN chmod +x /entrypoint.sh \
-    && useradd -m appuser \
+    && groupadd --gid 10001 appuser \
+    && useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app /entrypoint.sh
-USER appuser
+USER 10001:10001
 
 # Expose the port
 EXPOSE 7002

@@ -40,7 +40,7 @@ def send_email(subject, email, message):
     email_message = EmailMessage(subject, message, email_from, recipient_list)
     try:
         email_message.send()
-    except OSError, SMTPException:
+    except (OSError, SMTPException):
         LOGGER.exception("Failed to send email.")
 
 

@@ -32,8 +32,14 @@ fi
 
 device_id="archideal-smoke-$(date +%s)"
 timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-gps_payload=$(printf '{"timestamp":"%s","latitude":50.8503,"longitude":4.3517}' "$timestamp")
-sensor_payload=$(printf '{"timestamp":"%s","sensor_type":"temperature","value":21.5,"unit":"celsius"}' "$timestamp")
+gps_message_id="$device_id-gps"
+sensor_message_id="$device_id-sensor"
+gps_payload=$(printf \
+  '{"message_id":"%s","timestamp":"%s","latitude":50.8503,"longitude":4.3517}' \
+  "$gps_message_id" "$timestamp")
+sensor_payload=$(printf \
+  '{"message_id":"%s","timestamp":"%s","sensor_type":"temperature","value":21.5,"unit":"celsius"}' \
+  "$sensor_message_id" "$timestamp")
 
 publish() {
   local topic=$1
@@ -47,8 +53,8 @@ publish "devices/$device_id/gps" "$gps_payload"
 publish "devices/$device_id/sensor" "$sensor_payload"
 python scripts/check-architecture.py --device-id "$device_id"
 
-# The bridge derives deterministic event IDs from topic and payload. Replaying the
-# same GPS message must therefore remain idempotent in DEALData.
+# A source-provided stable message_id is scoped by the bridge to this device and
+# topic. Replaying the same source event must therefore remain idempotent in DEALData.
 publish "devices/$device_id/gps" "$gps_payload"
 python scripts/check-architecture.py --device-id "$device_id"
 

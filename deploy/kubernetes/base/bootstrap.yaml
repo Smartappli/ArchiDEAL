@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: apisix-bootstrap-${RELEASE_ID}
+  labels:
+    app.kubernetes.io/name: apisix-bootstrap
+    app.kubernetes.io/component: bootstrap
+    app.kubernetes.io/part-of: archideal
+    archideal.io/release: "${RELEASE_ID}"
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apisix-bootstrap
+        app.kubernetes.io/component: bootstrap
+        app.kubernetes.io/part-of: archideal
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      restartPolicy: Never
+      serviceAccountName: apisix-bootstrap
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: "${IMAGE_APISIX_BOOTSTRAP}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: APISIX_ADMIN_URL
+              value: http://apisix-admin:9180
+            - name: APISIX_ROUTES_FILE
+              value: /bootstrap-config/routes.json
+            - name: APISIX_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: apisix-admin-key
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: bootstrap-config
+              mountPath: /bootstrap-config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: bootstrap-config
+          configMap:
+            name: apisix-bootstrap
+            items:
+              - key: routes.json
+                path: routes.json
+        - name: tmp
+          emptyDir: {}

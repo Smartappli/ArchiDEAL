@@ -1,0 +1,148 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: &weekly
+      interval: weekly
+      day: monday
+      time: "05:30"
+      timezone: Europe/Brussels
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"
+    groups: &dependency-groups
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(compose)"
+
+  - package-ecosystem: npm
+    directory: /components/DEALInterface
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(interface)"
+    groups: *dependency-groups
+
+  - package-ecosystem: cargo
+    directory: /components/DEALIoT
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(iot-rust)"
+    groups: *dependency-groups
+
+  - package-ecosystem: pip
+    directory: /components/DEALHost
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(host)"
+    groups: *dependency-groups
+
+  - package-ecosystem: pip
+    directory: /components/DEALData/core_layer
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(data-core)"
+    groups: *dependency-groups
+
+  - package-ecosystem: pip
+    directory: /components/DEALData/gps_layer
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(data-gps)"
+    groups: *dependency-groups
+
+  - package-ecosystem: pip
+    directory: /components/DEALData/sensor_layer
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(data-sensor)"
+    groups: *dependency-groups
+
+  - package-ecosystem: pip
+    directory: /components/DEALIoT/orchestration
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(iot-orchestration)"
+    groups: *dependency-groups
+
+  - package-ecosystem: pip
+    directory: /components/DEALIoT/beam
+    schedule: *weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(iot-beam)"
+    groups: *dependency-groups
+
+  - package-ecosystem: docker
+    directory: /components/DEALIoT/mqtt-kafka-bridge
+    schedule: *weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(image-bridge)"
+
+  - package-ecosystem: docker
+    directory: /components/DEALIoT/management-console
+    schedule: *weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(image-console)"
+
+  - package-ecosystem: docker
+    directory: /components/DEALData/core_layer
+    schedule: *weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(image-data-core)"
+
+  - package-ecosystem: docker
+    directory: /components/DEALData/gps_layer
+    schedule: *weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(image-data-gps)"
+
+  - package-ecosystem: docker
+    directory: /components/DEALData/sensor_layer
+    schedule: *weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(image-data-sensor)"
+
+  - package-ecosystem: docker
+    directory: /components/DEALHost
+    schedule: *weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(image-host)"
+
+  - package-ecosystem: docker
+    directory: /components/DEALInterface
+    schedule: *weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(image-interface)"
+
+  - package-ecosystem: docker
+    directory: /deploy/apisix
+    schedule: *weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(image-apisix-bootstrap)"

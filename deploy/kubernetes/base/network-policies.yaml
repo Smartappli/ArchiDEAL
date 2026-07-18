@@ -1,0 +1,588 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - key: k8s-app
+                operator: In
+                values: [kube-dns, coredns]
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oauth2-proxy-ingress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "${INGRESS_NAMESPACE}"
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+      ports:
+        - protocol: TCP
+          port: 4180
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: oauth2-proxy-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - protocol: TCP
+          port: 9080
+    - to:
+        - ipBlock:
+            cidr: "${OIDC_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: "${VALKEY_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 6380
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: apisix-ingress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: oauth2-proxy
+      ports:
+        - protocol: TCP
+          port: 9080
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - apisix-bootstrap
+                  - dealhost
+      ports:
+        - protocol: TCP
+          port: 9180
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "${MONITORING_NAMESPACE}"
+          podSelector:
+            matchLabels:
+              monitoring.archideal.io/scraper: "true"
+      ports:
+        - protocol: TCP
+          port: 9091
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: apisix-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - dealinterface
+                  - dealhost
+                  - dealdata-core
+                  - dealdata-gps
+                  - dealdata-sensor
+                  - dealiot-console
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 7000
+        - protocol: TCP
+          port: 7001
+        - protocol: TCP
+          port: 7002
+    - to:
+        - ipBlock:
+            cidr: "${ETCD_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 2379
+    - to:
+        - ipBlock:
+            cidr: "${OTEL_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-ingress-from-apisix
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealinterface
+          - dealhost
+          - dealdata-core
+          - dealdata-gps
+          - dealdata-sensor
+          - dealiot-console
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 7000
+        - protocol: TCP
+          port: 7001
+        - protocol: TCP
+          port: 7002
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealhost-external-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealhost
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${POSTGRES_METADATA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - ipBlock:
+            cidr: "${VALKEY_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 6380
+    - to:
+        - ipBlock:
+            cidr: "${OIDC_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: "${GITHUB_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealhost-migration-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-migrate
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${POSTGRES_METADATA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealdata-api-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealdata-core
+          - dealdata-gps
+          - dealdata-sensor
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${POSTGRES_DATA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealdata-consumer-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealdata-gps-consumer
+          - dealdata-sensor-consumer
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${POSTGRES_DATA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - ipBlock:
+            cidr: "${KAFKA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 9093
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealdata-migration-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealdata-core-migrate
+          - dealdata-gps-migrate
+          - dealdata-sensor-migrate
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${POSTGRES_DATA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-preflight-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kafka-preflight
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${KAFKA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 9093
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealiot-console-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dealiot-console
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${KAFKA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 9093
+    - to:
+        - ipBlock:
+            cidr: "${MQTT_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 8883
+    - to:
+        - ipBlock:
+            cidr: "${OIDC_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mqtt-kafka-bridge-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mqtt-kafka-bridge
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${KAFKA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 9093
+    - to:
+        - ipBlock:
+            cidr: "${MQTT_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 8883
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: production-smoke-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: production-smoke
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${MQTT_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 8883
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealhost-to-apisix-admin
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - protocol: TCP
+          port: 9180
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: apisix-bootstrap-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: apisix-bootstrap
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - protocol: TCP
+          port: 9180
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-identity-ingress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "${MONITORING_NAMESPACE}"
+          podSelector:
+            matchLabels:
+              monitoring.archideal.io/scraper: "true"
+      ports:
+        - protocol: TCP
+          port: 44180
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-dealdata-ingress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealdata-core
+          - dealdata-gps
+          - dealdata-sensor
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "${MONITORING_NAMESPACE}"
+          podSelector:
+            matchLabels:
+              monitoring.archideal.io/scraper: "true"
+      ports:
+        - protocol: TCP
+          port: 9101
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-ingestion-ingress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - mqtt-kafka-bridge
+          - dealdata-gps-consumer
+          - dealdata-sensor-consumer
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "${MONITORING_NAMESPACE}"
+          podSelector:
+            matchLabels:
+              monitoring.archideal.io/scraper: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9100

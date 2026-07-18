@@ -264,6 +264,24 @@ both derived records have been acknowledged. Kafka idempotent producers prevent 
 by internal producer retries; consumers must still tolerate a duplicate if a process stops between
 downstream delivery and source acknowledgement.
 
+For end-to-end idempotence, publishers should include a stable `event_id`, `message_id`,
+`measurement_id`, `sequence` or `counter`. The bridge hashes that source identity into the
+64-character event identifier and therefore maps a redelivery to the same record. Without a source
+identity it deliberately creates a new identifier for each MQTT delivery: this may retain a
+duplicate after a retry, but it never drops a legitimate repeated measurement merely because its
+payload equals an earlier one.
+
+The bridge `/metrics` endpoint exposes readiness, received MQTT deliveries, durably forwarded
+deliveries, DLQ records, loop errors and Kafka acknowledgement latency. Aggregate readiness requires
+MQTT SUBACK reason codes granting QoS 1 for every configured subscription and the latest Kafka
+metadata check; an ACL rejection or QoS downgrade fails the loop instead of marking the pod ready.
+The Kafka check runs every
+15 seconds with a 5-second bound, so an idle bridge leaves readiness after Kafka becomes unavailable.
+Kafka queue admission is bounded to 5 seconds and broker delivery to 30 seconds. `received_total`
+includes MQTT redeliveries and process counters reset on restart, so their ratio is an operational
+signal, not a unique-event 30-day SLI. The unified ArchiDEAL production overlay discovers this
+endpoint with a `PodMonitor`; the complete measurement limits are documented in `../../docs/slo.md`.
+
 ## Testing And Quality Gates
 
 Run the same validation layers used by CI:
