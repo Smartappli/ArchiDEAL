@@ -110,6 +110,7 @@ def synthetic_payloads(device_id: str) -> tuple[bytes, bytes]:
 
 def publish_synthetic(config: PublisherConfig) -> None:
     context = ssl.create_default_context(cafile=config.ca_file)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     client_id = f"archideal-production-smoke-{config.device_id}"[-120:]
     raw_socket = socket.create_connection((config.host, config.port), timeout=10)
     with context.wrap_socket(raw_socket, server_hostname=config.host) as connection:

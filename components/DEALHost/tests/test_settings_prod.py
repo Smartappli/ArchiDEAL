@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from dealhost.settings.env import cache_config
+from dealhost.settings.env import cache_config, get_secret_env
 
 
 PROD_SETTINGS_MODULE = "dealhost.settings.prod"
@@ -159,6 +159,59 @@ class ProductionSettingsTests(SimpleTestCase):
         self.assertEqual(
             prod.DEALHOST_OIDC_INTROSPECTION_URL,
             "https://identity.example.com/oauth2/introspect",
+        )
+
+    def test_prod_settings_validate_oidc_completeness_after_secret_loading(self):
+        env = {
+            "DJANGO_SECRET_KEY": "prod-secret-key",  # nosec B105 - test fixture.
+            "DJANGO_ALLOWED_HOSTS": "dealhost.example.com",
+            "DJANGO_CSRF_TRUSTED_ORIGINS": "https://dealhost.example.com",
+            "GITHUB_TOKEN": "github-token",  # nosec B105 - test fixture.
+            "GITHUB_WEBHOOK_SECRET": "github-webhook-secret",  # nosec B105.
+            "APISIX_ADMIN_KEY": "apisix-admin-key",  # nosec B105.
+            "DEALHOST_API_TOKENS": "",
+            "DEALHOST_ADMIN_API_TOKENS": "",
+            "DEALHOST_DATABASE_ENGINE": "postgresql",
+            "DEALHOST_DATABASE_HOST": "postgres.example.com",
+            "DEALHOST_DATABASE_PASSWORD": "database-secret",  # nosec B105.
+            "DEALHOST_DATABASE_SSLMODE": "verify-full",
+            "DEALHOST_DATABASE_SSLROOTCERT": "/run/secrets/postgres/ca.crt",
+            "VALKEY_URL": "rediss://dealhost:secret@valkey.example.com:6380/1",
+            "DEALHOST_OIDC_INTROSPECTION_URL": (
+                "https://identity.example.com/oauth2/introspect"
+            ),
+            "DEALHOST_OIDC_ISSUER": "https://identity.example.com",
+            "DEALHOST_OIDC_AUDIENCE": "archideal-production",
+            "DEALHOST_OIDC_CLIENT_ID": "dealhost",
+            "DEALHOST_OIDC_CLIENT_SECRET": "unresolved-secret",  # nosec B105.
+            "DEALHOST_OIDC_READ_GROUPS": "archideal-readers",
+        }
+
+        def resolve_secret(name, default=None, *, allow_placeholder=True):
+            if name == "DEALHOST_OIDC_CLIENT_SECRET":
+                return "resolved-oidc-secret"
+            return get_secret_env(
+                name,
+                default,
+                allow_placeholder=allow_placeholder,
+            )
+
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch(
+                "dealhost.settings.env.get_secret_env",
+                side_effect=resolve_secret,
+            ),
+        ):
+            prod = _reload_prod_settings()
+
+        self.assertEqual(
+            prod.oidc_values["DEALHOST_OIDC_CLIENT_SECRET"],
+            "resolved-oidc-secret",
+        )
+        self.assertEqual(
+            prod.DEALHOST_OIDC_CLIENT_SECRET,
+            "resolved-oidc-secret",
         )
 
     def test_prod_settings_reject_unencrypted_valkey(self):

@@ -332,6 +332,9 @@ fn handle_subscription_ack(
     pending_subscriptions: &mut usize,
     metrics: &BridgeMetrics,
 ) -> Result<bool, BridgeError> {
+    // run_bridge queues one topic per SUBSCRIBE request. MQTT requires the matching SUBACK to
+    // contain exactly one reason code; accepting a batched or unsolicited response would hide a
+    // protocol/client bookkeeping error and could mark subscriptions ready prematurely.
     let accepted = suback.return_codes.len() == 1
         && suback
             .return_codes
@@ -744,6 +747,26 @@ mod tests {
             .expect_err("a QoS 0 grant must not satisfy the QoS 1 ingestion contract");
 
         assert_eq!(pending_subscriptions, 1);
+        assert!(!metrics.ready.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn mqtt_subscription_ack_must_match_one_subscribe_request() {
+        let metrics = BridgeMetrics::default();
+        metrics.set_kafka_ready(true);
+        let mut pending_subscriptions = 2;
+        let unexpected_batch = SubAck::new(
+            44,
+            vec![
+                SubscribeReasonCode::Success(QoS::AtLeastOnce),
+                SubscribeReasonCode::Success(QoS::AtLeastOnce),
+            ],
+        );
+
+        handle_subscription_ack(&unexpected_batch, &mut pending_subscriptions, &metrics)
+            .expect_err("one SUBSCRIBE request must receive exactly one return code");
+
+        assert_eq!(pending_subscriptions, 2);
         assert!(!metrics.ready.load(Ordering::Relaxed));
     }
 }

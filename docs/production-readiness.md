@@ -66,6 +66,27 @@ The explicit partial and missing indicators in `docs/slo.md` remain NO-GO items 
 environment supplies and tests them; the presence of Prometheus Operator CRDs alone is not evidence
 of observability readiness.
 
+## Temporary MQTT client supplier exception
+
+The Rust bridge currently imports the MQTT 3.1.1 client from the published
+`rumqttc-v4-next` 0.33.2 package. This is a temporary, named supplier exception: the previous
+`rumqttc` release pins a vulnerable `rustls-webpki` line, while the upstream remediation
+[remains unmerged](https://github.com/bytebeamio/rumqtt/pull/1037) and does not yet select the first
+version that fixes [RUSTSEC-2026-0104](https://rustsec.org/advisories/RUSTSEC-2026-0104.html).
+The replacement package is maintained in a personal fork and is not a strategic dependency.
+
+A production GO therefore additionally requires all of the following evidence:
+
+- the committed Cargo lock resolves exactly `rumqttc-v4-next` 0.33.2 and
+  `rustls-webpki` 0.103.13 or later, with no 0.102.x package, and every build uses `--locked`;
+- the release SBOM and blocking vulnerability scan cover the bridge dependency graph;
+- staging proves private-CA TLS, mutual TLS when enabled, reconnect, SUBACK, QoS 1 manual
+  acknowledgement and Kafka recovery behavior;
+- the platform owner records a quarterly supplier review, owner and exit date in the third-party
+  risk register;
+- the exception is removed when a maintained upstream or successor MQTT 3.1.1 release provides the
+  required fixed TLS dependency and passes the same integration suite.
+
 ## Promotion and rollback
 
 Build images once from the release commit. Promotion changes only the environment release record and

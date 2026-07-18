@@ -106,6 +106,28 @@ class ApisixBootstrapTests(unittest.TestCase):
         self.assertEqual(route_ids, {"archideal-stale"})
         self.assertEqual(request_json.call_count, 2)
 
+    def test_empty_route_listing_may_omit_list(self) -> None:
+        with mock.patch.object(
+            self.bootstrap,
+            "request_json",
+            return_value=(200, {"total": 0}),
+        ) as request_json:
+            route_ids = self.bootstrap.installed_managed_route_ids()
+
+        self.assertEqual(route_ids, set())
+        request_json.assert_called_once_with(
+            "/apisix/admin/routes?page=1&page_size=100",
+        )
+
+    def test_route_listing_rejects_a_malformed_list(self) -> None:
+        with mock.patch.object(
+            self.bootstrap,
+            "request_json",
+            return_value=(200, {"total": 0, "list": ""}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "invalid list format"):
+                self.bootstrap.installed_managed_route_ids()
+
     def test_plugin_metadata_is_installed_before_routes(self) -> None:
         metadata_file = mock.Mock()
         metadata_file.read_text.return_value = json.dumps(

@@ -69,6 +69,7 @@ if oidc_configured:
         "DEALHOST_OIDC_CLIENT_SECRET",
         allow_placeholder=False,
     )
+    oidc_values["DEALHOST_OIDC_CLIENT_SECRET"] = DEALHOST_OIDC_CLIENT_SECRET
     missing_oidc = sorted(name for name, value in oidc_values.items() if not value)
     if not DEALHOST_OIDC_READ_GROUPS and not DEALHOST_OIDC_ADMIN_GROUPS:
         missing_oidc.append("DEALHOST_OIDC_READ_GROUPS/DEALHOST_OIDC_ADMIN_GROUPS")

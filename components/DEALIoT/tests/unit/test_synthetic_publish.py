@@ -5,6 +5,7 @@ import struct
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import ANY, MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "management-console"))
@@ -64,6 +65,53 @@ class SyntheticPublishTests(unittest.TestCase):
             "archideal-smoke-release-1-sensor",
         )
         self.assertEqual(gps_payload["timestamp"], sensor_payload["timestamp"])
+
+    def test_publisher_explicitly_requires_tls_twelve_or_newer(self) -> None:
+        context = MagicMock()
+        connection = context.wrap_socket.return_value.__enter__.return_value
+        acknowledgements = [
+            (synthetic_publish.CONNACK_PACKET_TYPE, b"\x00\x00"),
+            *[
+                (
+                    synthetic_publish.PUBACK_PACKET_TYPE,
+                    struct.pack("!H", packet_id),
+                )
+                for packet_id in (1, 2, 3)
+            ],
+        ]
+        config = synthetic_publish.PublisherConfig(
+            host="mqtt.example.com",
+            port=8883,
+            username="smoke-user",
+            password="secret",  # noqa: S106 - synthetic test credential.
+            ca_file="/var/run/archideal-ca/mqtt-ca.crt",
+            device_id="smoke-1",
+        )
+
+        with (
+            patch.object(
+                synthetic_publish.ssl,
+                "create_default_context",
+                return_value=context,
+            ),
+            patch.object(synthetic_publish.socket, "create_connection"),
+            patch.object(
+                synthetic_publish,
+                "receive_frame",
+                side_effect=acknowledgements,
+            ),
+        ):
+            synthetic_publish.publish_synthetic(config)
+
+        self.assertEqual(
+            context.minimum_version,
+            synthetic_publish.ssl.TLSVersion.TLSv1_2,
+        )
+        context.wrap_socket.assert_called_once_with(
+            ANY,
+            server_hostname="mqtt.example.com",
+        )
+        self.assertEqual(connection.sendall.call_count, 5)
 
 
 if __name__ == "__main__":
