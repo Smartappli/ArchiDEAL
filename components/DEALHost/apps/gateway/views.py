@@ -51,6 +51,7 @@ def _cache_is_ready() -> bool:
 
 
 class LiveHealthView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -58,6 +59,7 @@ class LiveHealthView(APIView):
 
 
 class ReadyHealthView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def get(self, request):

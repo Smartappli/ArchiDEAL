@@ -19,7 +19,7 @@ python scripts/check-architecture.py --health-only
 bridge_ready=false
 for _attempt in {1..60}; do
   if docker compose exec -T mqtt-kafka-bridge \
-    wget -q --spider http://127.0.0.1:8080/readyz; then
+    /usr/local/bin/dealiot-mqtt-kafka-bridge --healthcheck; then
     bridge_ready=true
     break
   fi

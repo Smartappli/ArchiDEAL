@@ -28,7 +28,16 @@ function numberValue(record: Record<string, unknown>, key: string) {
 }
 
 function countUnhealthyStatuses(summary: Record<string, unknown>) {
-  const unhealthyKeys = ["error", "failed", "unhealthy", "unavailable", "timeout", "degraded"];
+  const unhealthyKeys = [
+    "error",
+    "failed",
+    "unhealthy",
+    "unavailable",
+    "unreachable",
+    "unknown",
+    "timeout",
+    "degraded",
+  ];
 
   return unhealthyKeys.reduce((total, key) => total + (numberValue(summary, key) ?? 0), 0);
 }

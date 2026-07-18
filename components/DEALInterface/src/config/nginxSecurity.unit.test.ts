@@ -5,6 +5,7 @@ import nginxConfig from "../../nginx.conf?raw";
 describe("nginx security policy", () => {
   it("suppresses version disclosure and emits baseline response headers", () => {
     expect(nginxConfig).toContain("server_tokens off;");
+    expect(nginxConfig).toContain("charset utf-8;");
     expect(nginxConfig).toContain('add_header X-Content-Type-Options "nosniff" always;');
     expect(nginxConfig).toContain('add_header X-Frame-Options "DENY" always;');
     expect(nginxConfig).toContain('add_header Referrer-Policy "no-referrer" always;');

@@ -124,6 +124,7 @@ jobs:
       - name: Scan the published digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.72.0
           image-ref: ${{ steps.image.outputs.image }}@${{ steps.build.outputs.digest }}
           format: sarif
           output: trivy-${{ matrix.name }}.sarif
@@ -142,6 +143,7 @@ jobs:
       - name: Generate CycloneDX evidence
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.72.0
           image-ref: ${{ steps.image.outputs.image }}@${{ steps.build.outputs.digest }}
           format: cyclonedx
           output: sbom-${{ matrix.name }}.cdx.json
@@ -405,6 +407,7 @@ jobs:
       - name: Scan the exact upstream digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.72.0
           image-ref: ${{ steps.upstream.outputs.image }}
           format: sarif
           output: trivy-${{ matrix.name }}.sarif
@@ -423,6 +426,7 @@ jobs:
       - name: Generate independent upstream CycloneDX evidence
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.72.0
           image-ref: ${{ steps.upstream.outputs.image }}
           format: cyclonedx
           output: sbom-${{ matrix.name }}.cdx.json

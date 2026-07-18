@@ -11,7 +11,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 dealiot-event-contracts = { path = "../dealiot-event-contracts" }
 env_logger = "0.11"
 log = "0.4"
-rdkafka = { version = "0.39", features = ["cmake-build", "ssl", "sasl"] }
+rdkafka = { version = "0.39", default-features = false, features = ["cmake-build", "libz-static", "ssl", "tokio"] }
 ring = "0.17"
 rumqttc = { package = "rumqttc-v4-next", version = "0.33.2", default-features = false, features = ["use-rustls-ring"] }
 serde = { version = "1", features = ["derive"] }

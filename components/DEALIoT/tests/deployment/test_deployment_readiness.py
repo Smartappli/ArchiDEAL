@@ -921,9 +921,12 @@ class DeploymentReadinessTests(unittest.TestCase):
         self.assertIn("COPY --chown=root:root --chmod=0555 pipelines", beam_runtime_dockerfile)
         self.assertIn("FROM rust:", bridge_dockerfile)
         self.assertIn("cargo build --release", bridge_dockerfile)
-        self.assertIn("ca-certificates libsasl2-2 wget", bridge_dockerfile)
+        self.assertIn("FROM scratch", bridge_dockerfile)
+        self.assertIn("dpkg-query -s ca-certificates libc6 libgcc-s1 libssl3", bridge_dockerfile)
+        self.assertNotIn("libsasl2-2 wget", bridge_dockerfile)
+        self.assertIn("--healthcheck", bridge_dockerfile)
         self.assertIn(
-            "COPY --from=builder --chown=root:root --chmod=0555",
+            "COPY --from=builder --chown=0:0 /runtime-root/ /",
             bridge_dockerfile,
         )
         self.assertIn("FROM rust:", normalizer_dockerfile)
