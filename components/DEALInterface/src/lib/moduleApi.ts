@@ -27,6 +27,18 @@ function numberValue(record: Record<string, unknown>, key: string) {
   return typeof value === "number" ? value : undefined;
 }
 
+function extractNumericSummary(payload: unknown) {
+  if (!isRecord(payload) || !isRecord(payload.summary)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(payload.summary).filter(
+    (entry): entry is [string, number] => typeof entry[1] === "number",
+  );
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 function countUnhealthyStatuses(summary: Record<string, unknown>) {
   const unhealthyKeys = [
     "error",
@@ -155,6 +167,7 @@ async function fetchProbe(runtime: ModuleRuntimeConfig, probe: ModuleProbeConfig
     });
     const payload = await parseResponse(response);
     const responseTimeMs = Math.round(performance.now() - startedAt);
+    const summary = extractNumericSummary(payload);
 
     return {
       id: probe.id,
@@ -164,6 +177,7 @@ async function fetchProbe(runtime: ModuleRuntimeConfig, probe: ModuleProbeConfig
       httpStatus: response.status,
       responseTimeMs,
       detail: summarizePayload(payload, response.status),
+      summary,
       checkedAt,
     };
   } catch (error) {

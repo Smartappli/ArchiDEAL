@@ -8,9 +8,12 @@ describe("French messages", () => {
       "command.access": "Accès",
       "hero.consoleDescription":
         "Les surfaces partagées d'accès, d'audit et d'opérations sont prêtes pour l'intégration API.",
-      "hero.title": "Pilotez DEALHost, DEALIot et DEALData depuis une interface unifiée.",
+      "hero.title": "Pilotez DEALHost, DEALIoT et DEALData depuis une interface unifiée.",
+      "moduleCopy.dealiot.capabilityTelemetry": "Télémétrie",
+      "platform.allOperational": "Tous les modules connectés sont opérationnels.",
       "production.liveOnlyTitle": "Mode de validation en direct",
       "service.refresh": "Rafraîchir",
+      "service.summaryUnreachable": "{count} injoignable(s)",
       "status.copyOnline":
         "Les sondes requises sont saines dans cet environnement de validation.",
       "status.degraded": "Dégradé",

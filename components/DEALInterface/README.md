@@ -5,7 +5,7 @@ DEALInterface is the unified management console for the DEAL suite.
 It is designed as a modular control plane:
 
 - `DEALHost` keeps hosting, gateway and runtime operations isolated.
-- `DEALIot` keeps device, telemetry and edge operations isolated.
+- `DEALIoT` keeps device, telemetry and edge operations isolated.
 - `DEALData` keeps ingestion, catalog and lineage operations isolated.
 - `DEALInterface` centralizes IAM, RBAC, audit, billing, support and operator workflows.
 
@@ -97,12 +97,12 @@ This first version provides:
 
 - a responsive management shell;
 - global platform metrics;
-- module navigation for `DEALHost`, `DEALIot` and `DEALData`;
+- module navigation for `DEALHost`, `DEALIoT` and `DEALData`;
 - active module detail panels;
 - control-plane topology;
 - operator action queue with active-module focus;
 - module control profiles with operating facts and workflow cards;
-- live API connection probes for `DEALHost`, `DEALIot` and the three `DEALData` layers;
+- live API connection probes for `DEALHost`, `DEALIoT` and the three `DEALData` layers;
 - shared workflow and activity sections;
 - runtime endpoint configuration ready for API integration.
 

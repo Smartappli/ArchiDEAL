@@ -20,7 +20,7 @@ export const dealModules: DealModule[] = [
   },
   {
     key: "dealiot",
-    name: "DEALIot",
+    name: "DEALIoT",
     shortName: "IoT",
     summary: "Device fleets, telemetry intake, automations and edge policy control.",
     owner: "IoT operations",
@@ -70,7 +70,7 @@ export const activityFeed: ActivityItem[] = [
     severity: "online",
   },
   {
-    module: "DEALIot",
+    module: "DEALIoT",
     title: "Telemetry lag above threshold",
     detail: "Two ingestion partitions need scaling before the next peak window.",
     time: "24 min",

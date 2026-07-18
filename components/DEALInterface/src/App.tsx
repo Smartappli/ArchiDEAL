@@ -7,6 +7,7 @@ import { MetricsGrid } from "./components/MetricsGrid";
 import { ModuleCard } from "./components/ModuleCard";
 import { ModuleDetail } from "./components/ModuleDetail";
 import { OperatorQueue } from "./components/OperatorQueue";
+import { PlatformHealth } from "./components/PlatformHealth";
 import { ServiceConnections } from "./components/ServiceConnections";
 import { TopologyMap } from "./components/TopologyMap";
 import { LanguageSelector } from "./components/LanguageSelector";
@@ -15,6 +16,7 @@ import { showDemoData } from "./config/runtimeMode";
 import { activityFeed, dashboardMetrics, dealModules, moduleControlProfiles, operatorActions } from "./data/dashboard";
 import { useModuleConnections } from "./hooks/useModuleConnections";
 import { I18nProvider, useI18n } from "./i18n/I18nProvider";
+import { localizeModules } from "./i18n/moduleCopy";
 import type { ActionPriority, ModuleKey } from "./types";
 
 const actionPriorityRank: Record<ActionPriority, number> = {
@@ -35,15 +37,16 @@ function AppContent() {
   const { t } = useI18n();
   const [activeKey, setActiveKey] = useState<ModuleKey>("dealhost");
   const { connections, isRefreshing, refresh } = useModuleConnections(moduleRuntimeConfig);
+  const localizedModules = useMemo(() => localizeModules(dealModules, t), [t]);
   const liveModules = useMemo(
     () =>
-      dealModules.map((module) => ({
+      localizedModules.map((module) => ({
         ...module,
         metrics: showDemoData ? module.metrics : [],
         status:
           connections[module.key]?.status ?? (showDemoData ? module.status : "attention"),
       })),
-    [connections],
+    [connections, localizedModules],
   );
   const activeModule = useMemo(
     () => liveModules.find((module) => module.key === activeKey) ?? liveModules[0],
@@ -62,9 +65,13 @@ function AppContent() {
   const nextActionModule = nextAction ? liveModules.find((module) => module.key === nextAction.moduleKey) : undefined;
 
   return (
-    <div className="app-shell">
+    <>
+      <a className="skip-link" href="#main-content">
+        {t("app.skipToContent")}
+      </a>
+      <div className="app-shell">
       <aside className="sidebar" aria-label={t("app.navigationAria")}>
-        <a className="brand" href="#top" aria-label={t("app.homeAria")}>
+        <a className="brand" href="#main-content" aria-label={t("app.homeAria")}>
           <span className="brand__mark">DI</span>
           <span>
             <strong>DEALInterface</strong>
@@ -74,16 +81,17 @@ function AppContent() {
 
         <LanguageSelector />
 
-        <nav className="module-nav" aria-label="Module navigation">
+        <nav className="module-nav" aria-label={t("app.moduleNavigationAria")}>
           {liveModules.map((module) => (
             <button
+              aria-pressed={module.key === activeKey}
               className={module.key === activeKey ? "module-nav__item module-nav__item--active" : "module-nav__item"}
               key={module.key}
               onClick={() => setActiveKey(module.key)}
               type="button"
             >
-              <span style={{ background: module.accent }} aria-hidden="true" />
-              {module.name}
+              <span className="module-nav__indicator" style={{ background: module.accent }} aria-hidden="true" />
+              <span className="module-nav__label">{module.name}</span>
             </button>
           ))}
         </nav>
@@ -106,8 +114,8 @@ function AppContent() {
         </div>
       </aside>
 
-      <main className="main-surface" id="top">
-        <section className="hero">
+      <main className="main-surface" id="main-content" tabIndex={-1}>
+        <section className={showDemoData ? "hero" : "hero hero--live"}>
           <div className="hero__content reveal" style={{ "--order": 0 } as CSSProperties}>
             <span className="section-kicker">{t("hero.kicker")}</span>
             <h1>{t("hero.title")}</h1>
@@ -118,20 +126,23 @@ function AppContent() {
             </div>
           </div>
 
-          <div className="hero-console reveal" style={{ "--order": 1 } as CSSProperties}>
-            <span>{showDemoData ? t("hero.consoleTitle") : t("production.liveOnlyTitle")}</span>
-            <strong>{showDemoData ? "84%" : "LIVE"}</strong>
-            <p>
-              {showDemoData
-                ? t("hero.consoleDescription")
-                : t("production.liveOnlyDescription")}
-            </p>
-            {showDemoData ? (
+          {showDemoData ? (
+            <div className="hero-console reveal" style={{ "--order": 1 } as CSSProperties}>
+              <span>{t("hero.consoleTitle")}</span>
+              <strong>84%</strong>
+              <p>{t("hero.consoleDescription")}</p>
               <div className="hero-console__bar" aria-hidden="true">
                 <span />
               </div>
-            ) : null}
-          </div>
+            </div>
+          ) : (
+            <PlatformHealth
+              connections={connections}
+              isRefreshing={isRefreshing}
+              modules={liveModules}
+              onRefresh={refresh}
+            />
+          )}
         </section>
 
         {showDemoData ? <MetricsGrid metrics={dashboardMetrics} /> : null}
@@ -145,6 +156,7 @@ function AppContent() {
             {liveModules.map((module, index) => (
               <ModuleCard
                 isActive={module.key === activeKey}
+                isPending={!connections[module.key]}
                 key={module.key}
                 module={module}
                 onSelect={setActiveKey}
@@ -183,6 +195,7 @@ function AppContent() {
           {showDemoData ? <ActivityFeed items={activityFeed} /> : null}
         </section>
       </main>
-    </div>
+      </div>
+    </>
   );
 }
