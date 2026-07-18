@@ -8,18 +8,7 @@ WORKDIR ${APP_HOME}
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DEBIAN_FRONTEND=noninteractive
-
-# Install system dependencies.
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    curl \
-    libpq-dev \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Copy and install Python dependencies
 COPY ./gps_layer/requirements.lock ./
@@ -35,15 +24,7 @@ WORKDIR ${APP_HOME}
 
 COPY --from=builder /install /usr/local
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    libpq-dev \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
- && groupadd --gid 10001 appuser \
+RUN groupadd --gid 10001 appuser \
  && useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser \
  && mkdir -p /app/staticfiles /app/logs /app/static /app/media \
  && chown -R appuser:appuser /app

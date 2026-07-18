@@ -8,13 +8,6 @@ WORKDIR ${APP_HOME}
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install system dependencies
-# hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-  && rm -rf /var/lib/apt/lists/*
-
 # Copy and install Python dependencies
 COPY ./core_layer/requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r requirements.lock

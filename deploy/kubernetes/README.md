@@ -51,8 +51,8 @@ deploy/kubernetes/deploy-production.sh \
 Before rendering or contacting Kubernetes, the deployer verifies the signed release bundle, every
 evidence hash and content contract, the exact ten values-file references and the eight first-party
 image signatures/attestations. There is no promotion bypass; Cosign and registry access are
-required. See `docs/supply-chain.md` for the four required upstream GitHub repository variables and
-the GitHub Release download procedure. Upstream authorization additionally requires APISIX
+required. See `docs/supply-chain.md` for the reviewed immutable upstream pin file and the GitHub
+Release download procedure. Upstream authorization additionally requires APISIX
 3.14.1+ and oauth2-proxy 7.15.3+, a registry-resolved source-tag-to-digest proof, and successful
 runtime compatibility checks against the exact promoted digests.
 
