@@ -6,7 +6,7 @@ dependencies = [
     "Django[argon2]==6.0.7",
     "django-filter==25.2",
     "django-health-check[psutil]==4.4.3",
-    "django-valkey[lz4]==0.4.1",
+    "django-valkey==0.4.1",
     "djangorestframework==3.17.1",
     "djangorestframework-simplejwt==5.5.1",
     "djangorestframework-stubs>=3.17.0",

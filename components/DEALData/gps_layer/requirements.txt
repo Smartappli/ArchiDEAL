@@ -4,7 +4,7 @@ django-filter==26.1
 django-health-check[psutil]==4.4.3
 
 # --- Valkey / cache ---
-django-valkey[lz4]==0.4.1
+django-valkey==0.4.1
 # --- Django ---
 Django[argon2]==6.0.7
 
