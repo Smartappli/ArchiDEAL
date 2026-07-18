@@ -77,7 +77,7 @@ describe("App live module integrations", () => {
 
     expect(
       screen.getByRole("heading", {
-        name: /Manage DEALHost, DEALIot and DEALData from one deliberate interface/i,
+        name: /Manage DEALHost, DEALIoT and DEALData from one deliberate interface/i,
       }),
     ).toBeInTheDocument();
 
@@ -104,7 +104,7 @@ describe("App live module integrations", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
 
-    await user.click(within(screen.getByLabelText("Module navigation")).getByRole("button", { name: "DEALIot" }));
+    await user.click(within(screen.getByLabelText("Module navigation")).getByRole("button", { name: "DEALIoT" }));
 
     expect(await screen.findByText("/dealiot/api/health")).toBeInTheDocument();
     expect(screen.getByText("dealiot API offline")).toBeInTheDocument();
@@ -222,8 +222,9 @@ describe("App live module integrations", () => {
 
     await user.selectOptions(languageSelect, "fr");
 
-    expect(screen.getByRole("heading", { name: "Pilotez DEALHost, DEALIot et DEALData depuis une interface unifiée." })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Pilotez DEALHost, DEALIoT et DEALData depuis une interface unifiée." })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Rafraîchir" })).toBeInTheDocument();
+    expect(screen.getAllByText("Télémétrie").length).toBeGreaterThan(0);
     expect(document.documentElement.lang).toBe("fr");
     expect(window.localStorage.getItem("dealinterface.language")).toBe("fr");
   });

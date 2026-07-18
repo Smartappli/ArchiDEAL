@@ -1,5 +1,5 @@
 # Stage 1: Build with all dependencies
-FROM python:3.14-slim-trixie@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS builder
+FROM python:3.14-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92 AS builder
 
 ARG APP_HOME=/app
 WORKDIR ${APP_HOME}
@@ -12,20 +12,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Copy and install Python dependencies
 COPY ./gps_layer/requirements.lock ./
-RUN pip install --prefix=/install --no-cache-dir --require-hashes --only-binary :all: -r requirements.lock \
+RUN apk add --no-cache --virtual .lz4-build-deps build-base linux-headers lz4-dev \
+ && pip install --prefix=/install --no-cache-dir --require-hashes --only-binary :all: --no-binary lz4 -r requirements.lock \
  && find /install -name "*.pyc" -delete \
- && find /install -depth -type d -name "__pycache__" -exec rm -rf {} +
+ && find /install -depth -type d -name "__pycache__" -exec rm -rf {} + \
+ && apk del .lz4-build-deps
 
 # Stage 2: Lightweight runtime image
-FROM python:3.14-slim-trixie@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS runtime
+FROM python:3.14-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92 AS runtime
 
 ARG APP_HOME=/app
 WORKDIR ${APP_HOME}
 
+RUN apk add --no-cache lz4-libs
+
 COPY --from=builder /install /usr/local
 
-RUN groupadd --gid 10001 appuser \
- && useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser \
+RUN addgroup -S -g 10001 appuser \
+ && adduser -S -D -H -u 10001 -G appuser appuser \
  && mkdir -p /app/staticfiles /app/logs /app/static /app/media \
  && chown -R appuser:appuser /app
 

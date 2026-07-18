@@ -1,4 +1,4 @@
-FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015
+FROM python:3.14-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,9 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN groupadd --system --gid 10001 dealhost \
-    && useradd --system --uid 10001 --gid dealhost \
-        --home-dir /app --shell /usr/sbin/nologin dealhost
+RUN addgroup -S -g 10001 dealhost \
+    && adduser -S -D -H -u 10001 -G dealhost dealhost
 
 COPY requirements.lock /tmp/requirements.lock
 

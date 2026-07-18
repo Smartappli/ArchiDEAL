@@ -5,10 +5,13 @@ const statusLabelKeys = {
   online: "status.online",
   degraded: "status.degraded",
   attention: "status.attention",
+  pending: "status.pending",
 } as const;
 
+export type DisplayStatus = ModuleHealth | "pending";
+
 interface StatusPillProps {
-  status: ModuleHealth;
+  status: DisplayStatus;
 }
 
 export function StatusPill({ status }: StatusPillProps) {
