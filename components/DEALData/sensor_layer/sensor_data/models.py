@@ -167,7 +167,7 @@ class SensorObservedObject(models.Model):
     )
     sensor_observed_object_sensor = models.ForeignKey(
         Sensor,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="sensor_observed_object_sensor",
     )
     sensor_observed_object_start_time = models.TimeField()
@@ -211,7 +211,7 @@ class SensorData(models.Model):
     )
     sensor_data_sensor = models.ForeignKey(
         Sensor,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="sensor_data_sensor",
     )
     sensor_data_utc_date = models.DateField()
@@ -347,7 +347,7 @@ class SensorDataObservedObject(models.Model):
     )
     sensor_data_observed_object_sensor = models.ForeignKey(
         Sensor,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="sensor_data_observed_object_sensor",
     )
     sensor_data_observed_object_object_id = models.UUIDField(

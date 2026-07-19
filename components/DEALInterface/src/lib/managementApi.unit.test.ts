@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDatasetResource,
   createIamUser,
+  deleteDatasetResource,
   deleteIamUser,
   type Dataset,
   type Device,
@@ -170,7 +171,7 @@ describe("managementRequest", () => {
     });
   });
 
-  it("creates catalog metadata and updates a dataset with its strong revision ETag", async () => {
+  it("creates, updates and deletes dataset catalog metadata", async () => {
     const dataset: Dataset = {
       id: 8,
       name: "Telemetry",
@@ -183,7 +184,8 @@ describe("managementRequest", () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse(dataset, 201))
-      .mockResolvedValueOnce(jsonResponse({ ...dataset, name: "Telemetry curated", revision: 5 }));
+      .mockResolvedValueOnce(jsonResponse({ ...dataset, name: "Telemetry curated", revision: 5 }))
+      .mockResolvedValueOnce(jsonResponse(undefined, 204));
     vi.stubGlobal("fetch", fetchMock);
 
     await createDatasetResource({
@@ -197,6 +199,7 @@ describe("managementRequest", () => {
       description: "Curated telemetry data",
       enabled: false,
     });
+    await deleteDatasetResource(dataset);
 
     expect(fetchMock.mock.calls[0][1]?.method).toBe("POST");
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
@@ -212,6 +215,9 @@ describe("managementRequest", () => {
       description: "Curated telemetry data",
       enabled: false,
     });
+    expect(fetchMock.mock.calls[2][0]).toBe("/dealhost/api/hosting/datasets/8/");
+    expect(fetchMock.mock.calls[2][1]?.method).toBe("DELETE");
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get("If-Match")).toBe('"4"');
   });
 
   it("uses the same strong ETag when retiring a device and rejects invalid revisions", async () => {

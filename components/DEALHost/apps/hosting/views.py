@@ -784,6 +784,41 @@ class DatasetViewSet(viewsets.ModelViewSet):
             response["ETag"] = f'"{serializer.instance.revision}"'
             return response
 
+    def destroy(self, request: Request, *args, **kwargs) -> Response:
+        """Delete only the exact dataset revision confirmed by the operator."""
+        try:
+            expected_revision = _if_match_revision(request.headers.get("If-Match"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if expected_revision is None:
+            return Response(
+                {"detail": "If-Match is required for dataset deletion."},
+                status=428,
+            )
+
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = kwargs[lookup_url_kwarg]
+        with transaction.atomic():
+            queryset = self.filter_queryset(self.get_queryset()).select_for_update()
+            instance = get_object_or_404(
+                queryset,
+                **{self.lookup_field: lookup_value},
+            )
+            self.check_object_permissions(request, instance)
+            if instance.revision != expected_revision:
+                response = Response(
+                    {
+                        "detail": "The dataset changed after it was loaded.",
+                        "revision": instance.revision,
+                    },
+                    status=status.HTTP_412_PRECONDITION_FAILED,
+                )
+                response["ETag"] = f'"{instance.revision}"'
+                return response
+
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
     def perform_create(self, serializer):
         instance = serializer.save()
         publish_event(

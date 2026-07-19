@@ -22,6 +22,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 from gps_data.views import (
+    GPSSensorDetailView,
+    GPSSensorListCreateView,
     WildFiGPSBatchIngestView,
     WildFiGPSIngestView,
     WildFiGPSListView,
@@ -34,6 +36,16 @@ urlpatterns = [
     path("health/live/", health_live, name="health-live"),
     path("health/ready/", health_ready, name="health-ready"),
     path("metrics/", metrics, name="metrics"),
+    path(
+        "api/gps-sensors/",
+        GPSSensorListCreateView.as_view(),
+        name="gps-sensor-list",
+    ),
+    path(
+        "api/gps-sensors/<uuid:pk>/",
+        GPSSensorDetailView.as_view(),
+        name="gps-sensor-detail",
+    ),
     path("api/wildfi/gps/", WildFiGPSListView.as_view(), name="wildfi-gps-list"),
     path(
         "api/ingest/wildfi/gps/",

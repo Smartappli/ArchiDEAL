@@ -157,6 +157,15 @@ scheme check, and an init container applies the same fail-closed check before oa
 The development Compose profile may continue to use plaintext `redis://` only on its private local
 network.
 
+DEALData uses a separate confidential OIDC introspection client in every Core, GPS, and Sensor
+workload. Store it at `dealdata/oidc-client-id` and `dealdata/oidc-client-secret` below
+`SECRET_PREFIX`; never place either value in the production values file. The shared ConfigMap pins
+the introspection URL, issuer, audience, top-level `groups` claim, distinct read/admin groups, and
+timeout. APISIX converts oauth2-proxy's `X-Forwarded-Access-Token` into `Authorization: Bearer ...`
+only on the three protected DEALData routes and removes the raw forwarded-token header before the
+request reaches Django. Current scientific metadata CRUD and WildFi event-listing routes require
+the admin group; the ingestion endpoints remain isolated behind `DEALDATA_INGEST_TOKEN`.
+
 Kafka credentials are deliberately separate: `kafka/producer-*` is used only by the MQTT bridge,
 `kafka/consumer-*` by the DEALData consumers and topology preflight, and `kafka/console-*` by the
 operator console. Configure matching least-privilege Kafka ACLs; do not point these entries at one

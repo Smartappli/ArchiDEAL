@@ -84,9 +84,10 @@ Upstream modules (containers/services Django)
   refusé (`400`, `code=module_unknown`). En production, une route dynamique exige en
   plus un manifest de module revu avec `production_ready=true` (`409`,
   `code=module_not_production_ready`). Elle reprend les plugins d'observabilité ; le
-  jeton OIDC n'est échangé contre `Authorization` que pour les upstreams DEALHost et
-  DEALIoT qui l'introspectent. Toutes les autres cibles suppriment explicitement
-  `Authorization` et `X-Forwarded-Access-Token`. Le profil de développement conserve
+  jeton OIDC n'est échangé contre `Authorization` que pour les upstreams DEALHost,
+  DEALIoT et les trois couches DEALData qui l'introspectent. Toutes les autres cibles
+  suppriment explicitement `Authorization` et `X-Forwarded-Access-Token`. Le profil de
+  développement conserve
   l'en-tête `Authorization` reçu et n'active pas OpenTelemetry sans collecteur local.
   Avant toute prévisualisation ou publication,
   DEALHost refuse les chemins ambigus/encodés, les espaces système (`/oauth2`,
@@ -105,7 +106,7 @@ Upstream modules (containers/services Django)
   un module sans route publique reste supprimable.
 - `GET/POST /api/hosting/tools/` : catalogue CRUD des outils (chaque outil peut lier plusieurs modules).
 - `GET/POST /api/hosting/applications/` : catalogue CRUD des applications (chaque application peut lier plusieurs modules) ; cette API ne déploie pas de runtime.
-- `GET/POST /api/hosting/datasets/` : catalogue des datasets et listes de visibilité. Les lectures authentifiées sont limitées aux entrées actives attribuées directement ou via un groupe ; le staff voit tout et réalise les mutations. Ces listes ne contrôlent pas l'accès aux événements GPS ou Sensor de DEALData.
+- `GET/POST /api/hosting/datasets/` : catalogue des datasets et listes de visibilité. Les lectures authentifiées sont limitées aux entrées actives attribuées directement ou via un groupe ; le staff voit tout et réalise les mutations. Les mises à jour et suppressions exigent la révision courante dans `If-Match`. Ces listes ne contrôlent pas l'accès aux événements GPS ou Sensor de DEALData.
 - `GET /api/hosting/dataset-principals/` (edge monorepo :
   `GET /dealhost/api/hosting/dataset-principals/`) : catalogue staff-only minimal pour
   l'édition des ACL de datasets. Il expose uniquement les identifiants, libellés,
@@ -444,8 +445,9 @@ staff (ou un jeton d'administration équivalent).
 
 Ces relations utilisateur/groupe sont uniquement des ACL de visibilité du catalogue
 DEALHost. Elles n'accordent ni ne refusent l'accès data-plane aux événements GPS ou
-Sensor de DEALData. Cet accès doit être protégé par un contrat d'autorisation explicite
-dans les API propriétaires et validé séparément avant toute mise en production.
+Sensor de DEALData. Les listes d'événements sont protégées séparément par le groupe
+administrateur de DEALData : cette frontière est commune au service et ne constitue
+pas une ACL par dataset, objet observé ou ligne d'événement.
 
 Une identité OIDC est reliée aux ACL directes par une clé locale stable dérivée de
 `issuer + sub`, jamais par le `preferred_username` mutable. Les noms du claim OIDC
@@ -508,9 +510,13 @@ portent `Cache-Control: no-store`. Le mécanisme de notification best-effort
 ACL opaque et l'acteur, jamais le `subject` brut.
 
 Chaque dataset expose `revision` et `updated_at`. Les réponses de détail portent un
-ETag fort (`"3"`) et tout `PATCH`/`PUT` exige cette valeur dans `If-Match` : l'absence
-renvoie `428`, une révision périmée `412`. Lorsque Core NATS est activé, les créations,
-modifications et suppressions tentent également d'émettre une notification best-effort
+ETag fort (`"3"`) et tout `PATCH`/`PUT`/`DELETE` exige cette valeur dans `If-Match`.
+Pour la suppression, l'absence renvoie `428`, un ETag faible ou mal formé `400`, et une
+révision périmée `412` avec l'ETag et la révision courants ; seule la révision exacte
+est supprimée avec `204`. DEALInterface affiche une confirmation puis envoie l'ETag
+fort de l'entrée chargée, afin qu'une vue opérateur obsolète ne puisse pas supprimer
+une version plus récente. Lorsque Core NATS est activé, les créations, modifications
+et suppressions tentent également d'émettre une notification best-effort
 `hosting.dataset.*` avec l'acteur et la révision.
 
 Ces notifications Core NATS ne constituent pas un journal d'audit durable : elles sont

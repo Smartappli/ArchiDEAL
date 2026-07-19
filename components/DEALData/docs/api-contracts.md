@@ -1,12 +1,16 @@
-# WildFi ingestion API contract
+# DEALData API contracts
 
-This document defines the stable contract shared by the GPS and Sensor ingestion services.
+This document defines the scientific metadata, WildFi ingestion, and event-listing contracts shared by the Core, GPS, and Sensor services.
 Existing endpoints are unversioned; incompatible changes require a documented deprecation and a versioned endpoint.
 
 ## Authentication
 
 When `DEALDATA_INGEST_TOKEN` is configured, ingestion requests must send it in the `X-DEALDATA-INGEST-TOKEN` header.
-Invalid or missing tokens receive `403 Forbidden`. Read and observability endpoints do not use this shared ingestion token.
+Invalid or missing tokens receive `403 Forbidden`. This token is restricted to ingestion and never authenticates metadata management or event-listing requests.
+
+Metadata management and WildFi event listings use Django REST Framework authentication. A local staff user may use a session or Basic authentication for development. The production edge forwards an OIDC bearer, which every DEALData service introspects without persisting a local user. Introspection fails closed unless the token is active and its issuer, audience, stable subject, and configured top-level group claim are valid.
+
+The OIDC settings are `DEALDATA_OIDC_INTROSPECTION_URL`, `DEALDATA_OIDC_ISSUER`, `DEALDATA_OIDC_AUDIENCE`, `DEALDATA_OIDC_CLIENT_ID`, `DEALDATA_OIDC_CLIENT_SECRET`, `DEALDATA_OIDC_GROUPS_CLAIM`, `DEALDATA_OIDC_READ_GROUPS`, `DEALDATA_OIDC_ADMIN_GROUPS`, and `DEALDATA_OIDC_TIMEOUT_SECONDS`. Read and admin group sets must be non-empty and disjoint. All metadata and event-listing routes documented below require the admin group (`IsAdminUser`); a read-group-only principal cannot access them.
 
 ## Single-event ingestion
 
@@ -41,14 +45,32 @@ The response reports `inserted`, `duplicates`, `errors`, and one result per inpu
 - `207 Multi-Status` means one or more items failed while other items were processed.
 - `400 Bad Request` means the batch envelope itself is invalid.
 
+## Scientific metadata management
+
+Every route in this section is staff/admin-only:
+
+- `GET` and `POST /api/experiments/`; `GET`, `PATCH`, and `DELETE /api/experiments/{uuid}/`.
+  The public fields are `id` (read-only), `project`, and `observed_objects`. Related UUIDs must identify existing Core projects and observed objects.
+- `GET` and `POST /api/sensors/`; `GET`, `PATCH`, and `DELETE /api/sensors/{uuid}/`.
+  The public fields are `id`, `vendor`, `model`, `code`, `created_at`, and `updated_at`; generated fields are read-only and `code` is unique.
+- `GET` and `POST /api/gps-sensors/`; `GET`, `PATCH`, and `DELETE /api/gps-sensors/{uuid}/`.
+  The public fields are `id`, `code`, `purchase_date`, `frequency`, `vendor`, `model`, `sim_card`, `active`, `created_at`, and `updated_at`. `code` is unique and `frequency` must be finite and greater than zero.
+
+Sensor and GPS sensor deletion is metadata-safe: it returns `409 Conflict` while measurements, processed positions, or observed-object links still reference the device. Clients must migrate or explicitly remove those related records before retrying; the metadata endpoint never cascades the deletion into scientific observations.
+
 ## Event listing
 
 - `GET /api/wildfi/gps/`
 - `GET /api/wildfi/sensor/`
 
+Both routes are staff/admin-only; they do not accept the shared ingestion token as read authorization.
 Supported shared query parameters are `device_id`, `source`, `topic`, `from`, `to`, `limit`, and `offset`; Sensor adds `sensor_type`.
 `from` and `to` must be ISO-8601 timestamps and `from` cannot be later than `to`.
 The default limit is 100 and the maximum is 1,000. A malformed query receives `400 Bad Request`.
+
+Passing `summary=true` returns a compact representation and omits raw `payload`, transport `metadata`, hashes, topics, and other detailed fields from the HTTP response. GPS summaries contain `id`, `device_id`, `observed_object_id`, `timestamp`, `latitude`, and `longitude`; Sensor summaries contain `id`, `device_id`, `observed_object_id`, `timestamp`, and `sensor_type`. DEALInterface requests `limit=20&offset=0&summary=true` for its recent read-only panels. Omitting `summary=true` preserves the existing detailed response for authorized administrators.
+
+These contracts manage scientific associations and device metadata. They do not provide map rendering, bulk acquisition/import, or retention/routing configuration. Dataset entries shown by DEALInterface are a DEALHost catalogue contract, not a DEALData storage or event-level authorization contract.
 
 ## Kafka parity and worker configuration
 

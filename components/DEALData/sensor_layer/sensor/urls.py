@@ -22,6 +22,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 from sensor_data.views import (
+    SensorDetailView,
+    SensorListCreateView,
     WildFiSensorBatchIngestView,
     WildFiSensorIngestView,
     WildFiSensorListView,
@@ -34,6 +36,12 @@ urlpatterns = [
     path("health/live/", health_live, name="health-live"),
     path("health/ready/", health_ready, name="health-ready"),
     path("metrics/", metrics, name="metrics"),
+    path("api/sensors/", SensorListCreateView.as_view(), name="sensor-list"),
+    path(
+        "api/sensors/<uuid:pk>/",
+        SensorDetailView.as_view(),
+        name="sensor-detail",
+    ),
     path(
         "api/wildfi/sensor/",
         WildFiSensorListView.as_view(),

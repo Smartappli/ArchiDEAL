@@ -127,19 +127,22 @@ blocked until the rollback window has closed.
 
 Create separate IdP groups for `OIDC_ALLOWED_GROUP` and `OIDC_ADMIN_GROUP`. The first is the
 oauth2-proxy admission group and grants read-only DEALHost/DEALIoT access; the second grants
-DEALHost administration and DEALIoT writes after introspection. An administrator needs both
-memberships because the edge rejects a principal that lacks `OIDC_ALLOWED_GROUP`. The renderer
-refuses identical group values. Both services read authorization membership only from the pinned
-top-level `groups` claim; names appearing in `scope`, `scp`, `roles` or `realm_access.roles` never
-grant read or administrative access.
+DEALHost administration, DEALIoT writes, and DEALData scientific metadata/event administration
+after introspection. An administrator needs both memberships because the edge rejects a principal
+that lacks `OIDC_ALLOWED_GROUP`. The renderer refuses identical group values. Every introspecting
+application reads authorization membership only from the pinned top-level `groups` claim; names
+appearing in `scope`, `scp`, `roles` or `realm_access.roles` never grant read or administrative
+access.
 
 Direct API bearer tokens follow the same boundary as browser sessions: oauth2-proxy validates the
 token and writes `X-Forwarded-Access-Token`, APISIX replaces `Authorization` on only the protected
-DEALHost/DEALIoT routes, and the applications introspect that token before applying their read or
-admin group. Those routes remove the raw `X-Forwarded-Access-Token` after the exchange. DEALData,
+DEALHost, DEALIoT, and three DEALData routes, and each application introspects that token before
+applying its role checks. Those routes remove the raw `X-Forwarded-Access-Token` after the exchange.
 DEALInterface and every other non-introspecting upstream explicitly remove both `Authorization`
-and `X-Forwarded-Access-Token`; the original client header and the edge token are never forwarded
-to them.
+and `X-Forwarded-Access-Token`; the original client header and edge token are never forwarded to
+them. Provision the confidential DEALData introspection client below
+`SECRET_PREFIX/dealdata/oidc-client-id` and `SECRET_PREFIX/dealdata/oidc-client-secret`; the same
+release-scoped immutable Secret is projected into Core, GPS, and Sensor.
 
 ```bash
 make production-deploy \

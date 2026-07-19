@@ -312,7 +312,13 @@ class ProductionRendererTests(unittest.TestCase):
                     route["id"],
                 )
             routes_by_id = {route["id"]: route for route in apisix_routes}
-            for route_id in ("archideal-dealhost", "archideal-dealiot"):
+            for route_id in (
+                "archideal-dealhost",
+                "archideal-dealiot",
+                "archideal-dealdata-core",
+                "archideal-dealdata-gps",
+                "archideal-dealdata-sensor",
+            ):
                 self.assertEqual(
                     routes_by_id[route_id]["plugins"]["proxy-rewrite"]["headers"][
                         "set"
@@ -649,6 +655,22 @@ class ProductionRendererTests(unittest.TestCase):
                     "dealdata-sensor": 7002,
                 }[service_name]
                 workload = by_kind_name[("Deployment", service_name)]
+                application = workload["spec"]["template"]["spec"]["containers"][0]
+                application_env = {
+                    item["name"]: item for item in application.get("env", [])
+                }
+                self.assertEqual(
+                    application_env["DEALDATA_OIDC_CLIENT_ID"]["valueFrom"][
+                        "secretKeyRef"
+                    ]["key"],
+                    "dealdata-oidc-client-id",
+                )
+                self.assertEqual(
+                    application_env["DEALDATA_OIDC_CLIENT_SECRET"]["valueFrom"][
+                        "secretKeyRef"
+                    ]["key"],
+                    "dealdata-oidc-client-secret",
+                )
                 metrics_proxy = next(
                     container
                     for container in workload["spec"]["template"]["spec"]["containers"]
@@ -771,7 +793,7 @@ class ProductionRendererTests(unittest.TestCase):
     def test_apisix_oidc_header_boundary_and_network_policy_are_render_gates(
         self,
     ) -> None:
-        def leak_raw_token(documents) -> None:
+        def stop_forwarding_dealdata_token(documents) -> None:
             config = next(
                 document
                 for document in documents
@@ -783,19 +805,40 @@ class ProductionRendererTests(unittest.TestCase):
                 for route in routes["routes"]
                 if route["id"] == "archideal-dealdata-core"
             )
-            core_route["plugins"]["proxy-rewrite"]["headers"]["remove"] = [
-                "Authorization"
-            ]
+            headers = core_route["plugins"]["proxy-rewrite"]["headers"]
+            headers["set"].pop("Authorization")
+            headers["remove"] = ["Authorization", "X-Forwarded-Access-Token"]
             config["data"]["routes.json"] = json.dumps(routes)
 
         with tempfile.TemporaryDirectory() as directory:
             result = self.render_with_kubernetes_mutation(
                 Path(directory) / "token-leak",
                 "base/configuration.yaml",
-                leak_raw_token,
+                stop_forwarding_dealdata_token,
             )
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("must strip Authorization", result.stderr)
+        self.assertIn("must exchange the forwarded", result.stderr)
+
+        def remove_dealdata_oidc_egress(documents) -> None:
+            policy = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "dealdata-api-egress"
+            )
+            policy["spec"]["egress"] = [
+                rule
+                for rule in policy["spec"]["egress"]
+                if all(port["port"] != 443 for port in rule.get("ports", []))
+            ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "dealdata-oidc-egress",
+                "base/network-policies.yaml",
+                remove_dealdata_oidc_egress,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("dealdata-api-egress", result.stderr)
 
         def remove_dealhost_egress(documents) -> None:
             policy = next(

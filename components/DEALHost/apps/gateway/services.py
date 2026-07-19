@@ -168,7 +168,15 @@ _SYSTEM_RESERVED_PATH_PREFIXES = (
     "/dealiot",
     "/dealdata",
 )
-_OIDC_INTROSPECTING_UPSTREAM_HOSTS = frozenset({"dealhost", "dealiot"})
+_OIDC_INTROSPECTING_UPSTREAM_HOSTS = frozenset(
+    {
+        "dealhost",
+        "dealiot",
+        "dealdata-core",
+        "dealdata-gps",
+        "dealdata-sensor",
+    },
+)
 
 
 def _validated_public_path(value: object) -> str:

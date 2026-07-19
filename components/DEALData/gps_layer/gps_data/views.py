@@ -2,9 +2,16 @@
 
 import logging
 
-from django.db import connections
+from django.db import IntegrityError, connections, transaction
+from django.db.models.deletion import ProtectedError
+from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_safe
 from rest_framework import status
+from rest_framework.generics import (
+    ListCreateAPIView,
+    RetrieveUpdateDestroyAPIView,
+)
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,10 +30,50 @@ from dealdata_common.views import (
 )
 
 from .ingestion import ingest_dealiot_gps_event
-from .models import GPSFix
-from .serializers import WildFiGPSBatchSerializer
+from .models import GPSFix, GPSSensor
+from .serializers import GPSSensorSerializer, WildFiGPSBatchSerializer
 
 LOGGER = logging.getLogger(__name__)
+
+
+class GPSSensorListCreateView(ListCreateAPIView):
+    """List GPS sensors or create a new sensor as an administrator."""
+
+    queryset = GPSSensor.objects.order_by("gps_sensors_code", "gps_sensors_id")
+    serializer_class = GPSSensorSerializer
+    permission_classes = [IsAdminUser]
+
+
+class GPSSensorDetailView(RetrieveUpdateDestroyAPIView):
+    """Retrieve, update, or delete one GPS sensor as an administrator."""
+
+    queryset = GPSSensor.objects.all()
+    serializer_class = GPSSensorSerializer
+    permission_classes = [IsAdminUser]
+    http_method_names = ["get", "patch", "delete", "head", "options"]
+
+    def destroy(self, request, *args, **kwargs):
+        """Refuse a metadata deletion that would cascade into scientific data."""
+        conflict = {
+            "detail": (
+                "This GPS sensor still has positions or observed-object links. "
+                "Remove or migrate those records before deleting its metadata."
+            ),
+        }
+        try:
+            with transaction.atomic():
+                queryset = self.filter_queryset(
+                    self.get_queryset(),
+                ).select_for_update()
+                sensor = get_object_or_404(queryset, pk=kwargs["pk"])
+                self.check_object_permissions(request, sensor)
+                related_managers = (sensor.gps_sensor_link, sensor.gps_sensor_link2)
+                if any(manager.exists() for manager in related_managers):
+                    return Response(conflict, status=status.HTTP_409_CONFLICT)
+                self.perform_destroy(sensor)
+        except (ProtectedError, IntegrityError):
+            return Response(conflict, status=status.HTTP_409_CONFLICT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @require_safe
@@ -62,29 +109,40 @@ def metrics(request):
     )
 
 
-def _serialize_gps_fix(event: GPSFix) -> dict[str, object]:
-    return {
+def _serialize_gps_fix(
+    event: GPSFix,
+    *,
+    summary: bool = False,
+) -> dict[str, object]:
+    result: dict[str, object] = {
         "id": str(event.wildfi_gps_fix_id),
         "device_id": event.wildfi_device_id,
         "observed_object_id": (
             str(event.observed_object_id) if event.observed_object_id else None
         ),
-        "event_id": event.event_id,
-        "payload_hash": event.payload_hash,
-        "topic": event.dealiot_topic,
-        "source": event.source,
-        "mqtt_topic": event.mqtt_topic,
         "timestamp": event.acquisition_time.isoformat(),
-        "ingested_at": event.ingested_at.isoformat() if event.ingested_at else None,
         "latitude": event.latitude,
         "longitude": event.longitude,
-        "altitude": event.altitude,
-        "speed": event.speed,
-        "heading": event.heading,
-        "geojson": event.as_geojson(),
-        "payload": event.payload,
-        "metadata": event.message_metadata,
     }
+    if summary:
+        return result
+    result.update(
+        {
+            "event_id": event.event_id,
+            "payload_hash": event.payload_hash,
+            "topic": event.dealiot_topic,
+            "source": event.source,
+            "mqtt_topic": event.mqtt_topic,
+            "ingested_at": event.ingested_at.isoformat() if event.ingested_at else None,
+            "altitude": event.altitude,
+            "speed": event.speed,
+            "heading": event.heading,
+            "geojson": event.as_geojson(),
+            "payload": event.payload,
+            "metadata": event.message_metadata,
+        },
+    )
+    return result
 
 
 class WildFiGPSIngestView(APIView):
@@ -113,8 +171,7 @@ class WildFiGPSIngestView(APIView):
 class WildFiGPSListView(APIView):
     """List stored WildFi GPS fixes."""
 
-    authentication_classes: list[type] = []
-    permission_classes: list[type] = []
+    permission_classes = [IsAdminUser]
 
     def get(self, request) -> Response:
         """Return GPS fixes filtered by device, source, topic and time window."""
@@ -139,12 +196,13 @@ class WildFiGPSListView(APIView):
 
         total = queryset.count()
         rows = queryset[offset : offset + limit]
+        summary = request.query_params.get("summary", "").casefold() == "true"
         return Response(
             {
                 "count": total,
                 "limit": limit,
                 "offset": offset,
-                "results": [_serialize_gps_fix(row) for row in rows],
+                "results": [_serialize_gps_fix(row, summary=summary) for row in rows],
             },
         )
 

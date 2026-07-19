@@ -188,6 +188,11 @@ PASSWORD_HASHERS = [
 ]
 
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "dealdata_common.authentication.OIDCBearerAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+        "rest_framework.authentication.BasicAuthentication",
+    ],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
 }
@@ -214,6 +219,39 @@ def configure_service_settings(
         CSRF_TRUSTED_ORIGINS=env_list("DJANGO_CSRF_TRUSTED_ORIGINS"),
         DEALDATA_INGEST_TOKEN=os.environ.get("DEALDATA_INGEST_TOKEN", ""),
         DEALDATA_REQUIRE_INGEST_TOKEN=require_ingest_token,
+        DEALDATA_OIDC_INTROSPECTION_URL=os.environ.get(
+            "DEALDATA_OIDC_INTROSPECTION_URL",
+            "",
+        ).strip(),
+        DEALDATA_OIDC_ISSUER=os.environ.get("DEALDATA_OIDC_ISSUER", "").strip(),
+        DEALDATA_OIDC_AUDIENCE=os.environ.get(
+            "DEALDATA_OIDC_AUDIENCE",
+            "",
+        ).strip(),
+        DEALDATA_OIDC_CLIENT_ID=os.environ.get(
+            "DEALDATA_OIDC_CLIENT_ID",
+            "",
+        ).strip(),
+        DEALDATA_OIDC_CLIENT_SECRET=os.environ.get(
+            "DEALDATA_OIDC_CLIENT_SECRET",
+            "",
+        ),
+        DEALDATA_OIDC_GROUPS_CLAIM=os.environ.get(
+            "DEALDATA_OIDC_GROUPS_CLAIM",
+            "groups",
+        ),
+        DEALDATA_OIDC_READ_GROUPS=tuple(
+            env_list("DEALDATA_OIDC_READ_GROUPS"),
+        ),
+        DEALDATA_OIDC_ADMIN_GROUPS=tuple(
+            env_list("DEALDATA_OIDC_ADMIN_GROUPS"),
+        ),
+        DEALDATA_OIDC_TIMEOUT_SECONDS=env_float(
+            "DEALDATA_OIDC_TIMEOUT_SECONDS",
+            default=3.0,
+            minimum=0.001,
+            maximum=30.0,
+        ),
         INSTALLED_APPS=[*DJANGO_APPS, "rest_framework", app_config],
         MIDDLEWARE=MIDDLEWARE,
         ROOT_URLCONF=f"{project_module}.urls",

@@ -7,6 +7,7 @@ import { DatasetManagementPanel } from "./DatasetManagementPanel";
 import { DeviceManagementPanel } from "./DeviceManagementPanel";
 import { ManagementAreaPanel } from "./ManagementAreaPanel";
 import { RoutePublicationPanel } from "./RoutePublicationPanel";
+import { ScientificManagementPanel } from "./ScientificManagementPanel";
 import { StatusPill } from "./StatusPill";
 import { UserManagementPanel } from "./UserManagementPanel";
 
@@ -80,6 +81,21 @@ const workspaceCopy: Record<ModuleKey, WorkspaceCopy> = {
         description: "workspace.dealdata.datasets.description",
       },
       {
+        id: "experiments",
+        title: "workspace.dealdata.experiments.title",
+        description: "workspace.dealdata.experiments.description",
+      },
+      {
+        id: "sensors",
+        title: "workspace.dealdata.sensors.title",
+        description: "workspace.dealdata.sensors.description",
+      },
+      {
+        id: "gps",
+        title: "workspace.dealdata.gps.title",
+        description: "workspace.dealdata.gps.description",
+      },
+      {
         id: "access",
         title: "workspace.dealdata.access.title",
         description: "workspace.dealdata.access.description",
@@ -147,6 +163,12 @@ export function ModuleWorkspace({
     }
     if (module.key === "dealdata" && activeArea.id === "datasets") {
       return <DatasetManagementPanel {...sharedProps} />;
+    }
+    if (
+      module.key === "dealdata"
+      && (activeArea.id === "experiments" || activeArea.id === "sensors" || activeArea.id === "gps")
+    ) {
+      return <ScientificManagementPanel {...sharedProps} key={activeArea.id} kind={activeArea.id} />;
     }
     return (
       <ManagementAreaPanel

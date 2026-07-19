@@ -296,7 +296,13 @@ def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) ->
         fail("APISIX bootstrap routes must be a JSON list.")
 
     bootstrap_pairs: set[tuple[str, int]] = set()
-    oidc_upstreams = {"dealhost", "dealiot"}
+    oidc_upstreams = {
+        "dealhost",
+        "dealiot",
+        "dealdata-core",
+        "dealdata-gps",
+        "dealdata-sensor",
+    }
     for route in bootstrap_routes:
         try:
             route_id = route["id"]
@@ -325,10 +331,11 @@ def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) ->
                 set_headers.get("Authorization")
                 != ("Bearer $http_x_forwarded_access_token")
                 or "X-Forwarded-Access-Token" not in removed_headers
+                or "Authorization" in removed_headers
             ):
                 fail(
-                    "Only DEALHost/DEALIoT routes may exchange the forwarded OIDC "
-                    "token for Authorization and must remove the raw token header."
+                    "Every OIDC-introspecting route must exchange the forwarded "
+                    "token for Authorization and remove the raw token header."
                 )
         elif (
             "Authorization" in set_headers
@@ -1232,6 +1239,27 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     }
     if not required_dealhost_config <= runtime_config.keys():
         fail("DEALHost native production database/OIDC configuration is incomplete.")
+    required_dealdata_oidc_config = {
+        "DEALDATA_OIDC_INTROSPECTION_URL",
+        "DEALDATA_OIDC_ISSUER",
+        "DEALDATA_OIDC_AUDIENCE",
+        "DEALDATA_OIDC_GROUPS_CLAIM",
+        "DEALDATA_OIDC_READ_GROUPS",
+        "DEALDATA_OIDC_ADMIN_GROUPS",
+        "DEALDATA_OIDC_TIMEOUT_SECONDS",
+    }
+    if not required_dealdata_oidc_config <= runtime_config.keys():
+        fail("DEALData native OIDC configuration is incomplete.")
+    if (
+        runtime_config.get("DEALDATA_OIDC_INTROSPECTION_URL")
+        != runtime_config.get("DEALHOST_OIDC_INTROSPECTION_URL")
+        or runtime_config.get("DEALDATA_OIDC_ISSUER")
+        != runtime_config.get("DEALHOST_OIDC_ISSUER")
+        or runtime_config.get("DEALDATA_OIDC_AUDIENCE")
+        != runtime_config.get("DEALHOST_OIDC_AUDIENCE")
+        or runtime_config.get("DEALDATA_OIDC_TIMEOUT_SECONDS") != "3"
+    ):
+        fail("DEALData must introspect the production edge issuer and audience.")
     required_registry_config = {
         "DEALIOT_REGISTRY_DATABASE_HOST",
         "DEALIOT_REGISTRY_DATABASE_PORT",
@@ -1267,12 +1295,15 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         or read_group == admin_group
         or runtime_config.get("DEALHOST_OIDC_READ_GROUPS") != read_group
         or runtime_config.get("DEALHOST_OIDC_ADMIN_GROUPS") != admin_group
+        or runtime_config.get("DEALDATA_OIDC_READ_GROUPS") != read_group
+        or runtime_config.get("DEALDATA_OIDC_ADMIN_GROUPS") != admin_group
         or runtime_config.get("DEALHOST_OIDC_GROUPS_CLAIM") != "groups"
+        or runtime_config.get("DEALDATA_OIDC_GROUPS_CLAIM") != "groups"
         or runtime_config.get("MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM") != "groups"
     ):
         fail(
-            "DEALHost and DEALIoT must share distinct OIDC read/admission and "
-            "write/admin groups and the dedicated top-level groups claim."
+            "DEALHost, DEALData and DEALIoT must share distinct OIDC read/admission "
+            "and write/admin groups and the dedicated top-level groups claim."
         )
     if (
         runtime_config["DJANGO_CSRF_TRUSTED_ORIGINS"]
@@ -1353,6 +1384,31 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         )
         if rendered_user_key != user_key or rendered_password_key != password_key:
             fail(f"{owner_name} does not use its layer-scoped database credential.")
+
+    for owner_name in ("dealdata-core", "dealdata-gps", "dealdata-sensor"):
+        application_container = owners_by_name[owner_name]["spec"]["template"]["spec"][
+            "containers"
+        ][0]
+        owner_env = {
+            item["name"]: item for item in application_container.get("env", [])
+        }
+        oidc_client_id_key = (
+            owner_env.get("DEALDATA_OIDC_CLIENT_ID", {})
+            .get("valueFrom", {})
+            .get("secretKeyRef", {})
+            .get("key")
+        )
+        oidc_client_secret_key = (
+            owner_env.get("DEALDATA_OIDC_CLIENT_SECRET", {})
+            .get("valueFrom", {})
+            .get("secretKeyRef", {})
+            .get("key")
+        )
+        if (
+            oidc_client_id_key != "dealdata-oidc-client-id"
+            or oidc_client_secret_key != "dealdata-oidc-client-secret"
+        ):
+            fail(f"{owner_name} lacks its confidential OIDC introspection client.")
 
     oauth_pod = workloads["oauth2-proxy"]["spec"]["template"]["spec"]
     oauth = oauth_pod["containers"][0]
@@ -1436,7 +1492,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     expected_egress_ports = {
         "dealhost-external-egress": {443, 5432, 6380},
         "dealhost-migration-egress": {5432},
-        "dealdata-api-egress": {5432},
+        "dealdata-api-egress": {443, 5432},
         "dealdata-consumer-egress": {5432, 9093},
         "dealdata-migration-egress": {5432},
         "kafka-preflight-egress": {9093},
@@ -1686,6 +1742,19 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         fail(
             "The production synthetic requires a dedicated MQTT publish-only credential."
         )
+    dealdata_oidc_remote_keys = {
+        name: runtime_secret_items.get(name, {}).get("remoteRef", {}).get("key", "")
+        for name in ("dealdata-oidc-client-id", "dealdata-oidc-client-secret")
+    }
+    if not dealdata_oidc_remote_keys["dealdata-oidc-client-id"].endswith(
+        "/dealdata/oidc-client-id"
+    ) or not dealdata_oidc_remote_keys["dealdata-oidc-client-secret"].endswith(
+        "/dealdata/oidc-client-secret"
+    ):
+        fail(
+            "DEALData OIDC introspection credentials must come from its dedicated "
+            "secret-store entries."
+        )
     registry_password_remote_key = (
         runtime_secret_items.get(
             "dealiot-registry-database-password",
@@ -1817,7 +1886,13 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
                 f"{route_id} must preserve oauth2-proxy's trusted "
                 "X-Forwarded-Proto value."
             )
-    for route_id in ("archideal-dealhost", "archideal-dealiot"):
+    for route_id in (
+        "archideal-dealhost",
+        "archideal-dealiot",
+        "archideal-dealdata-core",
+        "archideal-dealdata-gps",
+        "archideal-dealdata-sensor",
+    ):
         authorization = protected[route_id]["plugins"]["proxy-rewrite"]["headers"][
             "set"
         ].get("Authorization")

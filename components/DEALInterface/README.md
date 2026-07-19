@@ -97,14 +97,15 @@ DEALDATA_SENSOR_PROXY_TARGET=http://127.0.0.1:7002
 ```
 
 Authenticated module calls use the same-origin operator session. In production, oauth2-proxy/APISIX
-must translate that HttpOnly session into the module bearer identity. Tokens must never be added to a
-`VITE_*` variable because Vite embeds those values in the public browser bundle.
+must translate that HttpOnly session into the module bearer identity; DEALHost, DEALIoT and the three
+DEALData services then validate that bearer before applying their own role checks. Tokens must never
+be added to a `VITE_*` variable because Vite embeds those values in the public browser bundle.
 
 An Nginx Basic Auth prompt protects a staging URL but does not establish the OIDC identity or module
-roles required by DEALHost. On a Basic-only VPS, public health probes work while applications,
-datasets and IAM correctly return `401`; do not solve that by injecting one shared administrator
-token for every browser. Configure the documented oauth2-proxy/OIDC boundary before enabling those
-external management mutations.
+roles required by the APIs. On a Basic-only VPS, public health probes work while applications,
+datasets, scientific metadata/event listings and IAM correctly return `401`; do not solve that by
+injecting one shared administrator token for every browser. Configure the documented
+oauth2-proxy/OIDC boundary before enabling those external management mutations.
 
 Default values are defined in `src/config/moduleRegistry.ts` and `vite.config.ts`.
 
@@ -128,22 +129,33 @@ The current development build provides:
   publication action bound to the preview's strong ETag through `If-Match`; changed or cross-module
   previews cannot authorize publication, and disabled modules cannot be previewed or published from
   the console;
-- DEALData dataset creation, conditional metadata updates and access-list administration through
-  the DEALHost control plane,
-  using the staff-only minimal `/dealhost/api/hosting/dataset-principals/` contract instead of the
-  superuser IAM catalog; explicit OIDC issuer/subject provisioning is shown only to DEALHost
-  superusers and never collects credentials, client secrets, API keys or bearer tokens;
+- dataset catalogue creation, conditional metadata updates, confirmed deletion and access-list
+  administration in the DEALData workspace through the DEALHost control plane, using the staff-only
+  minimal `/dealhost/api/hosting/dataset-principals/` contract instead of the superuser IAM catalog.
+  Dataset updates and deletion use the displayed strong revision ETag in `If-Match`, so a stale
+  operator view cannot remove a newer catalogue entry; explicit OIDC issuer/subject provisioning is
+  shown only to DEALHost superusers and never collects credentials, client secrets, API keys or
+  bearer tokens;
+- staff-only DEALData experiment CRUD, associating each experiment with an existing project UUID and
+  a validated list of existing observed-object UUIDs;
+- staff-only metadata CRUD for generic sensors and GPS sensors. Deletion is refused while related
+  measurements, positions or observed-object links still exist, avoiding cascading scientific-data
+  loss;
+- the 20 most recent Sensor and GPS observations as compact read-only summaries. These requests use
+  `summary=true`; raw `payload` and transport `metadata` are neither returned to nor rendered by the
+  console;
 - explicit loading, empty, read-only, expired-session and API-error states.
 
 The production UI does not claim that release metadata is a completed application deployment.
-Deployment orchestration, domain lifecycle, telemetry/rules configuration, lineage, audit evidence,
-billing and support remain unavailable until their owning services expose stable management API
-contracts. The optional demo mode still contains synthetic metrics and operator workflow data; live
-connectivity, device, application, route, dataset and access-right state comes from module APIs.
+Deployment orchestration, domain lifecycle, map views, bulk scientific-data import/acquisition,
+retention or routing-rule configuration, lineage, audit evidence, billing and support remain
+unavailable until their owning services expose stable management API contracts. The optional demo
+mode still contains synthetic metrics and operator workflow data; live connectivity, device,
+application, route, dataset, experiment, sensor, GPS and access-right state comes from module APIs.
 
-Dataset user/group lists currently control visibility of DEALHost catalog entries only. They are not
-data-plane authorization for DEALData GPS or Sensor events and must not be used as evidence that
-event access is protected; the owning DEALData APIs still need an explicit authorization contract.
+Dataset user/group lists control visibility of DEALHost catalogue entries only. They do not grant or
+deny access to DEALData GPS or Sensor events. Event summaries are protected separately by DEALData's
+staff/admin authorization boundary, which is service-wide and is not a per-dataset or per-row ACL.
 
 This is development validation, not production approval. Production still requires a configured
 OIDC provider and role mapping, TLS and external secrets at the edge, durable backed-up databases,

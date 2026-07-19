@@ -94,7 +94,7 @@ class ObservedObjectGPSSensor(models.Model):
     )
     observed_object_gps_sensor_gps_sensor = models.ForeignKey(
         GPSSensor,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="gps_sensor_link",
     )
     observed_object_start_time = models.DateTimeField()
@@ -354,7 +354,7 @@ class ProcessedGPSDataObservedObject(models.Model):
     )
     processed_gps_data_sensors = models.ForeignKey(
         GPSSensor,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="gps_sensor_link2",
     )
     processed_gps_data_observed_object_uuid = models.UUIDField(

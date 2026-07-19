@@ -2,9 +2,12 @@
 
 import logging
 
-from django.db import connections
+from django.db import IntegrityError, connections, transaction
+from django.db.models.deletion import ProtectedError
+from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_safe
-from rest_framework import status
+from rest_framework import generics, status
+from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,10 +26,55 @@ from dealdata_common.views import (
 )
 
 from .ingestion import ingest_dealiot_sensor_event
-from .models import DecodedSensorEvent
-from .serializers import WildFiSensorBatchSerializer
+from .models import DecodedSensorEvent, Sensor
+from .serializers import SensorSerializer, WildFiSensorBatchSerializer
 
 LOGGER = logging.getLogger(__name__)
+
+
+class SensorListCreateView(generics.ListCreateAPIView):
+    """List sensor metadata or register a new sensor."""
+
+    queryset = Sensor.objects.order_by("sensor_code")
+    serializer_class = SensorSerializer
+    permission_classes = [IsAdminUser]
+    http_method_names = ["get", "post", "head", "options"]
+
+
+class SensorDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, partially update, or remove sensor metadata."""
+
+    queryset = Sensor.objects.all()
+    serializer_class = SensorSerializer
+    permission_classes = [IsAdminUser]
+    http_method_names = ["get", "patch", "delete", "head", "options"]
+
+    def destroy(self, request, *args, **kwargs):
+        """Refuse a metadata deletion that would cascade into scientific data."""
+        conflict = {
+            "detail": (
+                "This sensor still has measurements or observed-object links. "
+                "Remove or migrate those records before deleting its metadata."
+            ),
+        }
+        try:
+            with transaction.atomic():
+                queryset = self.filter_queryset(
+                    self.get_queryset(),
+                ).select_for_update()
+                sensor = get_object_or_404(queryset, pk=kwargs["pk"])
+                self.check_object_permissions(request, sensor)
+                related_managers = (
+                    sensor.sensor_observed_object_sensor,
+                    sensor.sensor_data_sensor,
+                    sensor.sensor_data_observed_object_sensor,
+                )
+                if any(manager.exists() for manager in related_managers):
+                    return Response(conflict, status=status.HTTP_409_CONFLICT)
+                self.perform_destroy(sensor)
+        except (ProtectedError, IntegrityError):
+            return Response(conflict, status=status.HTTP_409_CONFLICT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @require_safe
@@ -62,24 +110,35 @@ def metrics(request):
     )
 
 
-def _serialize_sensor_event(event: DecodedSensorEvent) -> dict[str, object]:
-    return {
+def _serialize_sensor_event(
+    event: DecodedSensorEvent,
+    *,
+    summary: bool = False,
+) -> dict[str, object]:
+    result: dict[str, object] = {
         "id": str(event.wildfi_decoded_sensor_event_id),
         "device_id": event.wildfi_device_id,
         "observed_object_id": (
             str(event.observed_object_id) if event.observed_object_id else None
         ),
-        "event_id": event.event_id,
-        "payload_hash": event.payload_hash,
-        "topic": event.dealiot_topic,
-        "source": event.source,
-        "mqtt_topic": event.mqtt_topic,
         "timestamp": event.acquisition_time.isoformat(),
-        "ingested_at": event.ingested_at.isoformat() if event.ingested_at else None,
         "sensor_type": event.sensor_type,
-        "payload": event.payload,
-        "metadata": event.message_metadata,
     }
+    if summary:
+        return result
+    result.update(
+        {
+            "event_id": event.event_id,
+            "payload_hash": event.payload_hash,
+            "topic": event.dealiot_topic,
+            "source": event.source,
+            "mqtt_topic": event.mqtt_topic,
+            "ingested_at": event.ingested_at.isoformat() if event.ingested_at else None,
+            "payload": event.payload,
+            "metadata": event.message_metadata,
+        },
+    )
+    return result
 
 
 class WildFiSensorIngestView(APIView):
@@ -108,8 +167,7 @@ class WildFiSensorIngestView(APIView):
 class WildFiSensorListView(APIView):
     """List stored WildFi sensor events."""
 
-    authentication_classes: list[type] = []
-    permission_classes: list[type] = []
+    permission_classes = [IsAdminUser]
 
     def get(self, request) -> Response:
         """Return sensor events filtered by device, type, source, topic and time."""
@@ -140,12 +198,15 @@ class WildFiSensorListView(APIView):
 
         total = queryset.count()
         rows = queryset[offset : offset + limit]
+        summary = request.query_params.get("summary", "").casefold() == "true"
         return Response(
             {
                 "count": total,
                 "limit": limit,
                 "offset": offset,
-                "results": [_serialize_sensor_event(row) for row in rows],
+                "results": [
+                    _serialize_sensor_event(row, summary=summary) for row in rows
+                ],
             },
         )
 

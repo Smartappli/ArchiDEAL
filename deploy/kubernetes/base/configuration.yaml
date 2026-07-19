@@ -75,6 +75,13 @@ data:
   DEALHOST_OIDC_READ_GROUPS: "${OIDC_ALLOWED_GROUP}"
   DEALHOST_OIDC_ADMIN_GROUPS: "${OIDC_ADMIN_GROUP}"
   DEALHOST_OIDC_TIMEOUT_SECONDS: "3"
+  DEALDATA_OIDC_INTROSPECTION_URL: "${OIDC_INTROSPECTION_URL}"
+  DEALDATA_OIDC_ISSUER: "${OIDC_ISSUER_URL}"
+  DEALDATA_OIDC_AUDIENCE: "${OIDC_AUDIENCE}"
+  DEALDATA_OIDC_GROUPS_CLAIM: groups
+  DEALDATA_OIDC_READ_GROUPS: "${OIDC_ALLOWED_GROUP}"
+  DEALDATA_OIDC_ADMIN_GROUPS: "${OIDC_ADMIN_GROUP}"
+  DEALDATA_OIDC_TIMEOUT_SECONDS: "3"
   MANAGEMENT_CONSOLE_OIDC_READ_ROLES: "${OIDC_ALLOWED_GROUP}"
   MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES: "${OIDC_ADMIN_GROUP}"
   MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM: groups
@@ -242,9 +249,10 @@ data:
               "host": "dealdata-core",
               "headers": {
                 "set": {
+                  "Authorization": "Bearer $http_x_forwarded_access_token",
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
                 },
-                "remove": ["Authorization", "X-Forwarded-Access-Token"]
+                "remove": ["X-Forwarded-Access-Token"]
               }
             }
           },
@@ -266,9 +274,10 @@ data:
               "host": "dealdata-gps",
               "headers": {
                 "set": {
+                  "Authorization": "Bearer $http_x_forwarded_access_token",
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
                 },
-                "remove": ["Authorization", "X-Forwarded-Access-Token"]
+                "remove": ["X-Forwarded-Access-Token"]
               }
             }
           },
@@ -290,9 +299,10 @@ data:
               "host": "dealdata-sensor",
               "headers": {
                 "set": {
+                  "Authorization": "Bearer $http_x_forwarded_access_token",
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
                 },
-                "remove": ["Authorization", "X-Forwarded-Access-Token"]
+                "remove": ["X-Forwarded-Access-Token"]
               }
             }
           },

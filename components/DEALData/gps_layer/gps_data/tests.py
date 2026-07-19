@@ -9,17 +9,19 @@ import sys
 import types
 from unittest import TestCase
 from unittest.mock import patch
+from uuid import uuid4
 
+from django.contrib.auth import get_user_model
 from django.core.checks import Tags, run_checks
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import DatabaseError
+from django.db import DatabaseError, IntegrityError
+from django.db.models.deletion import PROTECT, ProtectedError
 from django.test import Client, override_settings
 from django.utils import timezone
 import pytest
 from rest_framework.test import APIClient
 
-from gps_data.models import GPSSensor, ProcessedGPSDataObservedObject, GPSFix
 from dealdata_common.kafka import (
     DealIotKafkaCommand,
     boolean_env,
@@ -28,6 +30,12 @@ from dealdata_common.kafka import (
     positive_int,
 )
 from dealdata_common.views import INVALID_LIST_QUERY_PARAMETERS_DETAIL
+from gps_data.models import (
+    GPSFix,
+    GPSSensor,
+    ObservedObjectGPSSensor,
+    ProcessedGPSDataObservedObject,
+)
 
 CHECK = TestCase()
 EMPTY_INGEST_TOKEN = str()
@@ -297,6 +305,282 @@ def test_gps_sensor_string_representation() -> None:
     gps_sensor = GPSSensor(gps_sensors_code="GPS-001")
 
     CHECK.assertEqual(str(gps_sensor), "GPS-001")
+
+
+@pytest.mark.django_db
+def test_gps_sensor_management_requires_an_admin_user() -> None:
+    """Anonymous and non-admin users cannot manage GPS sensor metadata."""
+    anonymous_response = APIClient().get("/api/gps-sensors/")
+    user = get_user_model().objects.create_user(username="gps-user")
+    authenticated_client = APIClient()
+    authenticated_client.force_authenticate(user=user)
+
+    authenticated_response = authenticated_client.get("/api/gps-sensors/")
+
+    CHECK.assertEqual(anonymous_response.status_code, 403)
+    CHECK.assertEqual(authenticated_response.status_code, 403)
+
+
+@pytest.mark.django_db
+def test_admin_can_manage_gps_sensor_metadata() -> None:
+    """Administrators can create, list, retrieve, patch, and delete sensors."""
+    admin = get_user_model().objects.create_user(
+        username="gps-admin",
+        is_staff=True,
+    )
+    client = APIClient()
+    client.force_authenticate(user=admin)
+    supplied_id = "00000000-0000-0000-0000-000000000001"
+    payload = {
+        "id": supplied_id,
+        "code": "GPS-API-001",
+        "purchase_date": "2026-06-15",
+        "frequency": 30.0,
+        "vendor": "Globaltek",
+        "model": "FT203",
+        "sim_card": "123456789012345",
+        "active": True,
+    }
+
+    create_response = client.post("/api/gps-sensors/", payload, format="json")
+
+    CHECK.assertEqual(create_response.status_code, 201)
+    CHECK.assertNotEqual(create_response.data["id"], supplied_id)
+    CHECK.assertEqual(create_response.data["code"], "GPS-API-001")
+    CHECK.assertIn("created_at", create_response.data)
+    CHECK.assertIn("updated_at", create_response.data)
+    sensor_id = create_response.data["id"]
+
+    list_response = client.get("/api/gps-sensors/")
+    detail_response = client.get(f"/api/gps-sensors/{sensor_id}/")
+
+    CHECK.assertEqual(list_response.status_code, 200)
+    CHECK.assertEqual(len(list_response.data), 1)
+    CHECK.assertEqual(list_response.data[0]["id"], sensor_id)
+    CHECK.assertEqual(detail_response.status_code, 200)
+    CHECK.assertEqual(detail_response.data["vendor"], "Globaltek")
+
+    patch_response = client.patch(
+        f"/api/gps-sensors/{sensor_id}/",
+        {"id": supplied_id, "frequency": 60.0, "active": False},
+        format="json",
+    )
+
+    CHECK.assertEqual(patch_response.status_code, 200)
+    CHECK.assertEqual(patch_response.data["id"], sensor_id)
+    CHECK.assertEqual(patch_response.data["frequency"], 60.0)
+    CHECK.assertIs(patch_response.data["active"], False)
+    sensor = GPSSensor.objects.get(pk=sensor_id)
+    CHECK.assertEqual(sensor.gps_sensor_frequency, 60.0)
+    CHECK.assertIs(sensor.gps_sensor_active, False)
+
+    put_response = client.put(
+        f"/api/gps-sensors/{sensor_id}/",
+        payload,
+        format="json",
+    )
+
+    CHECK.assertEqual(put_response.status_code, 405)
+
+    delete_response = client.delete(f"/api/gps-sensors/{sensor_id}/")
+
+    CHECK.assertEqual(delete_response.status_code, 204)
+    CHECK.assertFalse(GPSSensor.objects.filter(pk=sensor_id).exists())
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "relation_kind",
+    ["observed-object-link", "processed-position"],
+)
+def test_gps_sensor_delete_refuses_every_scientific_relation(
+    relation_kind: str,
+) -> None:
+    """Deleting metadata cannot remove any linked GPS scientific record."""
+    admin = get_user_model().objects.create_user(
+        username=f"gps-delete-admin-{relation_kind}",
+        is_staff=True,
+    )
+    sensor = GPSSensor.objects.create(
+        gps_sensors_code="GPS-LINKED",
+        gps_sensor_purchase_date="2026-06-15",
+        gps_sensor_frequency=30.0,
+    )
+    now = timezone.now()
+    if relation_kind == "observed-object-link":
+        related = ObservedObjectGPSSensor.objects.create(
+            observed_object_gps_sensor_observed_object_id=uuid4(),
+            observed_object_gps_sensor_gps_sensor=sensor,
+            observed_object_start_time=now,
+            observed_object_end_time=now,
+        )
+    else:
+        related = ProcessedGPSDataObservedObject.objects.create(
+            processed_gps_data_sensors=sensor,
+            processed_gps_data_observed_object_uuid=uuid4(),
+            processed_gps_data_observed_object_acquisition_time=now,
+            processed_gps_data_observed_object_longitude=4.3517,
+            processed_gps_data_observed_object_latitude=50.8503,
+            processed_gps_data_observed_object_insert_timestamp=now,
+        )
+    client = APIClient()
+    client.force_authenticate(user=admin)
+
+    response = client.delete(f"/api/gps-sensors/{sensor.pk}/")
+
+    CHECK.assertEqual(response.status_code, 409)
+    CHECK.assertEqual(
+        response.data,
+        {
+            "detail": (
+                "This GPS sensor still has positions or observed-object links. "
+                "Remove or migrate those records before deleting its metadata."
+            ),
+        },
+    )
+    CHECK.assertTrue(GPSSensor.objects.filter(pk=sensor.pk).exists())
+    CHECK.assertTrue(type(related).objects.filter(pk=related.pk).exists())
+
+
+@pytest.mark.parametrize(
+    ("model", "field_name"),
+    [
+        (
+            ObservedObjectGPSSensor,
+            "observed_object_gps_sensor_gps_sensor",
+        ),
+        (
+            ProcessedGPSDataObservedObject,
+            "processed_gps_data_sensors",
+        ),
+    ],
+)
+def test_gps_scientific_relations_protect_sensor_metadata(
+    model,
+    field_name: str,
+) -> None:
+    """Every scientific GPS foreign key protects its metadata parent."""
+    field = model._meta.get_field(field_name)
+
+    CHECK.assertIs(field.remote_field.on_delete, PROTECT)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "deletion_error",
+    [
+        pytest.param(
+            ProtectedError("protected GPS relation", []),
+            id="protected-error",
+        ),
+        pytest.param(IntegrityError("concurrent GPS relation"), id="integrity-error"),
+    ],
+)
+def test_gps_sensor_delete_translates_database_conflicts(
+    deletion_error: Exception,
+) -> None:
+    """Late database protection failures keep metadata and return a stable 409."""
+    admin = get_user_model().objects.create_user(
+        username=f"gps-conflict-admin-{type(deletion_error).__name__}",
+        is_staff=True,
+    )
+    sensor = GPSSensor.objects.create(
+        gps_sensors_code=f"GPS-CONFLICT-{type(deletion_error).__name__}",
+        gps_sensor_purchase_date="2026-06-15",
+        gps_sensor_frequency=30.0,
+    )
+    client = APIClient()
+    client.force_authenticate(user=admin)
+
+    with patch(
+        "gps_data.views.GPSSensorDetailView.perform_destroy",
+        side_effect=deletion_error,
+    ):
+        response = client.delete(f"/api/gps-sensors/{sensor.pk}/")
+
+    CHECK.assertEqual(response.status_code, 409)
+    CHECK.assertTrue(GPSSensor.objects.filter(pk=sensor.pk).exists())
+
+
+@pytest.mark.django_db
+def test_gps_sensor_delete_rolls_back_before_returning_conflict() -> None:
+    """A late integrity failure cannot commit a partially completed deletion."""
+    admin = get_user_model().objects.create_user(
+        username="gps-rollback-admin",
+        is_staff=True,
+    )
+    sensor = GPSSensor.objects.create(
+        gps_sensors_code="GPS-ROLLBACK",
+        gps_sensor_purchase_date="2026-06-15",
+        gps_sensor_frequency=30.0,
+    )
+    client = APIClient()
+    client.force_authenticate(user=admin)
+
+    def delete_then_fail(instance: GPSSensor) -> None:
+        instance.delete()
+        raise IntegrityError("late GPS conflict")
+
+    with patch(
+        "gps_data.views.GPSSensorDetailView.perform_destroy",
+        side_effect=delete_then_fail,
+    ):
+        response = client.delete(f"/api/gps-sensors/{sensor.pk}/")
+
+    CHECK.assertEqual(response.status_code, 409)
+    CHECK.assertTrue(GPSSensor.objects.filter(pk=sensor.pk).exists())
+
+
+@pytest.mark.django_db
+def test_gps_sensor_metadata_validation() -> None:
+    """The metadata API validates required, unique, and frequency fields."""
+    admin = get_user_model().objects.create_user(
+        username="gps-validation-admin",
+        is_staff=True,
+    )
+    client = APIClient()
+    client.force_authenticate(user=admin)
+
+    missing_response = client.post("/api/gps-sensors/", {}, format="json")
+
+    CHECK.assertEqual(missing_response.status_code, 400)
+    CHECK.assertEqual(
+        set(missing_response.data),
+        {"code", "purchase_date", "frequency"},
+    )
+
+    invalid_frequency_response = client.post(
+        "/api/gps-sensors/",
+        {
+            "code": "GPS-ZERO",
+            "purchase_date": "2026-06-15",
+            "frequency": 0,
+        },
+        format="json",
+    )
+
+    CHECK.assertEqual(invalid_frequency_response.status_code, 400)
+    CHECK.assertIn("frequency", invalid_frequency_response.data)
+
+    valid_payload = {
+        "code": "GPS-UNIQUE",
+        "purchase_date": "2026-06-15",
+        "frequency": 10,
+    }
+    first_response = client.post(
+        "/api/gps-sensors/",
+        valid_payload,
+        format="json",
+    )
+    duplicate_response = client.post(
+        "/api/gps-sensors/",
+        valid_payload,
+        format="json",
+    )
+
+    CHECK.assertEqual(first_response.status_code, 201)
+    CHECK.assertEqual(duplicate_response.status_code, 400)
+    CHECK.assertIn("code", duplicate_response.data)
 
 
 def test_wildfi_gps_fix_from_dealiot_event() -> None:
@@ -631,6 +915,9 @@ def test_wildfi_gps_batch_ingest_rejects_oversized_batch() -> None:
 def test_wildfi_gps_list_filters_by_device_and_time() -> None:
     """GPS list endpoint filters and paginates stored events."""
     client = APIClient()
+    client.force_authenticate(
+        user=types.SimpleNamespace(is_authenticated=True, is_staff=True),
+    )
     first = {
         "event_id": "gps-list-1",
         "device_id": "wildfi-17",
@@ -670,11 +957,38 @@ def test_wildfi_gps_list_filters_by_device_and_time() -> None:
             "coordinates": [5.5667, 50.6333],
         },
     )
+    for historical_field in ("payload", "metadata", "payload_hash", "topic"):
+        CHECK.assertIn(historical_field, response.data["results"][0])
+
+    summary_response = client.get(
+        "/api/wildfi/gps/",
+        {"device_id": "wildfi-17", "summary": "true"},
+    )
+
+    CHECK.assertEqual(summary_response.status_code, 200)
+    CHECK.assertEqual(
+        set(summary_response.data["results"][0]),
+        {
+            "id",
+            "device_id",
+            "observed_object_id",
+            "timestamp",
+            "latitude",
+            "longitude",
+        },
+    )
+    for sensitive_field in ("payload", "metadata", "payload_hash", "topic"):
+        CHECK.assertNotIn(sensitive_field, summary_response.data["results"][0])
 
 
 def test_wildfi_gps_list_rejects_invalid_datetime() -> None:
     """GPS list endpoint validates date filters."""
-    response = APIClient().get("/api/wildfi/gps/", {"from": "not-a-date"})
+    client = APIClient()
+    client.force_authenticate(
+        user=types.SimpleNamespace(is_authenticated=True, is_staff=True),
+    )
+
+    response = client.get("/api/wildfi/gps/", {"from": "not-a-date"})
 
     CHECK.assertEqual(response.status_code, 400)
     CHECK.assertEqual(response.data["detail"], INVALID_LIST_QUERY_PARAMETERS_DETAIL)
@@ -682,13 +996,37 @@ def test_wildfi_gps_list_rejects_invalid_datetime() -> None:
 
 def test_wildfi_gps_list_rejects_reversed_time_window() -> None:
     """GPS list validation rejects time windows with an inverted range."""
-    response = APIClient().get(
+    client = APIClient()
+    client.force_authenticate(
+        user=types.SimpleNamespace(is_authenticated=True, is_staff=True),
+    )
+
+    response = client.get(
         "/api/wildfi/gps/",
         {"from": "2026-05-24T13:00:00Z", "to": "2026-05-24T12:00:00Z"},
     )
 
     CHECK.assertEqual(response.status_code, 400)
     CHECK.assertEqual(response.data["detail"], INVALID_LIST_QUERY_PARAMETERS_DETAIL)
+
+
+def test_wildfi_gps_list_rejects_anonymous_requests() -> None:
+    """Stored GPS fixes are not exposed without an authenticated principal."""
+    response = APIClient().get("/api/wildfi/gps/")
+
+    CHECK.assertIn(response.status_code, {401, 403})
+
+
+def test_wildfi_gps_list_rejects_authenticated_non_staff() -> None:
+    """A regular authenticated principal cannot read sensitive GPS fixes."""
+    client = APIClient()
+    client.force_authenticate(
+        user=types.SimpleNamespace(is_authenticated=True, is_staff=False),
+    )
+
+    response = client.get("/api/wildfi/gps/")
+
+    CHECK.assertEqual(response.status_code, 403)
 
 
 def test_gps_metrics_exposes_prometheus_counts() -> None:

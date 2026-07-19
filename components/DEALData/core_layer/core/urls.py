@@ -21,9 +21,25 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path
-from core_data.views import health_live, health_ready, metrics
+from core_data.views import (
+    ExperimentDetailView,
+    ExperimentListCreateView,
+    health_live,
+    health_ready,
+    metrics,
+)
 
 urlpatterns = [
+    path(
+        "api/experiments/",
+        ExperimentListCreateView.as_view(),
+        name="experiment-list",
+    ),
+    path(
+        "api/experiments/<uuid:experiment_id>/",
+        ExperimentDetailView.as_view(),
+        name="experiment-detail",
+    ),
     path("health/live/", health_live, name="health-live"),
     path("health/ready/", health_ready, name="health-ready"),
     path("metrics/", metrics, name="metrics"),

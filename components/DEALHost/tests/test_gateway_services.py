@@ -581,7 +581,7 @@ class ApisixServiceTests(TestCase):
         ),
     )
     @patch("apps.gateway.services.httpx.put")
-    def test_production_non_introspecting_route_strips_all_identity_headers(
+    def test_production_dealdata_route_forwards_then_strips_oidc_token(
         self,
         put_mock,
     ):
@@ -616,16 +616,52 @@ class ApisixServiceTests(TestCase):
                     "headers": {
                         "set": {
                             "X-Forwarded-Proto": "$http_x_forwarded_proto",
+                            "Authorization": "Bearer $http_x_forwarded_access_token",
                         },
-                        "remove": [
-                            "Authorization",
-                            "X-Forwarded-Access-Token",
-                        ],
+                        "remove": ["X-Forwarded-Access-Token"],
                     },
                 },
             },
         )
         self.assertEqual(payload["upstream"]["pass_host"], "node")
+        put_mock.assert_not_called()
+
+    @override_settings(
+        DEBUG=False,
+        APISIX=replace(
+            TEST_APISIX_CONFIG,
+            route_allowed_upstreams=("field-portal:8081",),
+        ),
+    )
+    @patch("apps.gateway.services.httpx.put")
+    def test_production_non_introspecting_route_strips_identity_headers(
+        self,
+        put_mock,
+    ):
+        module = Module.objects.create(
+            name="Analytics extension",
+            slug="analytics-extension",
+            image="ghcr.io/smartappli/analytics-extension:sha-test",
+            public_path="/analytics-extension",
+            upstream_host="field-portal",
+            upstream_port=8081,
+        )
+        service = ApisixService()
+        service.module_manifests[module.slug] = {
+            "slug": module.slug,
+            "production_ready": True,
+        }
+
+        result = service.publish_route(module.slug, dry_run=True)
+
+        headers = result["payload"]["plugins"]["proxy-rewrite"]["headers"]
+        self.assertEqual(
+            headers,
+            {
+                "set": {"X-Forwarded-Proto": "$http_x_forwarded_proto"},
+                "remove": ["Authorization", "X-Forwarded-Access-Token"],
+            },
+        )
         put_mock.assert_not_called()
 
     @override_settings(

@@ -123,6 +123,25 @@ Endpoints de sante et d'observabilite:
 - `GET http://localhost:7002/health/ready/`
 - `GET http://localhost:7002/metrics/`
 
+Endpoints d'administration scientifique:
+
+- `GET/POST http://localhost:7000/api/experiments/` et
+  `GET/PATCH/DELETE http://localhost:7000/api/experiments/{uuid}/` pour relier
+  une experimentation a un projet Core et a une liste d'objets observes existants.
+- `GET/POST http://localhost:7002/api/sensors/` et
+  `GET/PATCH/DELETE http://localhost:7002/api/sensors/{uuid}/` pour les
+  metadonnees `code`, `vendor` et `model` d'un senseur generique.
+- `GET/POST http://localhost:7001/api/gps-sensors/` et
+  `GET/PATCH/DELETE http://localhost:7001/api/gps-sensors/{uuid}/` pour les
+  metadonnees d'un senseur GPS (`code`, date d'achat, frequence, fournisseur,
+  modele, carte SIM et etat actif).
+
+Ces routes exigent un utilisateur Django staff en developpement ou l'appartenance
+au groupe OIDC administrateur en production. La suppression d'un senseur ou d'un
+senseur GPS renvoie `409 Conflict` tant que des mesures, positions ou liens vers
+des objets observes lui sont rattaches; aucune donnee scientifique n'est supprimee
+en cascade par ce CRUD de metadonnees.
+
 Endpoints WildFi:
 
 - `GET http://localhost:7001/api/wildfi/gps/`
@@ -135,6 +154,25 @@ Endpoints WildFi:
 Les endpoints d'ingestion acceptent le header
 `X-DEALDATA-INGEST-TOKEN` quand `DEALDATA_INGEST_TOKEN` est defini.
 En Docker local, cette variable doit etre renseignee dans `.env`.
+Ce jeton d'ingestion ne donne aucun acces aux routes de lecture ou
+d'administration.
+
+Les routes d'administration et les listes WildFi utilisent l'authentification
+DRF par session/Basic pour un staff local, ou un bearer OIDC introspecte sans
+creer d'utilisateur persistant. Le bearer doit etre actif et porter l'issuer,
+l'audience, le sujet stable et le groupe administrateur attendus. Configurer:
+
+- `DEALDATA_OIDC_INTROSPECTION_URL`, `DEALDATA_OIDC_ISSUER` et
+  `DEALDATA_OIDC_AUDIENCE`;
+- `DEALDATA_OIDC_CLIENT_ID` et `DEALDATA_OIDC_CLIENT_SECRET` via le gestionnaire
+  de secrets;
+- `DEALDATA_OIDC_GROUPS_CLAIM`, `DEALDATA_OIDC_READ_GROUPS`,
+  `DEALDATA_OIDC_ADMIN_GROUPS` et `DEALDATA_OIDC_TIMEOUT_SECONDS`.
+
+Les groupes de lecture et d'administration doivent etre non vides et distincts.
+Les endpoints scientifiques documentes ci-dessus sont staff-only: appartenir
+uniquement a un groupe de lecture ne suffit pas. Une configuration OIDC absente
+ou incoherente echoue fermee pour toute requete bearer.
 
 Pour connecter directement DEALData aux topics Kafka DEALIoT:
 
@@ -240,13 +278,31 @@ production ni de modification de topic.
 
 ## Lecture des evenements
 
-Les endpoints de lecture acceptent des filtres par device et intervalle
-temporel:
+Les endpoints de lecture sont reserves au staff et acceptent des filtres par
+device et intervalle temporel. DEALInterface demande les 20 derniers resultats
+avec `summary=true`:
 
 ```powershell
-Invoke-RestMethod "http://localhost:7001/api/wildfi/gps/?device_id=wildfi-17&from=2026-05-24T12:00:00Z&to=2026-05-24T13:00:00Z&limit=10"
-Invoke-RestMethod "http://localhost:7002/api/wildfi/sensor/?device_id=wildfi-17&sensor_type=temperature&from=2026-05-24T12:00:00Z&to=2026-05-24T13:00:00Z&limit=10"
+Invoke-RestMethod "http://localhost:7001/api/wildfi/gps/?device_id=wildfi-17&from=2026-05-24T12:00:00Z&to=2026-05-24T13:00:00Z&limit=20&summary=true"
+Invoke-RestMethod "http://localhost:7002/api/wildfi/sensor/?device_id=wildfi-17&sensor_type=temperature&from=2026-05-24T12:00:00Z&to=2026-05-24T13:00:00Z&limit=20&summary=true"
 ```
+
+En mode resume, GPS retourne uniquement `id`, `device_id`,
+`observed_object_id`, `timestamp`, `latitude` et `longitude`; Sensor retourne
+`id`, `device_id`, `observed_object_id`, `timestamp` et `sensor_type`. Le
+`payload`, les metadonnees de transport et les autres champs detailles sont
+omis de la reponse, et pas seulement masques par l'interface. Sans
+`summary=true`, le contrat detaille historique reste disponible aux memes
+administrateurs.
+
+## Limites du perimetre de gestion
+
+Ces API administrent les associations d'experimentation et les metadonnees des
+senseurs. Elles ne fournissent pas de carte, de workflow d'import/acquisition en
+masse, ni de configuration de routage ou de retention des mesures. Les
+"datasets" visibles dans DEALInterface sont des entrees de catalogue DEALHost
+et leurs ACL de visibilite; ils ne constituent ni un stockage DEALData ni une
+ACL par ligne pour les evenements GPS/Sensor.
 
 ## Profil Compose durci
 

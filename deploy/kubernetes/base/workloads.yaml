@@ -509,6 +509,16 @@ spec:
                 secretKeyRef:
                   name: archideal-runtime-secrets-${RELEASE_ID}
                   key: dealdata-core-database-password
+            - name: DEALDATA_OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-oidc-client-id
+            - name: DEALDATA_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-oidc-client-secret
           ports:
             - name: http
               containerPort: 7000
@@ -732,6 +742,16 @@ spec:
                 secretKeyRef:
                   name: archideal-runtime-secrets-${RELEASE_ID}
                   key: dealdata-gps-database-password
+            - name: DEALDATA_OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-oidc-client-id
+            - name: DEALDATA_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-oidc-client-secret
           ports:
             - name: http
               containerPort: 7001
@@ -955,6 +975,16 @@ spec:
                 secretKeyRef:
                   name: archideal-runtime-secrets-${RELEASE_ID}
                   key: dealdata-sensor-database-password
+            - name: DEALDATA_OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-oidc-client-id
+            - name: DEALDATA_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealdata-oidc-client-secret
           ports:
             - name: http
               containerPort: 7002

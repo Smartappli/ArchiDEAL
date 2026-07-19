@@ -451,8 +451,12 @@ export function updateManagementResource<T>(
   });
 }
 
-export function deleteManagementResource(path: string, signal?: AbortSignal) {
-  return managementRequest<void>(path, { method: "DELETE", signal });
+export function deleteManagementResource(
+  path: string,
+  signal?: AbortSignal,
+  headers?: HeadersInit,
+) {
+  return managementRequest<void>(path, { method: "DELETE", signal, headers });
 }
 
 export function createIamUser(
@@ -512,6 +516,14 @@ export function updateDatasetResource(
   return updateManagementResource<Dataset>(
     `/dealhost/api/hosting/datasets/${dataset.id}/`,
     payload,
+    signal,
+    { "If-Match": strongRevisionEtag(dataset.revision) },
+  );
+}
+
+export function deleteDatasetResource(dataset: Dataset, signal?: AbortSignal) {
+  return deleteManagementResource(
+    `/dealhost/api/hosting/datasets/${dataset.id}/`,
     signal,
     { "If-Match": strongRevisionEtag(dataset.revision) },
   );

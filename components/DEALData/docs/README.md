@@ -8,7 +8,7 @@ This directory contains operator, contributor, and community documentation for D
 - Contributor rules: `../CONTRIBUTING.md`
 - Support boundaries: `../SUPPORT.md`
 - Security reporting: `../SECURITY.md`
-- WildFi HTTP and Kafka contract: `api-contracts.md`
+- Scientific metadata, WildFi HTTP/listing and Kafka contracts: `api-contracts.md`
 - Progressive refactor roadmap: `refactor-roadmap.md`
 - Community guide: `community/README.md`
 

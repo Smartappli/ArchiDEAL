@@ -1194,7 +1194,13 @@ describe("App live module integrations", () => {
 
   it("keeps all modules on the home page and opens their dedicated workspaces", async () => {
     const user = userEvent.setup();
-    const fetchMock = mockModuleFetch();
+    const fetchMock = mockModuleFetch({
+      "/dealdata/core/api/experiments/": [],
+      "/dealdata/sensor/api/sensors/": [],
+      "/dealdata/sensor/api/wildfi/sensor/?limit=20&offset=0&summary=true": { results: [] },
+      "/dealdata/gps/api/gps-sensors/": [],
+      "/dealdata/gps/api/wildfi/gps/?limit=20&offset=0&summary=true": { results: [] },
+    });
 
     render(<App />);
 
@@ -1213,8 +1219,27 @@ describe("App live module integrations", () => {
     expect(screen.getByRole("button", { name: "Release metadata" })).toBeInTheDocument();
 
     await user.click(within(navigation).getByRole("button", { name: "DEALData" }));
-    expect(screen.getByRole("heading", { name: "DEALData catalog workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "DEALData scientific workspace" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Datasets" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Experiments" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sensors" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "GPS sensors" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Catalog visibility" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Experiments" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/dealdata/core/api/experiments/",
+      expect.any(Object),
+    ));
+    await user.click(screen.getByRole("button", { name: "Sensors" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/dealdata/sensor/api/wildfi/sensor/?limit=20&offset=0&summary=true",
+      expect.any(Object),
+    ));
+    await user.click(screen.getByRole("button", { name: "GPS sensors" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/dealdata/gps/api/wildfi/gps/?limit=20&offset=0&summary=true",
+      expect.any(Object),
+    ));
   });
 });

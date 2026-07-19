@@ -284,6 +284,25 @@ class DatasetApiStaffTests(APITestCase):
         self.assertEqual(dataset.description, "current")
         self.assertEqual(dataset.revision, 2)
 
+    def test_dataset_delete_requires_current_strong_etag(self) -> None:
+        dataset = Dataset.objects.create(name="Delete guarded", slug="delete-guarded")
+        url = reverse("datasets-detail", kwargs={"pk": dataset.pk})
+
+        missing = self.client.delete(url)
+        weak = self.client.delete(url, HTTP_IF_MATCH='W/"1"')
+        stale = self.client.delete(url, HTTP_IF_MATCH='"2"')
+
+        self.assertEqual(missing.status_code, 428)
+        self.assertEqual(weak.status_code, 400)
+        self.assertEqual(stale.status_code, 412)
+        self.assertEqual(stale["ETag"], '"1"')
+        self.assertTrue(Dataset.objects.filter(pk=dataset.pk).exists())
+
+        current = self.client.delete(url, HTTP_IF_MATCH='"1"')
+
+        self.assertEqual(current.status_code, 204)
+        self.assertFalse(Dataset.objects.filter(pk=dataset.pk).exists())
+
     def test_staff_can_list_disabled_datasets_and_filter_acl(self) -> None:
         assigned = Dataset.objects.create(
             name="Assigned",
