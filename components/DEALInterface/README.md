@@ -35,6 +35,11 @@ The app starts on `http://127.0.0.1:5173`.
 npm run typecheck
 npm run test:unit
 npm run test:integration
+npm run test:coverage
+
+# Avec le serveur de prévisualisation lancé sur le port 4173
+python3 -m pip install -r requirements-e2e.txt
+npm run test:selenium
 npm run build
 ```
 

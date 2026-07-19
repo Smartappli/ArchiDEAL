@@ -180,6 +180,7 @@ export function ModuleWorkspace({
               aria-label={t(area.title)}
               aria-current={area.id === activeArea.id ? "page" : undefined}
               className={area.id === activeArea.id ? "module-workspace__nav-item module-workspace__nav-item--active" : "module-workspace__nav-item"}
+              data-area-id={area.id}
               key={area.id}
               onClick={() => onSelectArea(area.id)}
               type="button"

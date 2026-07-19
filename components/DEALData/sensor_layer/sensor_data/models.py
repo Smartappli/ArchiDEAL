@@ -233,7 +233,7 @@ class SensorData(models.Model):
         return str(self.sensor_data_value)
 
 
-class WildFiDecodedSensorEvent(WildFiEventBase):
+class DecodedSensorEvent(WildFiEventBase):
     """Decoded WildFi sensor event received from DEALIoT."""
 
     wildfi_decoded_sensor_event_id = models.UUIDField(
@@ -250,6 +250,8 @@ class WildFiDecodedSensorEvent(WildFiEventBase):
 
     class Meta:
         """Model metadata for decoded WildFi sensor events."""
+
+        db_table = "sensor_event"
 
         indexes = [
             Index(fields=["wildfi_device_id", "acquisition_time"]),
@@ -275,7 +277,7 @@ class WildFiDecodedSensorEvent(WildFiEventBase):
         event: dict[str, Any],
         *,
         topic: str = "raw.sensor",
-    ) -> "WildFiDecodedSensorEvent":
+    ) -> "DecodedSensorEvent":
         """Build a sensor event from the decoded DEALIoT contract."""
         payload = _payload_dict(event.get("payload"))
         device_id = event.get("device_id") or payload.get("device_id")

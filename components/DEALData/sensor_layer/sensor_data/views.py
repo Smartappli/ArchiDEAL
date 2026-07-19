@@ -23,7 +23,7 @@ from dealdata_common.views import (
 )
 
 from .ingestion import ingest_dealiot_sensor_event
-from .models import WildFiDecodedSensorEvent
+from .models import DecodedSensorEvent
 from .serializers import WildFiSensorBatchSerializer
 
 LOGGER = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def metrics(request):
     )
 
 
-def _serialize_sensor_event(event: WildFiDecodedSensorEvent) -> dict[str, object]:
+def _serialize_sensor_event(event: DecodedSensorEvent) -> dict[str, object]:
     return {
         "id": str(event.wildfi_decoded_sensor_event_id),
         "device_id": event.wildfi_device_id,
@@ -124,7 +124,7 @@ class WildFiSensorListView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        queryset = WildFiDecodedSensorEvent.objects.order_by(
+        queryset = DecodedSensorEvent.objects.order_by(
             "-acquisition_time",
             "-created_at",
         )

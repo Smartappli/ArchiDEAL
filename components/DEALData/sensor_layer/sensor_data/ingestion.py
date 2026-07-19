@@ -6,23 +6,23 @@ from rest_framework import status
 
 from dealdata_common.ingestion import persist_idempotent_event
 
-from .models import WildFiDecodedSensorEvent
+from .models import DecodedSensorEvent
 from .serializers import WildFiSensorIngestSerializer
 
 
 def find_existing_sensor_event(
-    event: WildFiDecodedSensorEvent,
-) -> WildFiDecodedSensorEvent | None:
+    event: DecodedSensorEvent,
+) -> DecodedSensorEvent | None:
     """Return an already-ingested event matching idempotency keys."""
     if event.event_id:
-        existing = WildFiDecodedSensorEvent.objects.filter(
+        existing = DecodedSensorEvent.objects.filter(
             source=event.source,
             event_id=event.event_id,
         ).first()
         if existing:
             return existing
     if event.payload_hash:
-        return WildFiDecodedSensorEvent.objects.filter(
+        return DecodedSensorEvent.objects.filter(
             source=event.source,
             payload_hash=event.payload_hash,
         ).first()
@@ -30,7 +30,7 @@ def find_existing_sensor_event(
 
 
 def serialize_sensor_ingest_event(
-    event: WildFiDecodedSensorEvent,
+    event: DecodedSensorEvent,
     *,
     duplicate: bool,
 ) -> dict[str, object]:
@@ -56,7 +56,7 @@ def ingest_dealiot_sensor_event(
         return {"detail": serializer.errors}, status.HTTP_400_BAD_REQUEST
 
     try:
-        event = WildFiDecodedSensorEvent.from_dealiot_event(
+        event = DecodedSensorEvent.from_dealiot_event(
             serializer.validated_data,
         )
     except ValueError as exc:
