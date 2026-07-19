@@ -33,6 +33,9 @@ export function ModuleCard({ module, isActive, isPending, onSelect, order }: Mod
           <span key={capability}>{capability}</span>
         ))}
       </div>
+      <span className="module-card__action" aria-hidden="true">
+        {t("workspace.kicker")} <span>→</span>
+      </span>
     </button>
   );
 }

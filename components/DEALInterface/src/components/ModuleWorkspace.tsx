@@ -166,15 +166,20 @@ export function ModuleWorkspace({
 
       <div className="module-workspace__body">
         <nav aria-label={t("workspace.managedAreas", { module: module.name })} className="module-workspace__nav">
-          {copy.areas.map((area) => (
+          {copy.areas.map((area, index) => (
             <button
+              aria-label={t(area.title)}
               aria-current={area.id === activeArea.id ? "page" : undefined}
               className={area.id === activeArea.id ? "module-workspace__nav-item module-workspace__nav-item--active" : "module-workspace__nav-item"}
               key={area.id}
               onClick={() => onSelectArea(area.id)}
               type="button"
             >
-              {t(area.title)}
+              <span className="module-workspace__nav-index" aria-hidden="true">{index + 1}</span>
+              <span>
+                <strong>{t(area.title)}</strong>
+                <small>{t(area.description)}</small>
+              </span>
             </button>
           ))}
         </nav>

@@ -2301,3 +2301,257 @@ h2 {
     transition-duration: 1ms !important;
   }
 }
+
+/* Operator-focused UI: denser surfaces, clearer navigation and stronger task cues. */
+.sidebar {
+  gap: 1.35rem;
+}
+
+.module-nav__item {
+  min-height: 3.7rem;
+  padding: 0.7rem 0.8rem;
+}
+
+.module-nav__item--active {
+  border-color: rgba(255, 255, 255, 0.24);
+  box-shadow: inset 3px 0 0 #f8c75b;
+}
+
+.module-nav__home {
+  margin-bottom: 0.25rem;
+}
+
+.module-nav__icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 1.8rem;
+  height: 1.8rem;
+  place-items: center;
+  color: #172019;
+  background: #f8c75b;
+  border-radius: 0.55rem;
+  font-weight: 900;
+}
+
+.module-nav__copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.12rem;
+}
+
+.module-nav__copy small {
+  overflow: hidden;
+  color: rgba(248, 243, 231, 0.5);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-nav__status {
+  flex: 0 0 auto;
+  width: 0.48rem;
+  height: 0.48rem;
+  background: #a4aca3;
+  border-radius: 999px;
+}
+
+.module-nav__status--online { background: #65d5c8; }
+.module-nav__status--protected { background: #83b8e8; }
+.module-nav__status--degraded { background: #f8c75b; }
+.module-nav__status--attention { background: #ef8b87; }
+
+.main-surface {
+  padding: clamp(1rem, 2vw, 2rem);
+}
+
+.module-workspace__header {
+  padding: clamp(1.25rem, 2.2vw, 1.9rem);
+}
+
+.module-workspace__body {
+  grid-template-columns: minmax(15rem, 0.28fr) minmax(0, 0.72fr);
+}
+
+.module-workspace__nav-item {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  gap: 0.7rem;
+}
+
+.module-workspace__nav-item:hover {
+  border-color: rgba(0, 155, 142, 0.5);
+  background: #fffdf5;
+}
+
+.module-workspace__nav-index {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  color: var(--muted);
+  background: rgba(23, 32, 25, 0.07);
+  border-radius: 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.module-workspace__nav-item strong,
+.module-workspace__nav-item small {
+  display: block;
+}
+
+.module-workspace__nav-item small {
+  display: -webkit-box;
+  margin-top: 0.3rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.module-workspace__nav-item--active .module-workspace__nav-index {
+  color: #fff;
+  background: var(--teal);
+}
+
+.hero {
+  min-height: 19rem;
+}
+
+.hero__content {
+  padding: clamp(1.7rem, 3.5vw, 3rem);
+}
+
+.module-card {
+  min-height: 16.5rem;
+}
+
+.module-card__capabilities {
+  margin-top: 0.7rem;
+}
+
+.module-card__action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 0.9rem;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  border-top: 1px solid var(--line);
+  text-transform: uppercase;
+}
+
+.module-card__action span {
+  font-size: 1.15rem;
+  transition: transform 180ms ease;
+}
+
+.module-card:hover .module-card__action span {
+  transform: translateX(0.25rem);
+}
+
+@media (max-width: 1080px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  .module-nav {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+  }
+
+  .module-nav__item {
+    flex: 0 0 min(15rem, 76vw);
+  }
+
+  .module-workspace__body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  html,
+  body,
+  .app-shell,
+  .main-surface {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  .sidebar {
+    position: relative;
+  }
+
+  .module-nav {
+    display: flex;
+    margin-inline: -1rem;
+    padding-inline: 1rem;
+    scroll-padding-inline: 1rem;
+    scroll-snap-type: x proximity;
+  }
+
+  .module-nav__item {
+    min-height: 3.25rem;
+    scroll-snap-align: start;
+  }
+
+  .module-nav__copy small,
+  .module-nav__status {
+    display: none;
+  }
+
+  .module-workspace__heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .module-workspace__heading h1 {
+    font-size: clamp(1.8rem, 9vw, 2.55rem);
+  }
+
+  .module-workspace__nav {
+    display: flex;
+    margin-inline: -1rem;
+    padding: 0 1rem 0.35rem;
+    overflow-x: auto;
+    scroll-padding-inline: 1rem;
+    scroll-snap-type: x mandatory;
+  }
+
+  .module-workspace__nav-item {
+    flex: 0 0 min(17rem, 82vw);
+    min-height: 5.25rem;
+    scroll-snap-align: start;
+  }
+
+  .hero__actions a,
+  .management-toolbar button,
+  .management-search button,
+  .management-pagination button,
+  .management-form button,
+  .management-detail-form button,
+  .management-route-detail button,
+  .oidc-provisioning button,
+  .management-notice a {
+    min-height: 2.75rem;
+  }
+
+  .hero__actions a {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .management-detail-form__actions > button {
+    flex: 1 1 9rem;
+  }
+}

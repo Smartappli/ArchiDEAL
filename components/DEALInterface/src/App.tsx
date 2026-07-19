@@ -193,8 +193,22 @@ function AppContent() {
         <LanguageSelector />
 
         <nav className="module-nav" aria-label={t("app.moduleNavigationAria")}>
+          <button
+            aria-current={route.view === "home" ? "page" : undefined}
+            aria-label={t("app.homeAria")}
+            className={route.view === "home" ? "module-nav__item module-nav__item--active module-nav__home" : "module-nav__item module-nav__home"}
+            onClick={backHome}
+            type="button"
+          >
+            <span className="module-nav__icon" aria-hidden="true">⌂</span>
+            <span className="module-nav__copy">
+              <span className="module-nav__label">{t("workspace.backHome")}</span>
+              <small>{t("hero.kicker")}</small>
+            </span>
+          </button>
           {liveModules.map((module) => (
             <button
+              aria-label={module.name}
               aria-pressed={route.view === "module" && module.key === activeKey}
               className={route.view === "module" && module.key === activeKey ? "module-nav__item module-nav__item--active" : "module-nav__item"}
               key={module.key}
@@ -202,7 +216,11 @@ function AppContent() {
               type="button"
             >
               <span className="module-nav__indicator" style={{ background: module.accent }} aria-hidden="true" />
-              <span className="module-nav__label">{module.name}</span>
+              <span className="module-nav__copy">
+                <span className="module-nav__label">{module.name}</span>
+                <small>{module.capabilities[0]}</small>
+              </span>
+              <span className={`module-nav__status module-nav__status--${module.status}`} aria-hidden="true" />
             </button>
           ))}
         </nav>
