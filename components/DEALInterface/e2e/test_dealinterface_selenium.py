@@ -28,11 +28,11 @@ def test_operator_can_open_a_module_workspace(browser):
     wait = WebDriverWait(browser, 10)
 
     wait.until(conditions.visibility_of_element_located((By.TAG_NAME, "h1")))
-    browser.find_element(By.XPATH, "//button[normalize-space()='DEALHost']").click()
+    browser.find_element(By.CSS_SELECTOR, "button[data-module-key='dealhost']").click()
 
     wait.until(conditions.url_contains("#/modules/dealhost/"))
     assert browser.find_element(By.CSS_SELECTOR, "main").is_displayed()
-    assert browser.find_element(By.XPATH, "//button[normalize-space()='Deployments']").get_attribute("aria-current") == "page"
+    assert browser.find_element(By.CSS_SELECTOR, "button[data-area-id='deployments']").get_attribute("aria-current") == "page"
 
 
 def test_mobile_layout_has_no_horizontal_page_overflow(browser):
@@ -45,4 +45,4 @@ def test_mobile_layout_has_no_horizontal_page_overflow(browser):
     page_width = browser.execute_script("return document.documentElement.scrollWidth")
 
     assert page_width <= viewport + 1
-    assert browser.find_element(By.XPATH, "//button[normalize-space()='Device configuration']").is_displayed()
+    assert browser.find_element(By.CSS_SELECTOR, "button[data-area-id='devices']").is_displayed()

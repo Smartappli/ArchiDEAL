@@ -15,4 +15,14 @@ class Migration(migrations.Migration):
             name="gpsfix",
             table="gps_fix",
         ),
+        migrations.RenameIndex(
+            model_name="gpsfix",
+            old_name="gps_data_wi_wildfi__3f5d69_idx",
+            new_name="gps_fix_wildfi__83ec1f_idx",
+        ),
+        migrations.RenameIndex(
+            model_name="gpsfix",
+            old_name="gps_data_wi_dealiot_bdc6e3_idx",
+            new_name="gps_fix_dealiot_a9c637_idx",
+        ),
     ]

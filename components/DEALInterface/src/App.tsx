@@ -211,6 +211,7 @@ function AppContent() {
               aria-label={module.name}
               aria-pressed={route.view === "module" && module.key === activeKey}
               className={route.view === "module" && module.key === activeKey ? "module-nav__item module-nav__item--active" : "module-nav__item"}
+              data-module-key={module.key}
               key={module.key}
               onClick={() => selectModule(module.key)}
               type="button"
