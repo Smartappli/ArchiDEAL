@@ -19,7 +19,7 @@ from django.utils import timezone
 import pytest
 from rest_framework.test import APIClient
 
-from gps_data.models import GPSSensor, ProcessedGPSDataObservedObject, WildFiGPSFix
+from gps_data.models import GPSSensor, ProcessedGPSDataObservedObject, GPSFix
 from dealdata_common.kafka import (
     DealIotKafkaCommand,
     boolean_env,
@@ -315,7 +315,7 @@ def test_wildfi_gps_fix_from_dealiot_event() -> None:
         "retain": False,
     }
 
-    gps_fix = WildFiGPSFix.from_dealiot_event(event)
+    gps_fix = GPSFix.from_dealiot_event(event)
 
     CHECK.assertEqual(gps_fix.wildfi_device_id, "wildfi-17")
     CHECK.assertEqual(gps_fix.dealiot_topic, "raw.gps")
@@ -360,7 +360,7 @@ def test_wildfi_gps_ingest_is_idempotent() -> None:
     CHECK.assertEqual(first_response.status_code, 201)
     CHECK.assertEqual(second_response.status_code, 200)
     CHECK.assertIs(second_response.data["duplicate"], True)
-    CHECK.assertEqual(WildFiGPSFix.objects.count(), 1)
+    CHECK.assertEqual(GPSFix.objects.count(), 1)
 
 
 @pytest.mark.django_db
@@ -387,7 +387,7 @@ def test_wildfi_gps_ingest_accepts_dealiot_metric_aliases() -> None:
         format="json",
     )
 
-    gps_fix = WildFiGPSFix.objects.get(event_id="gps-event-dealiot-aliases")
+    gps_fix = GPSFix.objects.get(event_id="gps-event-dealiot-aliases")
     CHECK.assertEqual(response.status_code, 201)
     CHECK.assertEqual(gps_fix.altitude, 411.2)
     CHECK.assertEqual(gps_fix.speed, 1.8)
@@ -460,12 +460,12 @@ def test_dealiot_kafka_consumer_matches_http_gps_ingestion() -> None:
             stderr=StringIO(),
         )
 
-    gps_fix = WildFiGPSFix.objects.get(event_id="gps-event-kafka")
+    gps_fix = GPSFix.objects.get(event_id="gps-event-kafka")
     CHECK.assertEqual(http_response.status_code, 201)
     CHECK.assertEqual(http_response.data["id"], str(gps_fix.wildfi_gps_fix_id))
     CHECK.assertEqual(http_response.data["payload_hash"], gps_fix.payload_hash)
     CHECK.assertEqual(gps_fix.altitude, 411.2)
-    CHECK.assertEqual(WildFiGPSFix.objects.count(), 1)
+    CHECK.assertEqual(GPSFix.objects.count(), 1)
     CHECK.assertIn("duplicates=1", stdout.getvalue())
     CHECK.assertEqual(
         FakeKafkaConsumer.instances[0].kwargs["security_protocol"],
@@ -498,7 +498,7 @@ def test_wildfi_gps_batch_ingest_accepts_duplicates() -> None:
     CHECK.assertEqual(response.data["inserted"], 1)
     CHECK.assertEqual(response.data["duplicates"], 1)
     CHECK.assertEqual(response.data["errors"], 0)
-    CHECK.assertEqual(WildFiGPSFix.objects.count(), 1)
+    CHECK.assertEqual(GPSFix.objects.count(), 1)
 
 
 def test_wildfi_gps_ingest_rejects_missing_longitude() -> None:
@@ -557,7 +557,7 @@ def test_wildfi_gps_ingest_rejects_out_of_range_coordinates() -> None:
     )
 
     CHECK.assertEqual(response.status_code, 400)
-    CHECK.assertEqual(WildFiGPSFix.objects.count(), 0)
+    CHECK.assertEqual(GPSFix.objects.count(), 0)
 
 
 @pytest.mark.django_db
@@ -581,7 +581,7 @@ def test_wildfi_gps_ingest_rejects_invalid_token(settings) -> None:
     )
 
     CHECK.assertEqual(response.status_code, 403)
-    CHECK.assertEqual(WildFiGPSFix.objects.count(), 0)
+    CHECK.assertEqual(GPSFix.objects.count(), 0)
 
 
 @pytest.mark.django_db

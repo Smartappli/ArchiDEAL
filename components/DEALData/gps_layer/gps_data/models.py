@@ -191,7 +191,7 @@ class GPSRawData(models.Model):
         db_table = "gps_raw_data"
 
 
-class WildFiGPSFix(WildFiEventBase):
+class GPSFix(WildFiEventBase):
     """Decoded WildFi GPS event received from DEALIoT."""
 
     wildfi_gps_fix_id = models.UUIDField(
@@ -212,6 +212,8 @@ class WildFiGPSFix(WildFiEventBase):
 
     class Meta:
         """Model metadata for decoded WildFi GPS fixes."""
+
+        db_table = "gps_fix"
 
         constraints = [
             CheckConstraint(
@@ -244,7 +246,7 @@ class WildFiGPSFix(WildFiEventBase):
         event: dict[str, Any],
         *,
         topic: str = "raw.gps",
-    ) -> "WildFiGPSFix":
+    ) -> "GPSFix":
         """Build a GPS fix from the decoded DEALIoT `raw.gps` contract."""
         payload = _payload_dict(event.get("payload"))
         device_id = event.get("device_id") or payload.get("device_id")

@@ -23,7 +23,7 @@ from dealdata_common.views import (
 )
 
 from .ingestion import ingest_dealiot_gps_event
-from .models import WildFiGPSFix
+from .models import GPSFix
 from .serializers import WildFiGPSBatchSerializer
 
 LOGGER = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def metrics(request):
     )
 
 
-def _serialize_gps_fix(event: WildFiGPSFix) -> dict[str, object]:
+def _serialize_gps_fix(event: GPSFix) -> dict[str, object]:
     return {
         "id": str(event.wildfi_gps_fix_id),
         "device_id": event.wildfi_device_id,
@@ -129,7 +129,7 @@ class WildFiGPSListView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        queryset = WildFiGPSFix.objects.order_by("-acquisition_time", "-created_at")
+        queryset = GPSFix.objects.order_by("-acquisition_time", "-created_at")
         queryset = apply_event_filters(
             queryset,
             request.query_params,

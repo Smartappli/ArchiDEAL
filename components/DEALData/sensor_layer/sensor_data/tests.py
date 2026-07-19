@@ -14,7 +14,7 @@ from django.test import Client
 import pytest
 from rest_framework.test import APIClient
 
-from sensor_data.models import Sensor, SensorData, WildFiDecodedSensorEvent
+from sensor_data.models import Sensor, SensorData, DecodedSensorEvent
 from dealdata_common.views import INVALID_LIST_QUERY_PARAMETERS_DETAIL
 
 CHECK = TestCase()
@@ -55,7 +55,7 @@ def test_wildfi_sensor_event_from_dealiot_event() -> None:
         "retain": False,
     }
 
-    sensor_event = WildFiDecodedSensorEvent.from_dealiot_event(event)
+    sensor_event = DecodedSensorEvent.from_dealiot_event(event)
 
     CHECK.assertEqual(sensor_event.wildfi_device_id, "wildfi-17")
     CHECK.assertEqual(sensor_event.dealiot_topic, "raw.sensor")
@@ -94,7 +94,7 @@ def test_wildfi_sensor_ingest_is_idempotent() -> None:
     CHECK.assertEqual(first_response.status_code, 201)
     CHECK.assertEqual(second_response.status_code, 200)
     CHECK.assertIs(second_response.data["duplicate"], True)
-    CHECK.assertEqual(WildFiDecodedSensorEvent.objects.count(), 1)
+    CHECK.assertEqual(DecodedSensorEvent.objects.count(), 1)
 
 
 @pytest.mark.django_db
@@ -140,7 +140,7 @@ def test_repeated_measurements_are_kept_while_source_redelivery_is_deduplicated(
     CHECK.assertEqual(first_delivery.status_code, 201)
     CHECK.assertEqual(redelivery.status_code, 200)
     CHECK.assertIs(redelivery.data["duplicate"], True)
-    CHECK.assertEqual(WildFiDecodedSensorEvent.objects.count(), 3)
+    CHECK.assertEqual(DecodedSensorEvent.objects.count(), 3)
 
 
 @pytest.mark.django_db
@@ -167,7 +167,7 @@ def test_wildfi_sensor_type_is_inferred_from_dealiot_mqtt_topic() -> None:
         format="json",
     )
 
-    sensor_event = WildFiDecodedSensorEvent.objects.get(
+    sensor_event = DecodedSensorEvent.objects.get(
         event_id="sensor-event-imu-topic",
     )
     CHECK.assertEqual(response.status_code, 201)
@@ -262,7 +262,7 @@ def test_dealiot_kafka_consumer_matches_http_sensor_ingestion() -> None:
             stderr=StringIO(),
         )
 
-    sensor_event = WildFiDecodedSensorEvent.objects.get(
+    sensor_event = DecodedSensorEvent.objects.get(
         event_id="sensor-event-kafka",
     )
     CHECK.assertEqual(http_response.status_code, 201)
@@ -272,7 +272,7 @@ def test_dealiot_kafka_consumer_matches_http_sensor_ingestion() -> None:
     )
     CHECK.assertEqual(http_response.data["payload_hash"], sensor_event.payload_hash)
     CHECK.assertEqual(sensor_event.sensor_type, "environment")
-    CHECK.assertEqual(WildFiDecodedSensorEvent.objects.count(), 1)
+    CHECK.assertEqual(DecodedSensorEvent.objects.count(), 1)
     CHECK.assertIn("duplicates=1", stdout.getvalue())
     CHECK.assertIs(FakeKafkaConsumer.instances[0].committed, True)
     CHECK.assertIs(FakeKafkaConsumer.instances[0].closed, True)
@@ -303,7 +303,7 @@ def test_wildfi_sensor_batch_ingest_accepts_duplicates() -> None:
     CHECK.assertEqual(response.data["inserted"], 1)
     CHECK.assertEqual(response.data["duplicates"], 1)
     CHECK.assertEqual(response.data["errors"], 0)
-    CHECK.assertEqual(WildFiDecodedSensorEvent.objects.count(), 1)
+    CHECK.assertEqual(DecodedSensorEvent.objects.count(), 1)
 
 
 def test_wildfi_sensor_ingest_rejects_scalar_payload() -> None:
@@ -344,7 +344,7 @@ def test_wildfi_sensor_ingest_rejects_invalid_token(settings) -> None:
     )
 
     CHECK.assertEqual(response.status_code, 403)
-    CHECK.assertEqual(WildFiDecodedSensorEvent.objects.count(), 0)
+    CHECK.assertEqual(DecodedSensorEvent.objects.count(), 0)
 
 
 @pytest.mark.django_db
@@ -488,7 +488,7 @@ def test_observability_endpoints_reject_unsafe_methods(path: str) -> None:
 @pytest.mark.django_db
 def test_sensor_event_direct_save_populates_payload_hash() -> None:
     """Directly-created sensor events still receive an idempotency hash."""
-    event = WildFiDecodedSensorEvent.from_dealiot_event(
+    event = DecodedSensorEvent.from_dealiot_event(
         {
             "device_id": "wildfi-17",
             "timestamp": "2026-05-24T12:30:00Z",
