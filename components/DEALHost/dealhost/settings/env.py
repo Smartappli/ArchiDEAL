@@ -32,6 +32,11 @@ class ApisixConfig:
     admin_key: str
     upstream_host: str
     upstream_port: int
+    route_allowed_upstream_hosts: tuple[str, ...] = ()
+    route_allowed_upstream_suffixes: tuple[str, ...] = ()
+    route_allowed_upstream_ports: tuple[int, ...] = ()
+    route_allowed_upstreams: tuple[str, ...] = ()
+    route_reserved_path_prefixes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,17 @@ def get_required_csv_env(name: str) -> tuple[str, ...]:
     if not values:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return values
+
+
+def get_int_csv_env(name: str, default: str = "") -> tuple[int, ...]:
+    values = get_csv_env(name, default)
+    try:
+        parsed = tuple(int(value) for value in values)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must contain only integers") from exc
+    if any(value < 1 or value > 65535 for value in parsed):
+        raise RuntimeError(f"{name} values must be between 1 and 65535")
+    return parsed
 
 
 def get_secret_csv_env(
@@ -131,6 +147,25 @@ def apisix_config(*, require_secrets: bool = False) -> ApisixConfig:
         ),
         upstream_host=get_env("APISIX_UPSTREAM_HOST", "django-app"),
         upstream_port=int(get_env("APISIX_UPSTREAM_PORT", "8000")),
+        route_allowed_upstream_hosts=get_csv_env(
+            "APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS",
+            "",
+        ),
+        route_allowed_upstream_suffixes=get_csv_env(
+            "APISIX_ROUTE_ALLOWED_UPSTREAM_SUFFIXES",
+            "",
+        ),
+        route_allowed_upstream_ports=get_int_csv_env(
+            "APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS",
+        ),
+        route_allowed_upstreams=get_csv_env(
+            "APISIX_ROUTE_ALLOWED_UPSTREAMS",
+            "",
+        ),
+        route_reserved_path_prefixes=get_csv_env(
+            "APISIX_ROUTE_RESERVED_PATH_PREFIXES",
+            "",
+        ),
     )
 
 

@@ -38,16 +38,17 @@ NO-GO.
 | Supply chain | Signed manifest and hashed evidence package; SBOM, provenance, signature, signed attestations and blocking scan per first-party image; minimum-version review, registry tag-to-digest proof, runtime compatibility output, independent SBOM and blocking scan for APISIX and oauth2-proxy |
 | Secret generation | Release-scoped `CreatedOnce` runtime Secret patched and verified with native `immutable: true`, every Pod/Job bound to the same release name, staged credential overlap, and a tested new-release rotation/old-release rollback |
 | TLS and identity | Valid public chain, OIDC issuer/audience/group tests, secure cookie inspection, and a `rediss://` Valkey session URL validated against the approved host and TLS port |
-| Authorization | Anonymous rejection and an approved operator-group access test |
+| Authorization | Anonymous rejection, distinct `OIDC_ALLOWED_GROUP` admission/read and `OIDC_ADMIN_GROUP` write groups, read-only denial of writes, and dual-membership administrator access tests |
 | Network isolation | Pre-mutation Ready ingress-nginx Pod identity/IP-to-proxy-CIDR proof, in-cluster all-answer private DNS-to-CIDR proof, default-deny plus negative pod-to-pod and Admin API connectivity tests |
 | Kafka | Three brokers, RF=3, min ISR=2, SASL_SSL and principal/topic/group ACL tests |
 | MQTT | Three nodes, TLS, device/bridge identities and topic ACL tests |
-| PostgreSQL | HA, `verify-full`, PITR and restore proof for DEALHost and all DEALData databases |
-| APISIX/etcd | Private Admin API, authenticated TLS etcd quorum and snapshot restoration |
+| PostgreSQL | HA, `verify-full`, PITR and restore proof for DEALHost, all DEALData databases and the dedicated DEALIoT device registry; distinct registry DDL/runtime roles and secrets; release-scoped registry migration completed |
+| APISIX/etcd | Private Admin API, authenticated TLS etcd quorum and snapshot restoration; exact dynamic upstreams matched to Services/NetworkPolicy, bootstrap-path collision rejection and proof that no unrevokable dynamic route is enabled |
 | Availability | PDB, zone spread, resource limits and loss-of-pod/node/zone tests |
 | Observability | Prometheus Operator selectors active, gateway RED metrics, consumer health/outcomes, external Kafka lag/database/certificate/backup exporters, DLQ/errors, logs, traces and paging test |
+| Durable audit | Transactional mutation record or outbox, durable retained sink, actor/request correlation, access controls, failure recovery and restore/query evidence; best-effort Core NATS notifications are not audit evidence |
 | SLO | Staging calibration and accepted error budgets from `docs/slo.md` |
-| Data path | Authenticated MQTT-to-PostgreSQL test, both event types and idempotent replay |
+| Data path | Authenticated DEALIoT registry create/update/stale-ETag/retire cleanup plus MQTT-to-PostgreSQL test, both event types and idempotent replay |
 | Recovery | Application rollback plus backup/restore and regional DR exercises |
 
 ## Initial service objectives
@@ -115,3 +116,6 @@ data path, and retain the previous release-scoped Secret until rollback is no lo
 - plaintext Kafka, MQTT, PostgreSQL, Valkey or etcd;
 - mutable image tags or credentials committed in Git;
 - a go-live based only on static manifest validation.
+- dynamic APISIX module routes while route state, conditional revocation and durable audit are not
+  implemented; the production baseline remains bootstrap-only and every current module manifest
+  stays `production_ready=false`.

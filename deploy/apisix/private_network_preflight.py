@@ -102,6 +102,12 @@ def configured_endpoints(
             5432,
             "POSTGRES_DATA_EGRESS_CIDR",
         ),
+        (
+            "PostgreSQL DEALIoT registry",
+            "POSTGRES_DEALIOT_REGISTRY_HOST",
+            5432,
+            "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR",
+        ),
         ("Valkey", "VALKEY_HOST", 6380, "VALKEY_EGRESS_CIDR"),
     )
     for label, host_name, port, network_name in simple_dependencies:

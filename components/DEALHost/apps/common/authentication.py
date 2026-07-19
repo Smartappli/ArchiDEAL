@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +10,20 @@ from django.conf import settings
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
 
+from .oidc import derive_oidc_acl_username
+
+
+DEFAULT_OIDC_GROUPS_CLAIM = "groups"
+FORBIDDEN_OIDC_GROUPS_CLAIMS = frozenset(
+    {
+        "scope",
+        "scp",
+        "roles",
+        "realm_access",
+        "realm_access.roles",
+    }
+)
+
 
 @dataclass(frozen=True)
 class SettingsTokenUser:
@@ -16,6 +31,9 @@ class SettingsTokenUser:
     is_staff: bool = False
     is_superuser: bool = False
     is_active: bool = True
+    oidc_issuer: str | None = None
+    oidc_subject: str | None = None
+    oidc_groups: frozenset[str] = frozenset()
 
     @property
     def is_authenticated(self) -> bool:
@@ -30,6 +48,14 @@ class SettingsTokenUser:
 
     def has_perms(self, perm_list: list[str], obj: object | None = None) -> bool:
         return all(self.has_perm(perm, obj=obj) for perm in perm_list)
+
+    @property
+    def acl_username(self) -> str:
+        """Stable local ACL key for a token-backed identity."""
+
+        if self.oidc_issuer and self.oidc_subject:
+            return derive_oidc_acl_username(self.oidc_issuer, self.oidc_subject)
+        return self.username
 
 
 class EnvBearerAuthentication(BaseAuthentication):
@@ -83,22 +109,42 @@ class EnvBearerAuthentication(BaseAuthentication):
         )
 
     @staticmethod
-    def _claim_values(claims: dict[str, Any]) -> set[str]:
-        values: set[str] = set()
-        for claim_name in ("groups", "roles"):
-            claim = claims.get(claim_name)
-            if isinstance(claim, list):
-                values.update(str(value) for value in claim)
-        realm_access = claims.get("realm_access")
-        if isinstance(realm_access, dict) and isinstance(
-            realm_access.get("roles"),
-            list,
+    def _configured_groups_claim_name() -> str | None:
+        configured = getattr(settings, "DEALHOST_OIDC_GROUPS_CLAIM", None)
+        if configured is None:
+            configured = os.getenv(
+                "DEALHOST_OIDC_GROUPS_CLAIM",
+                DEFAULT_OIDC_GROUPS_CLAIM,
+            )
+        if not isinstance(configured, str):
+            return None
+        claim_name = configured.strip()
+        if (
+            not claim_name
+            or configured != claim_name
+            or len(claim_name) > 255
+            or "\0" in claim_name
+            or claim_name.casefold() in FORBIDDEN_OIDC_GROUPS_CLAIMS
         ):
-            values.update(str(value) for value in realm_access["roles"])
-        scope = claims.get("scope")
-        if isinstance(scope, str):
-            values.update(scope.split())
-        return values
+            return None
+        return claim_name
+
+    @classmethod
+    def _claim_values(cls, claims: dict[str, Any]) -> set[str]:
+        """Read authorization groups from exactly one configured top-level claim."""
+
+        claim_name = cls._configured_groups_claim_name()
+        if claim_name is None:
+            raise AuthenticationFailed("Invalid OIDC groups claim configuration.")
+        claim = claims.get(claim_name)
+        if not isinstance(claim, list):
+            return set()
+        if any(
+            not isinstance(value, str) or not value.strip() or value != value.strip()
+            for value in claim
+        ):
+            return set()
+        return set(claim)
 
     @classmethod
     def _authenticate_oidc(cls, token: str) -> SettingsTokenUser | None:
@@ -137,23 +183,36 @@ class EnvBearerAuthentication(BaseAuthentication):
         if settings.DEALHOST_OIDC_AUDIENCE not in audiences:
             raise AuthenticationFailed("Invalid bearer token audience.")
 
-        identities = cls._claim_values(claims)
+        authorization_groups = cls._claim_values(claims)
         admin_groups = set(settings.DEALHOST_OIDC_ADMIN_GROUPS)
         read_groups = set(settings.DEALHOST_OIDC_READ_GROUPS)
-        is_admin = bool(identities & admin_groups)
-        if not is_admin and not identities & read_groups:
+        is_admin = bool(authorization_groups & admin_groups)
+        if not is_admin and not authorization_groups & read_groups:
             raise AuthenticationFailed("Bearer token has no authorized group.")
+
+        subject = claims.get("sub")
+        if (
+            not isinstance(subject, str)
+            or not subject
+            or subject != subject.strip()
+            or len(subject) > 255
+            or "\0" in subject
+        ):
+            raise AuthenticationFailed("Bearer token has no stable subject.")
 
         username = next(
             (
                 str(claims[name])
-                for name in ("preferred_username", "email", "sub")
+                for name in ("preferred_username", "email")
                 if claims.get(name)
             ),
-            "oidc-operator",
+            subject,
         )
         return SettingsTokenUser(
             username=username,
             is_staff=is_admin,
             is_superuser=is_admin,
+            oidc_issuer=str(claims["iss"]),
+            oidc_subject=subject,
+            oidc_groups=frozenset(authorization_groups),
         )

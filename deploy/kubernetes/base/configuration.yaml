@@ -63,6 +63,7 @@ data:
   BRIDGE_HEALTH_PORT: "8080"
   MANAGEMENT_CONSOLE_PORT: "8080"
   MANAGEMENT_CONSOLE_PRODUCTION_MODE: "true"
+  MANAGEMENT_CONSOLE_PUBLIC_ORIGIN: "https://${PUBLIC_HOST}"
   MANAGEMENT_CONSOLE_PROBE_TIMEOUT_SECONDS: "2"
   MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL: "${OIDC_INTROSPECTION_URL}"
   MANAGEMENT_CONSOLE_OIDC_ISSUER: "${OIDC_ISSUER_URL}"
@@ -70,14 +71,27 @@ data:
   DEALHOST_OIDC_INTROSPECTION_URL: "${OIDC_INTROSPECTION_URL}"
   DEALHOST_OIDC_ISSUER: "${OIDC_ISSUER_URL}"
   DEALHOST_OIDC_AUDIENCE: "${OIDC_AUDIENCE}"
+  DEALHOST_OIDC_GROUPS_CLAIM: groups
   DEALHOST_OIDC_READ_GROUPS: "${OIDC_ALLOWED_GROUP}"
-  DEALHOST_OIDC_ADMIN_GROUPS: "${OIDC_ALLOWED_GROUP}"
+  DEALHOST_OIDC_ADMIN_GROUPS: "${OIDC_ADMIN_GROUP}"
   DEALHOST_OIDC_TIMEOUT_SECONDS: "3"
   MANAGEMENT_CONSOLE_OIDC_READ_ROLES: "${OIDC_ALLOWED_GROUP}"
-  MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES: "${OIDC_ALLOWED_GROUP}"
+  MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES: "${OIDC_ADMIN_GROUP}"
+  MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM: groups
+  DEALIOT_REGISTRY_DATABASE_HOST: "${POSTGRES_DEALIOT_REGISTRY_HOST}"
+  DEALIOT_REGISTRY_DATABASE_PORT: "5432"
+  DEALIOT_REGISTRY_DATABASE_NAME: dealiot_registry
+  DEALIOT_REGISTRY_DATABASE_USER: dealiot_registry_app
+  DEALIOT_REGISTRY_DATABASE_SSLMODE: verify-full
+  DEALIOT_REGISTRY_DATABASE_SSLROOTCERT: /var/run/archideal-ca/postgres-ca.crt
+  DEALIOT_REGISTRY_DATABASE_CONNECT_TIMEOUT: "3"
   APISIX_ADMIN_URL: http://apisix-admin:9180
   APISIX_UPSTREAM_HOST: dealhost
   APISIX_UPSTREAM_PORT: "8000"
+  APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS: >-
+    dealhost,dealiot,dealdata-core,dealdata-gps,dealdata-sensor
+  APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS: "7000,7001,7002,8000,8080"
+  APISIX_ROUTE_ALLOWED_UPSTREAMS: "dealhost:8000,dealiot:8080,dealdata-core:7000,dealdata-gps:7001,dealdata-sensor:7002"
   GITHUB_OWNER: Smartappli
   GITHUB_REPOSITORY: ArchiDEAL
   GITHUB_ALLOWED_REPOSITORIES: Smartappli/ArchiDEAL
@@ -180,7 +194,8 @@ data:
                 "set": {
                   "Authorization": "Bearer $http_x_forwarded_access_token",
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
-                }
+                },
+                "remove": ["X-Forwarded-Access-Token"]
               }
             }
           },
@@ -204,7 +219,8 @@ data:
                 "set": {
                   "Authorization": "Bearer $http_x_forwarded_access_token",
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
-                }
+                },
+                "remove": ["X-Forwarded-Access-Token"]
               }
             }
           },
@@ -227,7 +243,8 @@ data:
               "headers": {
                 "set": {
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
-                }
+                },
+                "remove": ["Authorization", "X-Forwarded-Access-Token"]
               }
             }
           },
@@ -250,7 +267,8 @@ data:
               "headers": {
                 "set": {
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
-                }
+                },
+                "remove": ["Authorization", "X-Forwarded-Access-Token"]
               }
             }
           },
@@ -273,7 +291,8 @@ data:
               "headers": {
                 "set": {
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
-                }
+                },
+                "remove": ["Authorization", "X-Forwarded-Access-Token"]
               }
             }
           },
@@ -294,7 +313,8 @@ data:
               "headers": {
                 "set": {
                   "X-Forwarded-Proto": "$http_x_forwarded_proto"
-                }
+                },
+                "remove": ["Authorization", "X-Forwarded-Access-Token"]
               }
             }
           },

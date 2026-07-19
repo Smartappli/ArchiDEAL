@@ -35,7 +35,7 @@ Maintain replicated and tested recovery paths for:
 | Scenario | Immediate action | Recovery path |
 | --- | --- | --- |
 | Kubernetes region unavailable | Stop DNS changes and confirm external state health | Build secondary cluster and run ordered promotion |
-| PostgreSQL corruption | Contain writes and preserve a pre-containment snapshot | Point-in-time restore both database domains to one timestamp |
+| PostgreSQL corruption | Contain writes and preserve a pre-containment snapshot | Point-in-time restore metadata, data and the DEALIoT registry to one timestamp |
 | Kafka loss or severe lag | Quarantine MQTT producers and record offsets | Promote replicated Kafka, restore ACLs/offsets, then resume consumers |
 | etcd loss | Keep public edge on the last healthy APISIX fleet | Restore snapshot to new three-node etcd and rerun route bootstrap |
 | OIDC or Valkey unavailable | Keep the edge fail closed | Restore identity/session dependencies; never enable an auth bypass |
@@ -58,7 +58,10 @@ Maintain replicated and tested recovery paths for:
    deploy/kubernetes/deploy-production.sh \
      --values /secure/config/archideal-dr-values.yaml \
      --context archideal-dr \
-     --smoke-token-file /secure/tokens/archideal-smoke.jwt
+     --smoke-token-file /secure/tokens/archideal-smoke.jwt \
+     --release-manifest /secure/releases/archideal-dr/release-manifest.json \
+     --release-bundle /secure/releases/archideal-dr/release-manifest.sigstore.json \
+     --release-evidence-dir /secure/releases/archideal-dr
    ```
 
 6. The deployer waits for ExternalSecrets, the Kafka topic/ISR preflight, migrations, all

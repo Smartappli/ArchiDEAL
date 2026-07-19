@@ -100,7 +100,7 @@ class HostingEventPublishingTests(SimpleTestCase):
     def test_application_perform_create_emits_event(self, publish_mock):
         serializer = Mock()
         serializer.save.return_value = SimpleNamespace(
-            id=5, slug="storefront", enabled=True
+            id=5, slug="storefront", enabled=True, revision=1
         )
 
         HostedApplicationViewSet().perform_create(serializer)
@@ -110,12 +110,14 @@ class HostingEventPublishingTests(SimpleTestCase):
     @patch("apps.hosting.views.publish_event")
     def test_application_perform_update_emits_event(self, publish_mock):
         serializer = Mock()
+        serializer.instance = SimpleNamespace(revision=1)
         serializer.save.return_value = SimpleNamespace(
-            id=6, slug="storefront", enabled=False
+            id=6, slug="storefront", enabled=False, revision=2
         )
 
         HostedApplicationViewSet().perform_update(serializer)
 
+        serializer.save.assert_called_once_with(revision=2)
         publish_mock.assert_called_once()
 
     @patch("rest_framework.viewsets.ModelViewSet.get_queryset")
@@ -262,18 +264,21 @@ class HostingEventPublishingTests(SimpleTestCase):
     @patch("apps.hosting.views.publish_event")
     @patch("apps.hosting.views.ToolVersionSerializer")
     @patch("apps.hosting.views.VersionCreateSerializer")
-    @patch("apps.hosting.views.timezone.now")
+    @patch("apps.hosting.views.publish_immutable_version")
     def test_tool_versions_post_updates_current_version_and_publishes(
         self,
-        now_mock,
+        publish_version_mock,
         version_create_serializer_cls,
         tool_version_serializer_cls,
         publish_mock,
     ):
-        now_mock.return_value = "now"
         tool = Mock(id=7, slug="tool-slug")
         version_obj = SimpleNamespace(version="1.1.0")
-        tool.versions.update_or_create.return_value = (version_obj, True)
+        publish_version_mock.return_value = SimpleNamespace(
+            resource=tool,
+            version=version_obj,
+            created=True,
+        )
         serializer = Mock()
         serializer.validated_data = {
             "version": "1.1.0",
@@ -292,8 +297,9 @@ class HostingEventPublishingTests(SimpleTestCase):
         )
 
         serializer.is_valid.assert_called_once_with(raise_exception=True)
-        tool.save.assert_called_once_with(
-            update_fields=["current_version", "released_at", "updated_at"]
+        publish_version_mock.assert_called_once_with(
+            tool,
+            serializer.validated_data,
         )
         publish_mock.assert_called_once()
         self.assertEqual(response.status_code, 201)
@@ -313,45 +319,35 @@ class HostingEventPublishingTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [{"version": "1.0.0"}])
 
-    @patch("apps.hosting.views.ModuleAttachSerializer")
-    def test_application_detach_module_removes_module(self, serializer_class):
-        serializer_instance = Mock()
-        serializer_instance.validated_data = {"module": "module-core"}
-        serializer_class.return_value = serializer_instance
-        application = Mock()
+    def test_application_detach_module_delegates_to_conditional_mutation(self):
         view = HostedApplicationViewSet()
-        view.get_object = Mock(return_value=application)
-        view.get_serializer = Mock(
-            return_value=SimpleNamespace(data={"slug": "storefront"})
+        delegated_response = Mock()
+        view._update_module_membership = Mock(return_value=delegated_response)
+        request = SimpleNamespace(data={"module": 1})
+
+        response = view.detach_module(request, pk="9")
+
+        view._update_module_membership.assert_called_once_with(
+            request,
+            pk="9",
+            attach=False,
         )
+        self.assertIs(response, delegated_response)
 
-        response = view.detach_module(SimpleNamespace(data={"module": 1}))
-
-        serializer_class.assert_called_once_with(data={"module": 1})
-        serializer_instance.is_valid.assert_called_once_with(raise_exception=True)
-        application.modules.remove.assert_called_once_with("module-core")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, {"slug": "storefront"})
-
-    @patch("apps.hosting.views.ModuleAttachSerializer")
-    def test_application_attach_module_adds_module(self, serializer_class):
-        serializer_instance = Mock()
-        serializer_instance.validated_data = {"module": "module-core"}
-        serializer_class.return_value = serializer_instance
-        application = Mock()
+    def test_application_attach_module_delegates_to_conditional_mutation(self):
         view = HostedApplicationViewSet()
-        view.get_object = Mock(return_value=application)
-        view.get_serializer = Mock(
-            return_value=SimpleNamespace(data={"slug": "storefront"})
+        delegated_response = Mock()
+        view._update_module_membership = Mock(return_value=delegated_response)
+        request = SimpleNamespace(data={"module": 1})
+
+        response = view.attach_module(request, pk="9")
+
+        view._update_module_membership.assert_called_once_with(
+            request,
+            pk="9",
+            attach=True,
         )
-
-        response = view.attach_module(SimpleNamespace(data={"module": 1}))
-
-        serializer_class.assert_called_once_with(data={"module": 1})
-        serializer_instance.is_valid.assert_called_once_with(raise_exception=True)
-        application.modules.add.assert_called_once_with("module-core")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, {"slug": "storefront"})
+        self.assertIs(response, delegated_response)
 
     @patch("apps.hosting.views.ApplicationVersionSerializer")
     def test_application_versions_get_returns_versions(self, serializer_cls):
@@ -384,18 +380,21 @@ class HostingEventPublishingTests(SimpleTestCase):
     @patch("apps.hosting.views.publish_event")
     @patch("apps.hosting.views.ApplicationVersionSerializer")
     @patch("apps.hosting.views.VersionCreateSerializer")
-    @patch("apps.hosting.views.timezone.now")
+    @patch("apps.hosting.views.publish_immutable_version")
     def test_application_versions_post_updates_current_version_and_publishes(
         self,
-        now_mock,
+        publish_version_mock,
         version_create_serializer_cls,
         application_version_serializer_cls,
         publish_mock,
     ):
-        now_mock.return_value = "now"
-        application = Mock(id=11, slug="storefront")
+        application = Mock(id=11, slug="storefront", revision=4)
         version_obj = SimpleNamespace(version="3.0.0")
-        application.versions.update_or_create.return_value = (version_obj, True)
+        publish_version_mock.return_value = SimpleNamespace(
+            resource=application,
+            version=version_obj,
+            created=True,
+        )
         serializer = Mock()
         serializer.validated_data = {
             "version": "3.0.0",
@@ -410,16 +409,23 @@ class HostingEventPublishingTests(SimpleTestCase):
         view.get_object = Mock(return_value=application)
 
         response = view.versions(
-            SimpleNamespace(method="POST", data={"version": "3.0.0"})
+            SimpleNamespace(
+                method="POST",
+                data={"version": "3.0.0"},
+                headers={"If-Match": '"4"'},
+            )
         )
 
         serializer.is_valid.assert_called_once_with(raise_exception=True)
-        application.save.assert_called_once_with(
-            update_fields=["current_version", "released_at", "updated_at"]
+        publish_version_mock.assert_called_once_with(
+            application,
+            serializer.validated_data,
+            expected_revision=4,
         )
         publish_mock.assert_called_once()
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data, {"version": "3.0.0"})
+        self.assertEqual(response["ETag"], '"4"')
 
     @patch("apps.hosting.views.auto_discover_tools_and_applications")
     def test_api_autodiscover_view_returns_report_dict(self, autodiscover):

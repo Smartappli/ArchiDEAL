@@ -198,5 +198,9 @@ ARCHIDEAL_INGEST_TOKEN_FILE="$ingest_token_file" \
     --production \
     --exercise-api-ingest \
     --device-id "$smoke_device_id"
+python "$script_dir/../../scripts/check-device-registry.py" \
+  --base-url "https://$public_host/dealiot" \
+  --bearer-token-file "$smoke_token_file" \
+  --device-id "${smoke_device_id}-registry"
 printf 'Fresh production smoke %s passed for release %s.\n' \
   "$invocation_id" "$release_id"

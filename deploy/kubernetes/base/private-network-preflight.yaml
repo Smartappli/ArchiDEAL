@@ -53,6 +53,10 @@ spec:
               value: "${POSTGRES_DATA_HOST}"
             - name: POSTGRES_DATA_EGRESS_CIDR
               value: "${POSTGRES_DATA_EGRESS_CIDR}"
+            - name: POSTGRES_DEALIOT_REGISTRY_HOST
+              value: "${POSTGRES_DEALIOT_REGISTRY_HOST}"
+            - name: POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR
+              value: "${POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR}"
             - name: VALKEY_HOST
               value: "${VALKEY_HOST}"
             - name: VALKEY_EGRESS_CIDR

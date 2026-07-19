@@ -8,10 +8,10 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import transaction
-from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from .models import HostedApplication, Module, Tool
+from .versioning import publish_immutable_version
 
 logger = logging.getLogger(__name__)
 
@@ -189,19 +189,15 @@ def auto_discover_tools_and_applications(
             tool.modules.set(modules)
             version = payload.get("version")
             if version:
-                tool.current_version = str(version)
-                tool.released_at = timezone.now()
-                tool.save(
-                    update_fields=["current_version", "released_at", "updated_at"],
-                )
-                version_created = tool.versions.update_or_create(
-                    version=str(version),
-                    defaults={
+                publication = publish_immutable_version(
+                    tool,
+                    {
+                        "version": str(version),
                         "notes": str(payload.get("version_notes", "")),
                         "source": "autodiscovery",
                     },
-                )[1]
-                if version_created:
+                )
+                if publication.created:
                     report.tool_versions_created += 1
             if created:
                 report.tools_created += 1
@@ -227,30 +223,52 @@ def auto_discover_tools_and_applications(
         try:
             payload = _read_manifest(file_path)
             modules, missing = _extract_modules(payload)
-            application, created = HostedApplication.objects.update_or_create(
+            defaults = {
+                "name": str(payload["name"]),
+                "description": str(payload.get("description", "")),
+                "enabled": _as_bool(payload.get("enabled"), True),
+            }
+            application, created = HostedApplication.objects.get_or_create(
                 slug=str(payload["slug"]),
-                defaults={
-                    "name": str(payload["name"]),
-                    "description": str(payload.get("description", "")),
-                    "enabled": _as_bool(payload.get("enabled"), True),
-                },
+                defaults=defaults,
             )
-            application.modules.set(modules)
+            if created:
+                application.modules.set(modules)
+            else:
+                application = HostedApplication.objects.select_for_update().get(
+                    pk=application.pk,
+                )
+                changed_fields = [
+                    field
+                    for field, value in defaults.items()
+                    if getattr(application, field) != value
+                ]
+                current_module_ids = set(
+                    application.modules.values_list("pk", flat=True),
+                )
+                next_module_ids = {module.pk for module in modules}
+                modules_changed = current_module_ids != next_module_ids
+
+                for field in changed_fields:
+                    setattr(application, field, defaults[field])
+                if modules_changed:
+                    application.modules.set(modules)
+                if changed_fields or modules_changed:
+                    application.revision += 1
+                    application.save(
+                        update_fields=[*changed_fields, "revision", "updated_at"],
+                    )
             version = payload.get("version")
             if version:
-                application.current_version = str(version)
-                application.released_at = timezone.now()
-                application.save(
-                    update_fields=["current_version", "released_at", "updated_at"],
-                )
-                version_created = application.versions.update_or_create(
-                    version=str(version),
-                    defaults={
+                publication = publish_immutable_version(
+                    application,
+                    {
+                        "version": str(version),
                         "notes": str(payload.get("version_notes", "")),
                         "source": "autodiscovery",
                     },
-                )[1]
-                if version_created:
+                )
+                if publication.created:
                     report.application_versions_created += 1
             if created:
                 report.applications_created += 1

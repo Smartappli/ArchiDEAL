@@ -71,8 +71,10 @@ The runtime services require at least:
 - `MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET`
 
 The Management Console keeps `/healthz` public for probes. Production bearer tokens are
-introspected through OIDC and mapped to read/write roles. `MANAGEMENT_CONSOLE_TOKEN` is retained as
-an optional local and migration fallback.
+introspected through OIDC and mapped to read/write roles. The production process rejects
+`MANAGEMENT_CONSOLE_TOKEN`. Set `MANAGEMENT_CONSOLE_PUBLIC_ORIGIN` to the exact external HTTPS
+origin so browser mutations from any other origin fail closed; bearer service clients without an
+`Origin` header remain supported.
 
 ## Availability
 

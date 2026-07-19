@@ -15,10 +15,10 @@ const moduleCopyKeys: Record<ModuleKey, ModuleCopyKeys> = {
     summary: "moduleCopy.dealhost.summary",
     endpointLabel: "moduleCopy.dealhost.endpoint",
     capabilities: [
-      "moduleCopy.dealhost.capabilityDeployments",
-      "moduleCopy.dealhost.capabilityDomains",
-      "moduleCopy.dealhost.capabilityRuntimeLogs",
-      "moduleCopy.dealhost.capabilityTenantQuotas",
+      "moduleCopy.dealhost.capabilityApplicationCatalog",
+      "moduleCopy.dealhost.capabilityReleaseMetadata",
+      "moduleCopy.dealhost.capabilityApisixRoutes",
+      "moduleCopy.dealhost.capabilityHealthProbes",
     ],
     integrations: [
       "moduleCopy.dealhost.integrationApisix",

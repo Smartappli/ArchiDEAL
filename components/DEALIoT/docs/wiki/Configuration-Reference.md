@@ -76,13 +76,14 @@ Use `/readyz` for readiness and container health checks, and `/healthz` for live
 
 Production configures OIDC introspection through `MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL`,
 `MANAGEMENT_CONSOLE_OIDC_CLIENT_ID`, and `MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET`. Read and write
-role lists map identity-provider roles to API authorization. `MANAGEMENT_CONSOLE_TOKEN` remains a
-local compatibility fallback; `/healthz` stays public for Kubernetes probes.
+role lists map identity-provider roles to API authorization. Set `MANAGEMENT_CONSOLE_PUBLIC_ORIGIN`
+to the exact public HTTPS origin. Production rejects `MANAGEMENT_CONSOLE_TOKEN`; that variable is a
+local-development compatibility option only. `/healthz` stays public for Kubernetes probes.
 
 Example:
 
 ```bash
-curl -H "Authorization: Bearer $MANAGEMENT_CONSOLE_TOKEN" \
+curl -H "Authorization: Bearer $OIDC_ACCESS_TOKEN" \
   https://console.example.internal/api/architecture
 ```
 

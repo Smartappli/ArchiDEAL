@@ -5,6 +5,16 @@ export interface ModuleProbeConfig {
   label: string;
   baseUrl?: string;
   path: string;
+  healthContract?:
+    | {
+        kind: "status";
+        expectedService?: string;
+        requiredDependencies?: string[];
+        requireCheckedAt?: boolean;
+      }
+    | {
+        kind: "component-summary";
+      };
 }
 
 export interface ModuleRuntimeConfig {
@@ -12,7 +22,6 @@ export interface ModuleRuntimeConfig {
   apiBaseUrl: string;
   healthPath: string;
   docsPath: string;
-  authToken?: string;
   probes: ModuleProbeConfig[];
 }
 
@@ -27,6 +36,11 @@ export const moduleRuntimeConfig: Record<ModuleKey, ModuleRuntimeConfig> = {
         id: "gateway",
         label: "Gateway API",
         path: "/api/gateway/health/",
+        healthContract: {
+          kind: "status",
+          expectedService: "gateway",
+          requiredDependencies: ["database", "cache"],
+        },
       },
     ],
   },
@@ -35,17 +49,23 @@ export const moduleRuntimeConfig: Record<ModuleKey, ModuleRuntimeConfig> = {
     apiBaseUrl: import.meta.env.VITE_DEALIOT_API_URL ?? "/dealiot",
     healthPath: "/healthz",
     docsPath: "/docs/dealiot",
-    authToken: import.meta.env.VITE_DEALIOT_MANAGEMENT_TOKEN,
     probes: [
       {
         id: "management-console",
         label: "Management console",
         path: "/healthz",
+        healthContract: {
+          kind: "status",
+          requireCheckedAt: true,
+        },
       },
       {
         id: "platform-components",
         label: "Platform components",
         path: "/api/health",
+        healthContract: {
+          kind: "component-summary",
+        },
       },
     ],
   },
@@ -60,18 +80,33 @@ export const moduleRuntimeConfig: Record<ModuleKey, ModuleRuntimeConfig> = {
         label: "Core layer",
         baseUrl: import.meta.env.VITE_DEALDATA_CORE_API_URL ?? "/dealdata/core",
         path: "/health/ready/",
+        healthContract: {
+          kind: "status",
+          expectedService: "core",
+          requiredDependencies: ["database"],
+        },
       },
       {
         id: "gps",
         label: "GPS layer",
         baseUrl: import.meta.env.VITE_DEALDATA_GPS_API_URL ?? "/dealdata/gps",
         path: "/health/ready/",
+        healthContract: {
+          kind: "status",
+          expectedService: "gps",
+          requiredDependencies: ["database"],
+        },
       },
       {
         id: "sensor",
         label: "Sensor layer",
         baseUrl: import.meta.env.VITE_DEALDATA_SENSOR_API_URL ?? "/dealdata/sensor",
         path: "/health/ready/",
+        healthContract: {
+          kind: "status",
+          expectedService: "sensor",
+          requiredDependencies: ["database"],
+        },
       },
     ],
   },

@@ -10,7 +10,8 @@ SECRET_PREFIX: replace/archideal/production
 
 OIDC_ISSUER_URL: https://identity.example.invalid/realms/archideal
 OIDC_INTROSPECTION_URL: https://identity.example.invalid/oauth2/introspect
-OIDC_ALLOWED_GROUP: archideal-production-operators
+OIDC_ALLOWED_GROUP: archideal-production-readers
+OIDC_ADMIN_GROUP: archideal-production-admins
 OIDC_AUDIENCE: archideal-production
 OIDC_EGRESS_CIDR: 192.0.2.0/28
 GITHUB_EGRESS_CIDR: 192.0.2.16/28
@@ -19,6 +20,7 @@ KAFKA_BOOTSTRAP_SERVERS: kafka-0.example.invalid:9093,kafka-1.example.invalid:90
 MQTT_HOST: mqtt.example.invalid
 POSTGRES_METADATA_HOST: metadata-postgres.example.invalid
 POSTGRES_DATA_HOST: data-postgres.example.invalid
+POSTGRES_DEALIOT_REGISTRY_HOST: dealiot-registry-postgres.example.invalid
 VALKEY_HOST: valkey.example.invalid
 ETCD_ENDPOINT_1: https://etcd-0.example.invalid:2379
 ETCD_ENDPOINT_2: https://etcd-1.example.invalid:2379
@@ -30,6 +32,7 @@ POSTGRES_METADATA_EGRESS_CIDR: 10.100.2.0/24
 POSTGRES_DATA_EGRESS_CIDR: 10.100.3.0/24
 VALKEY_EGRESS_CIDR: 10.100.4.0/24
 ETCD_EGRESS_CIDR: 10.100.5.0/24
+POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR: 10.100.6.0/24
 POD_CIDR: 10.244.0.0/16
 
 OTEL_COLLECTOR_HTTP_ENDPOINT: https://otel.example.invalid/v1/traces

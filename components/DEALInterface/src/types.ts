@@ -77,6 +77,7 @@ export interface ModuleProbeResult {
   httpStatus?: number;
   responseTimeMs?: number;
   detail: string;
+  validationIssue?: "non-json" | "invalid-json" | "contract";
   summary?: Record<string, number>;
   checkedAt: string;
 }

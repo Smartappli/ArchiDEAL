@@ -101,6 +101,174 @@ class HostingDiscoveryTests(TestCase):
         self.assertEqual(tool.current_version, "1.0.0")
         self.assertEqual(application.current_version, "2.1.0")
 
+    def test_autodiscover_exact_version_replay_does_not_republish(self):
+        with TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            (base / "tools").mkdir(parents=True)
+            (base / "applications").mkdir(parents=True)
+            (base / "tools" / "backoffice.json").write_text(
+                json.dumps(
+                    {
+                        "name": "Backoffice",
+                        "slug": "backoffice",
+                        "version": "1.0.0",
+                        "version_notes": "Immutable tool release",
+                    },
+                ),
+                encoding="utf-8",
+            )
+            (base / "applications" / "storefront.json").write_text(
+                json.dumps(
+                    {
+                        "name": "Storefront",
+                        "slug": "storefront",
+                        "version": "2.1.0",
+                        "version_notes": "Immutable application release",
+                    },
+                ),
+                encoding="utf-8",
+            )
+
+            first_report = auto_discover_tools_and_applications(manifests_dir=base)
+            tool = Tool.objects.get(slug="backoffice")
+            application = HostedApplication.objects.get(slug="storefront")
+            tool_released_at = tool.released_at
+            application_released_at = application.released_at
+            application_revision = application.revision
+
+            replay_report = auto_discover_tools_and_applications(manifests_dir=base)
+
+        self.assertEqual(first_report.tool_versions_created, 1)
+        self.assertEqual(first_report.application_versions_created, 1)
+        self.assertEqual(replay_report.tool_versions_created, 0)
+        self.assertEqual(replay_report.application_versions_created, 0)
+        self.assertEqual(replay_report.errors, [])
+        tool.refresh_from_db()
+        application.refresh_from_db()
+        self.assertEqual(tool.released_at, tool_released_at)
+        self.assertEqual(application.released_at, application_released_at)
+        self.assertEqual(application.revision, application_revision)
+        self.assertEqual(tool.versions.count(), 1)
+        self.assertEqual(application.versions.count(), 1)
+
+    def test_autodiscover_only_revises_application_for_effective_catalog_changes(self):
+        module = Module.objects.create(
+            name="Core",
+            slug="module-core",
+            image="registry.example/core:latest",
+        )
+        application = HostedApplication.objects.create(
+            name="Storefront",
+            slug="storefront",
+            description="Initial metadata",
+        )
+        application.modules.add(module)
+
+        with TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            (base / "applications").mkdir(parents=True)
+            manifest = base / "applications" / "storefront.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "name": "Storefront",
+                        "slug": "storefront",
+                        "description": "Initial metadata",
+                        "module_slugs": ["module-core"],
+                    },
+                ),
+                encoding="utf-8",
+            )
+
+            auto_discover_tools_and_applications(manifests_dir=base)
+            application.refresh_from_db()
+            self.assertEqual(application.revision, 1)
+
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "name": "Storefront",
+                        "slug": "storefront",
+                        "description": "Changed metadata",
+                        "module_slugs": [],
+                    },
+                ),
+                encoding="utf-8",
+            )
+            auto_discover_tools_and_applications(manifests_dir=base)
+            application.refresh_from_db()
+            self.assertEqual(application.revision, 2)
+            self.assertEqual(application.description, "Changed metadata")
+            self.assertFalse(application.modules.exists())
+
+            auto_discover_tools_and_applications(manifests_dir=base)
+
+        application.refresh_from_db()
+        self.assertEqual(application.revision, 2)
+
+    def test_autodiscover_rejects_changed_metadata_for_existing_versions(self):
+        tool = Tool.objects.create(
+            name="Backoffice",
+            slug="backoffice",
+            current_version="1.0.0",
+        )
+        tool.versions.create(
+            version="1.0.0",
+            notes="Original tool release",
+            source="autodiscovery",
+        )
+        application = HostedApplication.objects.create(
+            name="Storefront",
+            slug="storefront",
+            current_version="2.1.0",
+        )
+        application.versions.create(
+            version="2.1.0",
+            notes="Original application release",
+            source="autodiscovery",
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            (base / "tools").mkdir(parents=True)
+            (base / "applications").mkdir(parents=True)
+            (base / "tools" / "backoffice.json").write_text(
+                json.dumps(
+                    {
+                        "name": "Renamed backoffice",
+                        "slug": "backoffice",
+                        "version": "1.0.0",
+                        "version_notes": "Replacement tool release",
+                    },
+                ),
+                encoding="utf-8",
+            )
+            (base / "applications" / "storefront.json").write_text(
+                json.dumps(
+                    {
+                        "name": "Renamed storefront",
+                        "slug": "storefront",
+                        "version": "2.1.0",
+                        "version_notes": "Replacement application release",
+                    },
+                ),
+                encoding="utf-8",
+            )
+
+            report = auto_discover_tools_and_applications(manifests_dir=base)
+
+        self.assertTrue(report.rolled_back)
+        self.assertEqual(report.error_count, 2)
+        tool.refresh_from_db()
+        application.refresh_from_db()
+        self.assertEqual(tool.name, "Backoffice")
+        self.assertEqual(application.name, "Storefront")
+        self.assertEqual(tool.versions.get().notes, "Original tool release")
+        self.assertEqual(
+            application.versions.get().notes,
+            "Original application release",
+        )
+
     def test_autodiscover_rolls_back_when_module_reference_is_missing(self):
         with TemporaryDirectory() as tmpdir:
             base = Path(tmpdir)

@@ -9,6 +9,10 @@ from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from apps.gateway.services import (
+    DisabledModuleRouteError,
+    UnknownModuleRouteError,
+)
 from apps.gateway.views import (
     GitHubRepositoriesView,
     GitHubWebhookView,
@@ -39,11 +43,16 @@ class GatewayEventPublishingTests(SimpleTestCase):
         apisix_service_cls,
         publish_mock,
     ):
-        apisix_service_cls.return_value.publish_route.return_value = {"route_id": "r-1"}
+        preview_etag = '"sha256-' + ("a" * 64) + '"'
+        apisix_service_cls.return_value.publish_route.return_value = {
+            "route_id": "r-1",
+            "etag": preview_etag,
+        }
         request = self.factory.post(
             "/api/gateway/apisix/publish/",
             {"module_slug": "core"},
             format="json",
+            HTTP_IF_MATCH=preview_etag,
         )
         force_authenticate(request, user=self.admin_user)
 
@@ -54,6 +63,8 @@ class GatewayEventPublishingTests(SimpleTestCase):
         apisix_service_cls.return_value.publish_route.assert_called_once_with(
             "core",
             dry_run=False,
+            expected_etag=preview_etag,
+            require_preview=True,
         )
 
     @patch("apps.gateway.views.publish_event")
@@ -75,6 +86,62 @@ class GatewayEventPublishingTests(SimpleTestCase):
         self.assertEqual(response.status_code, 400)
         apisix_service_cls.assert_not_called()
         publish_mock.assert_not_called()
+
+    @patch("apps.gateway.views.publish_event")
+    @patch("apps.gateway.views.ApisixService")
+    def test_publish_route_returns_conflict_for_disabled_module(
+        self,
+        apisix_service_cls,
+        publish_mock,
+    ):
+        apisix_service_cls.return_value.publish_route.side_effect = (
+            DisabledModuleRouteError("disabled module")
+        )
+        request = self.factory.post(
+            "/api/gateway/apisix/publish/",
+            {"module_slug": "dealdata-core-layer", "dry_run": True},
+            format="json",
+        )
+        force_authenticate(request, user=self.admin_user)
+
+        response = PublishRouteView.as_view()(request)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "module_disabled")
+        self.assertEqual(response.data["module_slug"], "dealdata-core-layer")
+        self.assertEqual(publish_mock.call_count, 2)
+        self.assertEqual(
+            publish_mock.call_args.kwargs["data"]["error_code"],
+            "module_disabled",
+        )
+
+    @patch("apps.gateway.views.publish_event")
+    @patch("apps.gateway.views.ApisixService")
+    def test_publish_route_returns_bad_request_for_unknown_module(
+        self,
+        apisix_service_cls,
+        publish_mock,
+    ):
+        apisix_service_cls.return_value.publish_route.side_effect = (
+            UnknownModuleRouteError("unknown module")
+        )
+        request = self.factory.post(
+            "/api/gateway/apisix/publish/",
+            {"module_slug": "not-registered"},
+            format="json",
+        )
+        force_authenticate(request, user=self.admin_user)
+
+        response = PublishRouteView.as_view()(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["code"], "module_unknown")
+        self.assertEqual(response.data["module_slug"], "not-registered")
+        self.assertEqual(publish_mock.call_count, 2)
+        self.assertEqual(
+            publish_mock.call_args.kwargs["data"]["error_code"],
+            "module_unknown",
+        )
 
     @patch("apps.gateway.views.GitHubService")
     def test_sync_github_accepts_repository_full_name(self, github_service_cls):
@@ -158,7 +225,9 @@ class GatewayEventPublishingTests(SimpleTestCase):
         github.is_allowed_event.return_value = True
         github.module_slugs_for_webhook.return_value = ["mqtt-kafka-bridge"]
         github_service_cls.return_value = github
-        apisix_service_cls.return_value.publish_route.return_value = {"route_id": "r-2"}
+        apisix_service_cls.return_value.publish_route_unconditionally.return_value = {
+            "route_id": "r-2",
+        }
 
         request = self.factory.post(
             "/api/gateway/github/webhook/",
@@ -182,9 +251,8 @@ class GatewayEventPublishingTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(publish_mock.call_count, 3)
-        apisix_service_cls.return_value.publish_route.assert_called_once_with(
+        apisix_service_cls.return_value.publish_route_unconditionally.assert_called_once_with(
             "mqtt-kafka-bridge",
-            dry_run=False,
         )
         self.assertEqual(response.data["module_slugs"], ["mqtt-kafka-bridge"])
 
@@ -225,6 +293,7 @@ class GatewayEventPublishingTests(SimpleTestCase):
         self.assertTrue(response.data["ignored"])
         publish_mock.assert_not_called()
         apisix_service_cls.return_value.publish_route.assert_not_called()
+        apisix_service_cls.return_value.publish_route_unconditionally.assert_not_called()
 
     @patch("apps.gateway.views.publish_event")
     @patch("apps.gateway.views.ApisixService")
@@ -261,6 +330,7 @@ class GatewayEventPublishingTests(SimpleTestCase):
         self.assertTrue(response.data["ignored"])
         publish_mock.assert_not_called()
         apisix_service_cls.return_value.publish_route.assert_not_called()
+        apisix_service_cls.return_value.publish_route_unconditionally.assert_not_called()
 
 
 @override_settings(GITHUB=TEST_GITHUB_CONFIG)
@@ -297,7 +367,9 @@ class GitHubWebhookSecurityTests(SimpleTestCase):
                 ],
             },
         ).encode("utf-8")
-        apisix_service_cls.return_value.publish_route.return_value = {"route_id": "r-1"}
+        apisix_service_cls.return_value.publish_route_unconditionally.return_value = {
+            "route_id": "r-1",
+        }
         headers = {
             "HTTP_X_HUB_SIGNATURE_256": self._signature(payload),
             "HTTP_X_GITHUB_EVENT": "push",
@@ -320,9 +392,8 @@ class GitHubWebhookSecurityTests(SimpleTestCase):
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 202)
         self.assertTrue(second.data["ignored"])
-        apisix_service_cls.return_value.publish_route.assert_called_once_with(
+        apisix_service_cls.return_value.publish_route_unconditionally.assert_called_once_with(
             "mqtt-kafka-bridge",
-            dry_run=False,
         )
         self.assertEqual(publish_mock.call_count, 3)
 
@@ -379,7 +450,7 @@ class GitHubWebhookSecurityTests(SimpleTestCase):
                 ],
             },
         ).encode("utf-8")
-        apisix_service_cls.return_value.publish_route.side_effect = [
+        apisix_service_cls.return_value.publish_route_unconditionally.side_effect = [
             RuntimeError("APISIX unavailable"),
             {"route_id": "r-1"},
         ]
@@ -404,5 +475,8 @@ class GitHubWebhookSecurityTests(SimpleTestCase):
         )
 
         self.assertEqual(retry.status_code, 202)
-        self.assertEqual(apisix_service_cls.return_value.publish_route.call_count, 2)
+        self.assertEqual(
+            apisix_service_cls.return_value.publish_route_unconditionally.call_count,
+            2,
+        )
         self.assertEqual(publish_mock.call_count, 6)

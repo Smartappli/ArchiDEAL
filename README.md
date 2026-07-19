@@ -62,9 +62,24 @@ make smoke
 
 Open `http://127.0.0.1:8080`. Change `ARCHIDEAL_HTTP_PORT` in `.env` if necessary.
 
-The smoke test publishes GPS and sensor messages over MQTT, waits for the DEALIoT bridge to place
-them on Kafka, verifies DEALData persistence through APISIX, and replays one message to confirm
-idempotency.
+The compact stack stores DEALIoT device configuration in its dedicated
+`dealiot-registry-db` volume and applies schema migrations before starting the console. Existing
+installations whose `.env` predates the registry must add a new random credential before running
+Compose again:
+
+```bash
+printf '\nDEALIOT_REGISTRY_DATABASE_PASSWORD=%s\n' "$(openssl rand -hex 32)" >>.env
+chmod 600 .env
+```
+
+Do not rerun `make bootstrap` over an existing `.env`; the bootstrap script intentionally refuses
+to overwrite existing credentials.
+
+The smoke test first registers, updates and retires a device through APISIX, including a stale-ETag
+write that must return `412`, to validate the DEALIoT PostgreSQL migration, persistence and
+concurrency contract. It then publishes GPS and sensor messages over MQTT, waits for the DEALIoT
+bridge to place them on Kafka, verifies DEALData persistence through APISIX, and replays one message
+to confirm idempotency.
 
 ```bash
 make ps

@@ -90,6 +90,7 @@ class HostedApplication(models.Model):
     current_version = models.CharField(max_length=32, default="0.1.0")
     released_at = models.DateTimeField(null=True, blank=True)
     enabled = models.BooleanField(default=True)
+    revision = models.PositiveBigIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -138,7 +139,9 @@ class Dataset(models.Model):
     )
     groups = models.ManyToManyField("auth.Group", related_name="datasets", blank=True)
     enabled = models.BooleanField(default=True)
+    revision = models.PositiveBigIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = _("Dataset")

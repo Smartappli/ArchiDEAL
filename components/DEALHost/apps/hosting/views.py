@@ -1,12 +1,15 @@
 import logging
+import re
 from pathlib import Path
 
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.contrib.auth.models import Group
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
-from django.shortcuts import redirect
-from django.utils import timezone
+from django.shortcuts import get_object_or_404, redirect
 from django.utils.translation import gettext as _
 from django.views import View
 from django.views.generic import TemplateView
@@ -24,6 +27,9 @@ from apps.common.events.subjects import (
     HOSTING_APPLICATION_DELETED,
     HOSTING_APPLICATION_UPDATED,
     HOSTING_APPLICATION_VERSION_RELEASED,
+    HOSTING_DATASET_CREATED,
+    HOSTING_DATASET_DELETED,
+    HOSTING_DATASET_UPDATED,
     HOSTING_MODULE_CREATED,
     HOSTING_MODULE_DELETED,
     HOSTING_MODULE_UPDATED,
@@ -40,12 +46,21 @@ from .discovery import (
 from .models import Dataset, HostedApplication, Module, Tool
 from .serializers import (
     ApplicationVersionSerializer,
+    DatasetAdminSerializer,
+    DatasetPrincipalGroupSerializer,
+    DatasetPrincipalUserSerializer,
+    DatasetSerializer,
     HostedApplicationSerializer,
     ModuleAttachSerializer,
     ModuleSerializer,
     ToolSerializer,
     ToolVersionSerializer,
     VersionCreateSerializer,
+)
+from .versioning import (
+    VersionMetadataConflict,
+    VersionRevisionConflict,
+    publish_immutable_version,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,11 +70,37 @@ def _query_bool(value: str) -> bool:
     return value.strip().casefold() in {"1", "true", "yes", "on"}
 
 
+def _if_match_revision(value: str | None) -> int | None:
+    if value is None:
+        return None
+    match = re.fullmatch(r'"([1-9][0-9]*)"', value.strip())
+    if match is None:
+        raise ValueError('If-Match must contain a strong revision ETag such as "3".')
+    return int(match.group(1))
+
+
+def _revision_etag(revision: int) -> str:
+    return f'"{revision}"'
+
+
 def _report_error_count(report: object) -> int:
     error_count = getattr(report, "error_count", None)
     if isinstance(error_count, int):
         return error_count
     return len(getattr(report, "errors", None) or [])
+
+
+def _immutable_version_conflict(version: str) -> Response:
+    return Response(
+        {
+            "code": "version_conflict",
+            "detail": (
+                f"Version {version} already exists with different immutable "
+                "release metadata."
+            ),
+        },
+        status=status.HTTP_409_CONFLICT,
+    )
 
 
 class ModuleViewSet(viewsets.ModelViewSet):
@@ -69,6 +110,53 @@ class ModuleViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "slug", "branch", "source_path", "repository_name"]
     ordering_fields = ["name", "slug", "deployment_target", "created_at"]
+
+    @staticmethod
+    def _has_revocation_sensitive_route(module: Module) -> bool:
+        return bool(
+            module.public_path.strip()
+            and module.upstream_host.strip()
+            and module.upstream_port is not None
+        )
+
+    @staticmethod
+    def _route_revocation_unavailable() -> Response:
+        return Response(
+            {
+                "code": "route_revocation_unavailable",
+                "detail": (
+                    "This module has routable metadata and may already own a dynamic "
+                    "APISIX route. Disabling, deleting, renaming or retargeting it is "
+                    "blocked until audited route revocation is implemented."
+                ),
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    @staticmethod
+    def _requests_route_revocation(module: Module, data: object) -> bool:
+        if not hasattr(data, "get") or not hasattr(data, "__contains__"):
+            return False
+
+        if "enabled" in data:
+            requested_enabled = data.get("enabled")
+            if requested_enabled is False or (
+                isinstance(requested_enabled, str)
+                and requested_enabled.strip().casefold() in {"0", "false", "no", "off"}
+            ):
+                return True
+
+        for field in ("slug", "public_path", "upstream_host"):
+            if field in data and str(data.get(field)) != str(getattr(module, field)):
+                return True
+        if "upstream_port" in data:
+            try:
+                requested_port = int(data.get("upstream_port"))
+            except (TypeError, ValueError):
+                return False
+            if requested_port != module.upstream_port:
+                return True
+        return False
 
     def get_queryset(self):  # type: ignore[override]
         queryset = super().get_queryset()
@@ -106,6 +194,48 @@ class ModuleViewSet(viewsets.ModelViewSet):
                     | Q(upstream_port__isnull=True),
                 )
         return queryset
+
+    def update(self, request: Request, *args, **kwargs) -> Response:
+        partial = kwargs.pop("partial", False)
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = kwargs[lookup_url_kwarg]
+        with transaction.atomic():
+            queryset = self.filter_queryset(self.get_queryset()).select_for_update()
+            module = get_object_or_404(
+                queryset,
+                **{self.lookup_field: lookup_value},
+            )
+            self.check_object_permissions(request, module)
+            if self._has_revocation_sensitive_route(
+                module,
+            ) and self._requests_route_revocation(module, request.data):
+                return self._route_revocation_unavailable()
+
+            serializer = self.get_serializer(
+                module,
+                data=request.data,
+                partial=partial,
+            )
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            if getattr(module, "_prefetched_objects_cache", None):
+                module._prefetched_objects_cache = {}
+            return Response(serializer.data)
+
+    def destroy(self, request: Request, *args, **kwargs) -> Response:
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = kwargs[lookup_url_kwarg]
+        with transaction.atomic():
+            queryset = self.filter_queryset(self.get_queryset()).select_for_update()
+            module = get_object_or_404(
+                queryset,
+                **{self.lookup_field: lookup_value},
+            )
+            self.check_object_permissions(request, module)
+            if self._has_revocation_sensitive_route(module):
+                return self._route_revocation_unavailable()
+            self.perform_destroy(module)
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_create(self, serializer):
         instance = serializer.save()
@@ -230,24 +360,25 @@ class ToolViewSet(viewsets.ModelViewSet):
 
         serializer = VersionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        tool.current_version = serializer.validated_data["version"]
-        tool.released_at = timezone.now()
-        tool.save(update_fields=["current_version", "released_at", "updated_at"])
-        version_obj, _ = tool.versions.update_or_create(
-            version=serializer.validated_data["version"],
-            defaults={
-                "notes": serializer.validated_data.get("notes", ""),
-                "source": serializer.validated_data.get("source", "manual"),
-            },
-        )
-        publish_event(
-            event_type=HOSTING_TOOL_VERSION_RELEASED,
-            data={"id": tool.id, "slug": tool.slug, "version": version_obj.version},
-            producer="apps.hosting.ToolViewSet",
-        )
+        try:
+            publication = publish_immutable_version(tool, serializer.validated_data)
+        except VersionMetadataConflict as exc:
+            return _immutable_version_conflict(str(exc))
+        if publication.created:
+            publish_event(
+                event_type=HOSTING_TOOL_VERSION_RELEASED,
+                data={
+                    "id": publication.resource.id,
+                    "slug": publication.resource.slug,
+                    "version": publication.version.version,
+                },
+                producer="apps.hosting.ToolViewSet",
+            )
         return Response(
-            ToolVersionSerializer(version_obj).data,
-            status=status.HTTP_201_CREATED,
+            ToolVersionSerializer(publication.version).data,
+            status=(
+                status.HTTP_201_CREATED if publication.created else status.HTTP_200_OK
+            ),
         )
 
 
@@ -276,6 +407,60 @@ class HostedApplicationViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(current_version=current_version)
         return queryset.distinct()
 
+    def retrieve(self, request: Request, *args, **kwargs) -> Response:
+        response = super().retrieve(request, *args, **kwargs)
+        response["ETag"] = _revision_etag(response.data["revision"])
+        return response
+
+    def update(self, request: Request, *args, **kwargs) -> Response:
+        try:
+            expected_revision = _if_match_revision(request.headers.get("If-Match"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if expected_revision is None:
+            return Response(
+                {"detail": "If-Match is required for application updates."},
+                status=428,
+            )
+
+        partial = kwargs.pop("partial", False)
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = kwargs[lookup_url_kwarg]
+        with transaction.atomic():
+            queryset = self.filter_queryset(self.get_queryset()).select_for_update()
+            instance = get_object_or_404(
+                queryset,
+                **{self.lookup_field: lookup_value},
+            )
+            self.check_object_permissions(request, instance)
+            if instance.revision != expected_revision:
+                return self._stale_revision_response(instance)
+
+            serializer = self.get_serializer(
+                instance,
+                data=request.data,
+                partial=partial,
+            )
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            if getattr(instance, "_prefetched_objects_cache", None):
+                instance._prefetched_objects_cache = {}
+            response = Response(serializer.data)
+            response["ETag"] = _revision_etag(serializer.instance.revision)
+            return response
+
+    @staticmethod
+    def _stale_revision_response(application: HostedApplication) -> Response:
+        response = Response(
+            {
+                "detail": "The application changed after it was loaded.",
+                "revision": application.revision,
+            },
+            status=status.HTTP_412_PRECONDITION_FAILED,
+        )
+        response["ETag"] = _revision_etag(application.revision)
+        return response
+
     def perform_create(self, serializer):
         instance = serializer.save()
         publish_event(
@@ -284,24 +469,56 @@ class HostedApplicationViewSet(viewsets.ModelViewSet):
                 "id": instance.id,
                 "slug": instance.slug,
                 "enabled": instance.enabled,
+                "revision": instance.revision,
             },
             producer="apps.hosting.HostedApplicationViewSet",
         )
 
     def perform_update(self, serializer):
-        instance = serializer.save()
+        next_revision = serializer.instance.revision + 1
+        instance = serializer.save(revision=next_revision)
         publish_event(
             event_type=HOSTING_APPLICATION_UPDATED,
             data={
                 "id": instance.id,
                 "slug": instance.slug,
                 "enabled": instance.enabled,
+                "revision": instance.revision,
             },
             producer="apps.hosting.HostedApplicationViewSet",
         )
 
+    def destroy(self, request: Request, *args, **kwargs) -> Response:
+        try:
+            expected_revision = _if_match_revision(request.headers.get("If-Match"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if expected_revision is None:
+            return Response(
+                {"detail": "If-Match is required for application deletion."},
+                status=428,
+            )
+
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = kwargs[lookup_url_kwarg]
+        with transaction.atomic():
+            queryset = self.filter_queryset(self.get_queryset()).select_for_update()
+            instance = get_object_or_404(
+                queryset,
+                **{self.lookup_field: lookup_value},
+            )
+            self.check_object_permissions(request, instance)
+            if instance.revision != expected_revision:
+                return self._stale_revision_response(instance)
+            self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def perform_destroy(self, instance):
-        payload = {"id": instance.id, "slug": instance.slug}
+        payload = {
+            "id": instance.id,
+            "slug": instance.slug,
+            "revision": instance.revision,
+        }
         super().perform_destroy(instance)
         publish_event(
             event_type=HOSTING_APPLICATION_DELETED,
@@ -311,25 +528,80 @@ class HostedApplicationViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="attach-module")
     def attach_module(self, request: Request, pk: str | None = None) -> Response:
-        serializer = ModuleAttachSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        application = self.get_object()
-        application.modules.add(serializer.validated_data["module"])
-        return Response(
-            self.get_serializer(application).data,
-            status=status.HTTP_200_OK,
+        return self._update_module_membership(
+            request,
+            pk=pk,
+            attach=True,
         )
 
     @action(detail=True, methods=["post"], url_path="detach-module")
     def detach_module(self, request: Request, pk: str | None = None) -> Response:
+        return self._update_module_membership(
+            request,
+            pk=pk,
+            attach=False,
+        )
+
+    def _update_module_membership(
+        self,
+        request: Request,
+        *,
+        pk: str | None,
+        attach: bool,
+    ) -> Response:
         serializer = ModuleAttachSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        application = self.get_object()
-        application.modules.remove(serializer.validated_data["module"])
-        return Response(
-            self.get_serializer(application).data,
-            status=status.HTTP_200_OK,
-        )
+        try:
+            expected_revision = _if_match_revision(request.headers.get("If-Match"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if expected_revision is None:
+            return Response(
+                {"detail": "If-Match is required for application module changes."},
+                status=428,
+            )
+
+        lookup_value = pk if pk is not None else self.kwargs.get(self.lookup_field)
+        with transaction.atomic():
+            queryset = self.filter_queryset(self.get_queryset()).select_for_update()
+            application = get_object_or_404(
+                queryset,
+                **{self.lookup_field: lookup_value},
+            )
+            self.check_object_permissions(request, application)
+            if application.revision != expected_revision:
+                return self._stale_revision_response(application)
+
+            module = serializer.validated_data["module"]
+            is_attached = application.modules.filter(pk=module.pk).exists()
+            changed = (attach and not is_attached) or (not attach and is_attached)
+            if changed:
+                if attach:
+                    application.modules.add(module)
+                else:
+                    application.modules.remove(module)
+                application.revision += 1
+                application.save(update_fields=["revision", "updated_at"])
+                publish_event(
+                    event_type=HOSTING_APPLICATION_UPDATED,
+                    data={
+                        "id": application.id,
+                        "slug": application.slug,
+                        "enabled": application.enabled,
+                        "revision": application.revision,
+                        "module_slug": module.slug,
+                    },
+                    producer="apps.hosting.HostedApplicationViewSet",
+                )
+
+            if getattr(application, "_prefetched_objects_cache", None):
+                application._prefetched_objects_cache = {}
+            response = Response(
+                self.get_serializer(application).data,
+                status=status.HTTP_200_OK,
+            )
+            response["ETag"] = _revision_etag(application.revision)
+            return response
 
     @action(detail=True, methods=["get"], url_path="modules")
     def modules(self, request: Request, pk: str | None = None) -> Response:
@@ -349,31 +621,245 @@ class HostedApplicationViewSet(viewsets.ModelViewSet):
             ).data
             return Response(data, status=status.HTTP_200_OK)
 
+        try:
+            expected_revision = _if_match_revision(request.headers.get("If-Match"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if expected_revision is None:
+            return Response(
+                {"detail": "If-Match is required for application version publication."},
+                status=428,
+            )
+
         serializer = VersionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        application.current_version = serializer.validated_data["version"]
-        application.released_at = timezone.now()
-        application.save(update_fields=["current_version", "released_at", "updated_at"])
-        version_obj, _ = application.versions.update_or_create(
-            version=serializer.validated_data["version"],
-            defaults={
-                "notes": serializer.validated_data.get("notes", ""),
-                "source": serializer.validated_data.get("source", "manual"),
-            },
+        try:
+            publication = publish_immutable_version(
+                application,
+                serializer.validated_data,
+                expected_revision=expected_revision,
+            )
+        except VersionRevisionConflict as exc:
+            return self._stale_revision_response(exc.resource)
+        except VersionMetadataConflict as exc:
+            return _immutable_version_conflict(str(exc))
+        if publication.created:
+            publish_event(
+                event_type=HOSTING_APPLICATION_VERSION_RELEASED,
+                data={
+                    "id": publication.resource.id,
+                    "slug": publication.resource.slug,
+                    "version": publication.version.version,
+                    "revision": publication.resource.revision,
+                },
+                producer="apps.hosting.HostedApplicationViewSet",
+            )
+        response = Response(
+            ApplicationVersionSerializer(publication.version).data,
+            status=(
+                status.HTTP_201_CREATED if publication.created else status.HTTP_200_OK
+            ),
         )
+        response["ETag"] = _revision_etag(publication.resource.revision)
+        return response
+
+
+class DatasetViewSet(viewsets.ModelViewSet):
+    """Manage datasets while enforcing their user and group access lists."""
+
+    queryset = (
+        Dataset.objects.prefetch_related("modules", "users", "groups")
+        .all()
+        .order_by("name")
+    )
+    permission_classes = [IsStaffOrAuthenticatedReadOnly]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "slug", "description", "modules__slug"]
+    ordering_fields = ["name", "slug", "enabled", "created_at"]
+
+    def get_serializer_class(self):
+        if self.request.user.is_staff:
+            return DatasetAdminSerializer
+        return DatasetSerializer
+
+    def get_queryset(self):  # type: ignore[override]
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        if not user.is_staff:
+            acl_user = user if getattr(user, "pk", None) is not None else None
+            if acl_user is None:
+                username = str(
+                    getattr(user, "acl_username", None) or getattr(user, "username", "")
+                ).strip()
+                acl_user = (
+                    get_user_model()
+                    .objects.filter(username=username, is_active=True)
+                    .first()
+                    if username
+                    else None
+                )
+            external_groups = tuple(
+                str(value)
+                for value in getattr(user, "oidc_groups", ())
+                if str(value).strip()
+            )
+            access_scope = None
+            if acl_user is not None:
+                access_scope = Q(users=acl_user) | Q(groups__in=acl_user.groups.all())
+            if external_groups:
+                group_scope = Q(groups__name__in=external_groups)
+                access_scope = (
+                    group_scope if access_scope is None else access_scope | group_scope
+                )
+            if access_scope is None:
+                queryset = queryset.none()
+            else:
+                queryset = queryset.filter(enabled=True).filter(access_scope)
+
+        enabled = self.request.query_params.get("enabled")
+        module_slug = self.request.query_params.get("module_slug")
+        if enabled is not None:
+            queryset = queryset.filter(enabled=_query_bool(enabled))
+        if module_slug:
+            queryset = queryset.filter(modules__slug=module_slug)
+
+        # ACL-oriented filters are administrative: exposing them to ordinary
+        # readers would make it possible to infer another user's membership.
+        if user.is_staff:
+            user_id = self.request.query_params.get("user_id")
+            group_id = self.request.query_params.get("group_id")
+            if user_id:
+                queryset = queryset.filter(users__id=user_id)
+            if group_id:
+                queryset = queryset.filter(groups__id=group_id)
+
+        return queryset.distinct()
+
+    def retrieve(self, request: Request, *args, **kwargs) -> Response:
+        response = super().retrieve(request, *args, **kwargs)
+        response["ETag"] = f'"{response.data["revision"]}"'
+        return response
+
+    def update(self, request: Request, *args, **kwargs) -> Response:
+        try:
+            expected_revision = _if_match_revision(request.headers.get("If-Match"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if expected_revision is None:
+            return Response(
+                {"detail": "If-Match is required for dataset updates."},
+                status=428,
+            )
+
+        partial = kwargs.pop("partial", False)
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        lookup_value = kwargs[lookup_url_kwarg]
+        with transaction.atomic():
+            queryset = self.filter_queryset(self.get_queryset()).select_for_update()
+            instance = get_object_or_404(
+                queryset,
+                **{self.lookup_field: lookup_value},
+            )
+            self.check_object_permissions(request, instance)
+            if instance.revision != expected_revision:
+                response = Response(
+                    {
+                        "detail": "The dataset changed after it was loaded.",
+                        "revision": instance.revision,
+                    },
+                    status=status.HTTP_412_PRECONDITION_FAILED,
+                )
+                response["ETag"] = f'"{instance.revision}"'
+                return response
+
+            serializer = self.get_serializer(
+                instance, data=request.data, partial=partial
+            )
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            if getattr(instance, "_prefetched_objects_cache", None):
+                instance._prefetched_objects_cache = {}
+            response = Response(serializer.data)
+            response["ETag"] = f'"{serializer.instance.revision}"'
+            return response
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
         publish_event(
-            event_type=HOSTING_APPLICATION_VERSION_RELEASED,
+            event_type=HOSTING_DATASET_CREATED,
             data={
-                "id": application.id,
-                "slug": application.slug,
-                "version": version_obj.version,
+                "id": instance.id,
+                "slug": instance.slug,
+                "enabled": instance.enabled,
+                "revision": instance.revision,
+                "actor": str(
+                    getattr(
+                        self.request.user, "acl_username", self.request.user.username
+                    )
+                ),
             },
-            producer="apps.hosting.HostedApplicationViewSet",
+            producer="apps.hosting.DatasetViewSet",
         )
-        return Response(
-            ApplicationVersionSerializer(version_obj).data,
-            status=status.HTTP_201_CREATED,
+
+    def perform_update(self, serializer):
+        next_revision = serializer.instance.revision + 1
+        instance = serializer.save(revision=next_revision)
+        publish_event(
+            event_type=HOSTING_DATASET_UPDATED,
+            data={
+                "id": instance.id,
+                "slug": instance.slug,
+                "enabled": instance.enabled,
+                "revision": instance.revision,
+                "actor": str(
+                    getattr(
+                        self.request.user, "acl_username", self.request.user.username
+                    )
+                ),
+            },
+            producer="apps.hosting.DatasetViewSet",
         )
+
+    def perform_destroy(self, instance):
+        payload = {
+            "id": instance.id,
+            "slug": instance.slug,
+            "revision": instance.revision,
+            "actor": str(
+                getattr(self.request.user, "acl_username", self.request.user.username)
+            ),
+        }
+        super().perform_destroy(instance)
+        publish_event(
+            event_type=HOSTING_DATASET_DELETED,
+            data=payload,
+            producer="apps.hosting.DatasetViewSet",
+        )
+
+
+class DatasetPrincipalListView(APIView):
+    """Return only the principals needed by staff dataset ACL editors."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request: Request) -> Response:
+        users = (
+            get_user_model()
+            .objects.select_related("oidc_acl_identity")
+            .all()
+            .order_by("id")
+        )
+        groups = Group.objects.only("id", "name").all().order_by("name")
+        response = Response(
+            {
+                "users": DatasetPrincipalUserSerializer(users, many=True).data,
+                "groups": DatasetPrincipalGroupSerializer(groups, many=True).data,
+                "can_provision_oidc": bool(request.user.is_superuser),
+            }
+        )
+        response["Cache-Control"] = "private, no-store"
+        return response
 
 
 class AutoDiscoverView(APIView):

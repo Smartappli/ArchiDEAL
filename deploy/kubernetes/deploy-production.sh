@@ -797,6 +797,10 @@ ARCHIDEAL_INGEST_TOKEN_FILE="$ingest_token_file" \
     --production \
     --exercise-api-ingest \
     --device-id "$smoke_device_id"
+python "$script_dir/../../scripts/check-device-registry.py" \
+  --base-url "https://$public_host/dealiot" \
+  --bearer-token-file "$smoke_token_file" \
+  --device-id "${smoke_device_id}-registry"
 
 success_controllers_json="$work_dir/success-controllers.json"
 success_pods_json="$work_dir/success-pods.json"
