@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDatasetResource,
+  createIamUser,
+  deleteIamUser,
   type Dataset,
   type Device,
   getDatasetPrincipals,
@@ -12,9 +14,11 @@ import {
   publishHostedApplicationVersion,
   provisionOidcIdentity,
   retireDeviceResource,
+  setIamUserPassword,
   updateDatasetResource,
   updateDeviceResource,
   updateHostedApplicationResource,
+  updateIamUser,
 } from "./managementApi";
 
 function jsonResponse(payload: unknown, status = 200, headers: Record<string, string> = {}) {
@@ -462,6 +466,63 @@ describe("managementRequest", () => {
       "/dealhost/api/hosting/dataset-principals/",
       expect.objectContaining({ credentials: "same-origin" }),
     );
+  });
+
+  it("uses the protected DEALHost IAM endpoints for user lifecycle operations", async () => {
+    const user = {
+      id: 9,
+      username: "operator",
+      email: "operator@example.test",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      is_active: true,
+      is_staff: true,
+      is_superuser: false,
+      groups: [],
+      date_joined: "2026-07-19T00:00:00Z",
+      last_login: null,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(user, 201))
+      .mockResolvedValueOnce(jsonResponse({ ...user, first_name: "Grace" }))
+      .mockResolvedValueOnce(jsonResponse({}, 204))
+      .mockResolvedValueOnce(jsonResponse({}, 204));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createIamUser({
+      username: "operator",
+      email: "operator@example.test",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      password: "correct horse battery staple",
+      is_active: true,
+      is_staff: true,
+      is_superuser: false,
+      group_ids: [2],
+    });
+    await updateIamUser(9, {
+      email: "operator@example.test",
+      first_name: "Grace",
+      last_name: "Lovelace",
+      is_active: true,
+      is_staff: true,
+      is_superuser: false,
+      group_ids: [2, 3],
+    });
+    await setIamUserPassword(9, "another correct horse battery staple");
+    await deleteIamUser(9);
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ["/dealhost/api/iam/users/", "POST"],
+      ["/dealhost/api/iam/users/9/", "PATCH"],
+      ["/dealhost/api/iam/users/9/set-password/", "POST"],
+      ["/dealhost/api/iam/users/9/", "DELETE"],
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      password: "correct horse battery staple",
+      group_ids: [2],
+    });
   });
 
   it("times out a management request that never receives a response", async () => {
