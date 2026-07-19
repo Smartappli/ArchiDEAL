@@ -129,6 +129,33 @@ export interface DatasetPrincipals {
   can_provision_oidc: boolean;
 }
 
+export interface IamGroup {
+  id: number;
+  name: string;
+}
+
+export interface IamUser {
+  id: number;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  is_active: boolean;
+  is_staff: boolean;
+  is_superuser: boolean;
+  groups: IamGroup[];
+  group_ids?: number[];
+  date_joined: string;
+  last_login: string | null;
+  oidc_identity?: {
+    issuer: string;
+    subject: string;
+    display_name: string;
+    email: string;
+    label: string;
+  } | null;
+}
+
 interface CollectionEnvelope<T> {
   results?: T[];
   devices?: T[];
@@ -422,6 +449,37 @@ export function updateManagementResource<T>(
     signal,
     headers,
   });
+}
+
+export function deleteManagementResource(path: string, signal?: AbortSignal) {
+  return managementRequest<void>(path, { method: "DELETE", signal });
+}
+
+export function createIamUser(
+  payload: Pick<IamUser, "username" | "email" | "first_name" | "last_name" | "is_active" | "is_staff" | "is_superuser"> & { password: string; group_ids: number[] },
+  signal?: AbortSignal,
+) {
+  return createManagementResource<IamUser>("/dealhost/api/iam/users/", payload, signal);
+}
+
+export function updateIamUser(
+  userId: number,
+  payload: Pick<IamUser, "email" | "first_name" | "last_name" | "is_active" | "is_staff" | "is_superuser"> & { group_ids: number[] },
+  signal?: AbortSignal,
+) {
+  return updateManagementResource<IamUser>(`/dealhost/api/iam/users/${userId}/`, payload, signal);
+}
+
+export function deleteIamUser(userId: number, signal?: AbortSignal) {
+  return deleteManagementResource(`/dealhost/api/iam/users/${userId}/`, signal);
+}
+
+export function setIamUserPassword(userId: number, password: string, signal?: AbortSignal) {
+  return createManagementResource<void>(
+    `/dealhost/api/iam/users/${userId}/set-password/`,
+    { password },
+    signal,
+  );
 }
 
 function strongRevisionEtag(revision: number) {
