@@ -53,8 +53,9 @@ Production runtime clients are expected to use authenticated and encrypted depen
 - Kafka defaults to `SASL_SSL` with SCRAM credentials provided by `dealiot-secrets`.
 - MQTT defaults to TLS on port `8883`; certificates can be mounted and referenced through runtime
   config.
-- Management Console routes use OIDC token introspection and role mapping in production. The static
-  bearer token remains a compatibility fallback for local and staged migrations.
+- Management Console routes use OIDC token introspection and role mapping in production. Production
+  rejects the local static-token compatibility path and requires an exact HTTPS public origin for
+  browser mutation checks.
 - Apicurio requires OIDC authentication and enforces role-based and owner-only authorization.
 - Airflow, Flink, Apicurio, the MQTT bridge, and media backfill share the same Kafka security
   environment contract.

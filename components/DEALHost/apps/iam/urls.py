@@ -1,11 +1,16 @@
 from rest_framework.routers import DefaultRouter
 
-from .views import GroupViewSet, PermissionViewSet, UserViewSet
+from .views import GroupViewSet, OIDCAclIdentityViewSet, PermissionViewSet, UserViewSet
 
 router = DefaultRouter()
 router.register("users", UserViewSet, basename="iam-users")
 router.register("groups", GroupViewSet, basename="iam-groups")
 router.register("permissions", PermissionViewSet, basename="iam-permissions")
+router.register(
+    "oidc-identities",
+    OIDCAclIdentityViewSet,
+    basename="iam-oidc-identities",
+)
 
 urlpatterns = [
     *router.urls,

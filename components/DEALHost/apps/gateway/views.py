@@ -17,7 +17,17 @@ from apps.common.events.subjects import (
     GATEWAY_ROUTE_PUBLISH_REQUESTED,
 )
 
-from .services import ApisixService, GitHubService, normalize_module_slug
+from .services import (
+    ApisixService,
+    DisabledModuleRouteError,
+    GitHubService,
+    InvalidRoutePreviewEtagError,
+    ModuleNotProductionReadyError,
+    RoutePublicationError,
+    RoutePreviewRequiredError,
+    StaleRoutePreviewError,
+    normalize_module_slug,
+)
 
 GITHUB_WEBHOOK_DELIVERY_TTL = 24 * 60 * 60
 
@@ -171,7 +181,113 @@ class PublishRouteView(APIView):
             producer="apps.gateway.PublishRouteView",
         )
         try:
-            result = ApisixService().publish_route(module_slug, dry_run=dry_run)
+            apisix = ApisixService()
+            if dry_run:
+                result = apisix.publish_route(module_slug, dry_run=True)
+            else:
+                result = apisix.publish_route(
+                    module_slug,
+                    dry_run=False,
+                    expected_etag=request.headers.get("If-Match"),
+                    require_preview=True,
+                )
+        except RoutePreviewRequiredError as exc:
+            publish_event(
+                event_type=GATEWAY_ROUTE_PUBLISH_FAILED,
+                data={"module_slug": module_slug, "error_code": exc.code},
+                producer="apps.gateway.PublishRouteView",
+            )
+            return Response(
+                {
+                    "detail": _(
+                        "Preview the effective route and send its ETag in If-Match.",
+                    ),
+                    "code": exc.code,
+                    "module_slug": module_slug,
+                },
+                status=428,
+            )
+        except InvalidRoutePreviewEtagError as exc:
+            publish_event(
+                event_type=GATEWAY_ROUTE_PUBLISH_FAILED,
+                data={"module_slug": module_slug, "error_code": exc.code},
+                producer="apps.gateway.PublishRouteView",
+            )
+            return Response(
+                {
+                    "detail": _(
+                        "If-Match must contain exactly one strong route preview ETag.",
+                    ),
+                    "code": exc.code,
+                    "module_slug": module_slug,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except StaleRoutePreviewError as exc:
+            publish_event(
+                event_type=GATEWAY_ROUTE_PUBLISH_FAILED,
+                data={"module_slug": module_slug, "error_code": exc.code},
+                producer="apps.gateway.PublishRouteView",
+            )
+            return Response(
+                {
+                    "detail": _(
+                        "The effective route changed after preview; preview it again.",
+                    ),
+                    "code": exc.code,
+                    "module_slug": module_slug,
+                },
+                status=status.HTTP_412_PRECONDITION_FAILED,
+            )
+        except DisabledModuleRouteError:
+            publish_event(
+                event_type=GATEWAY_ROUTE_PUBLISH_FAILED,
+                data={
+                    "module_slug": module_slug,
+                    "error_code": DisabledModuleRouteError.code,
+                },
+                producer="apps.gateway.PublishRouteView",
+            )
+            return Response(
+                {
+                    "detail": _(
+                        "The module is disabled and cannot publish a route.",
+                    ),
+                    "code": DisabledModuleRouteError.code,
+                    "module_slug": module_slug,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        except ModuleNotProductionReadyError as exc:
+            publish_event(
+                event_type=GATEWAY_ROUTE_PUBLISH_FAILED,
+                data={"module_slug": module_slug, "error_code": exc.code},
+                producer="apps.gateway.PublishRouteView",
+            )
+            return Response(
+                {
+                    "detail": _(
+                        "The module is not approved for dynamic production routes.",
+                    ),
+                    "code": exc.code,
+                    "module_slug": module_slug,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        except RoutePublicationError as exc:
+            publish_event(
+                event_type=GATEWAY_ROUTE_PUBLISH_FAILED,
+                data={"module_slug": module_slug, "error_code": exc.code},
+                producer="apps.gateway.PublishRouteView",
+            )
+            return Response(
+                {
+                    "detail": _("The module is unknown or its route is invalid."),
+                    "code": exc.code,
+                    "module_slug": module_slug,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except Exception as exc:
             publish_event(
                 event_type=GATEWAY_ROUTE_PUBLISH_FAILED,
@@ -188,7 +304,11 @@ class PublishRouteView(APIView):
             },
             producer="apps.gateway.PublishRouteView",
         )
-        return Response(result, status=status.HTTP_201_CREATED)
+        return Response(
+            result,
+            status=status.HTTP_201_CREATED,
+            headers={"ETag": result["etag"]},
+        )
 
 
 class GitHubWebhookView(APIView):
@@ -289,9 +409,8 @@ class GitHubWebhookView(APIView):
                 producer="apps.gateway.GitHubWebhookView",
             )
             try:
-                route_status = ApisixService().publish_route(
+                route_status = ApisixService().publish_route_unconditionally(
                     module_slug,
-                    dry_run=False,
                 )
             except Exception as exc:
                 publish_event(

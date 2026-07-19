@@ -151,25 +151,41 @@ spec:
   egress:
     - to:
         - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealhost
+      ports:
+        - protocol: TCP
+          port: 8000
+    - to:
+        - podSelector:
             matchExpressions:
               - key: app.kubernetes.io/name
                 operator: In
                 values:
                   - dealinterface
-                  - dealhost
-                  - dealdata-core
-                  - dealdata-gps
-                  - dealdata-sensor
                   - dealiot-console
       ports:
         - protocol: TCP
-          port: 8000
-        - protocol: TCP
           port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-core
+      ports:
         - protocol: TCP
           port: 7000
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-gps
+      ports:
         - protocol: TCP
           port: 7001
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealdata-sensor
+      ports:
         - protocol: TCP
           port: 7002
     - to:
@@ -398,6 +414,12 @@ spec:
   egress:
     - to:
         - ipBlock:
+            cidr: "${POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - ipBlock:
             cidr: "${KAFKA_EGRESS_CIDR}"
       ports:
         - protocol: TCP
@@ -414,6 +436,26 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealiot-registry-migration-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dealiot-registry-migrate
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 5432
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

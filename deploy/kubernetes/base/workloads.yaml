@@ -1138,6 +1138,11 @@ spec:
                 secretKeyRef:
                   name: archideal-runtime-secrets-${RELEASE_ID}
                   key: management-console-oidc-client-secret
+            - name: DEALIOT_REGISTRY_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealiot-registry-database-password
             - name: KAFKA_SASL_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -1202,6 +1207,8 @@ spec:
           secret:
             secretName: archideal-runtime-secrets-${RELEASE_ID}
             items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
               - key: kafka-ca.crt
                 path: kafka-ca.crt
               - key: mqtt-ca.crt

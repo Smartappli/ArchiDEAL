@@ -305,6 +305,10 @@ class DeploymentReadinessTests(unittest.TestCase):
         self.assertEqual(runtime_config["KAFKA_SECURITY_PROTOCOL"], "SASL_SSL")
         self.assertEqual(runtime_config["KAFKA_SASL_MECHANISM"], "SCRAM-SHA-512")
         self.assertEqual(runtime_config["KAFKA_SASL_USERNAME"], "dealiot_runtime")
+        self.assertEqual(runtime_config["MANAGEMENT_CONSOLE_PRODUCTION_MODE"], "true")
+        self.assertTrue(runtime_config["MANAGEMENT_CONSOLE_PUBLIC_ORIGIN"].startswith("https://"))
+        self.assertTrue(runtime_config["MANAGEMENT_CONSOLE_OIDC_ISSUER"].startswith("https://"))
+        self.assertEqual(runtime_config["MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM"], "groups")
         self.assertGreaterEqual(len(runtime_config["KAFKA_BOOTSTRAP_SERVERS"].split(",")), 3)
         self.assertNotIn("mqtt-broker.ingest.svc.cluster.local", config_text)
         self.assertNotIn("MQTT_PORT=1883", config_text)
@@ -447,7 +451,7 @@ class DeploymentReadinessTests(unittest.TestCase):
             "AIRFLOW__API__SECRET_KEY",
         ):
             self.assertIn(required_secret, contract_text)
-        self.assertIn("optional_keys:\n    - MANAGEMENT_CONSOLE_TOKEN", contract_text)
+        self.assertNotIn("MANAGEMENT_CONSOLE_TOKEN", contract_text)
         for required_evidence_topic in (
             "governance.dataset.catalog",
             "governance.data_management_plans",
@@ -590,7 +594,8 @@ class DeploymentReadinessTests(unittest.TestCase):
             item["name"]
             for item in management_console["spec"]["template"]["spec"]["containers"][0]["env"]
         }
-        self.assertIn("MANAGEMENT_CONSOLE_TOKEN", console_env_names)
+        self.assertNotIn("MANAGEMENT_CONSOLE_TOKEN", console_env_names)
+        self.assertIn("MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET", console_env_names)
         console_container = management_console["spec"]["template"]["spec"]["containers"][0]
         self.assertIn("readinessProbe", console_container)
         self.assertIn("livenessProbe", console_container)

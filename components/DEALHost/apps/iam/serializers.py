@@ -1,9 +1,92 @@
+from collections.abc import Mapping
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
+from apps.common.oidc import (
+    validate_approved_oidc_issuer,
+    validate_oidc_subject,
+)
+
+from .models import OIDCAclIdentity
+
 User = get_user_model()
+
+
+class OIDCAclIdentitySummarySerializer(serializers.ModelSerializer):
+    label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OIDCAclIdentity
+        fields = ["issuer", "subject", "display_name", "email", "label"]
+        read_only_fields = fields
+
+    def get_label(self, identity: OIDCAclIdentity) -> str:
+        return identity.display_name or identity.email or identity.subject
+
+
+class OIDCAclIdentitySerializer(serializers.ModelSerializer):
+    user_id = serializers.IntegerField(read_only=True)
+    acl_username = serializers.CharField(source="user.username", read_only=True)
+    is_active = serializers.BooleanField(source="user.is_active", read_only=True)
+
+    class Meta:
+        model = OIDCAclIdentity
+        fields = [
+            "id",
+            "user_id",
+            "acl_username",
+            "issuer",
+            "subject",
+            "display_name",
+            "email",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class OIDCAclIdentityProvisionSerializer(serializers.Serializer):
+    issuer = serializers.CharField(max_length=512, trim_whitespace=False)
+    subject = serializers.CharField(max_length=255, trim_whitespace=False)
+    display_name = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+    )
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping):
+            unknown = sorted(set(data) - {"issuer", "subject", "display_name", "email"})
+            if unknown:
+                raise serializers.ValidationError(
+                    {
+                        "unknown_fields": [
+                            f"Unsupported field: {name}" for name in unknown
+                        ]
+                    }
+                )
+        return super().to_internal_value(data)
+
+    def validate_issuer(self, value: str) -> str:
+        try:
+            return validate_approved_oidc_issuer(
+                value,
+                str(getattr(settings, "DEALHOST_OIDC_ISSUER", "")),
+            )
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+
+    def validate_subject(self, value: str) -> str:
+        try:
+            return validate_oidc_subject(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
 
 
 class PermissionSerializer(serializers.ModelSerializer):
@@ -28,6 +111,11 @@ class GroupSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    oidc_identity = OIDCAclIdentitySummarySerializer(
+        source="oidc_acl_identity",
+        read_only=True,
+        allow_null=True,
+    )
     group_ids = serializers.PrimaryKeyRelatedField(
         source="groups",
         queryset=Group.objects.all(),
@@ -58,6 +146,7 @@ class UserSerializer(serializers.ModelSerializer):
             "permission_ids",
             "date_joined",
             "last_login",
+            "oidc_identity",
         ]
         read_only_fields = [
             "id",
@@ -65,6 +154,7 @@ class UserSerializer(serializers.ModelSerializer):
             "user_permissions",
             "date_joined",
             "last_login",
+            "oidc_identity",
         ]
 
 

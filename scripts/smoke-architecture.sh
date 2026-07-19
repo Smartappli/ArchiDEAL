@@ -41,6 +41,8 @@ sensor_payload=$(printf \
   '{"message_id":"%s","timestamp":"%s","sensor_type":"temperature","value":21.5,"unit":"celsius"}' \
   "$sensor_message_id" "$timestamp")
 
+python scripts/check-device-registry.py --device-id "$device_id-registry"
+
 publish() {
   local topic=$1
   local payload=$2

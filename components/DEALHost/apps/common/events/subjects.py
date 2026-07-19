@@ -9,6 +9,11 @@ HOSTING_APPLICATION_CREATED = "hosting.application.created"
 HOSTING_APPLICATION_UPDATED = "hosting.application.updated"
 HOSTING_APPLICATION_DELETED = "hosting.application.deleted"
 HOSTING_APPLICATION_VERSION_RELEASED = "hosting.application.version_released"
+HOSTING_DATASET_CREATED = "hosting.dataset.created"
+HOSTING_DATASET_UPDATED = "hosting.dataset.updated"
+HOSTING_DATASET_DELETED = "hosting.dataset.deleted"
+
+IAM_OIDC_ACL_IDENTITY_DEPROVISIONED = "iam.oidc_acl_identity.deprovisioned"
 
 GATEWAY_ROUTE_PUBLISH_REQUESTED = "gateway.route.publish.requested"
 GATEWAY_ROUTE_PUBLISH_COMPLETED = "gateway.route.publish.completed"

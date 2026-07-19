@@ -23,7 +23,6 @@ function runtimeConfig(overrides: Partial<ModuleRuntimeConfig> = {}): ModuleRunt
     apiBaseUrl: "/dealiot",
     healthPath: "/healthz",
     docsPath: "/docs/dealiot",
-    authToken: "local-management-token",
     probes: [
       {
         id: "management-console",
@@ -45,7 +44,7 @@ afterEach(() => {
 });
 
 describe("fetchModuleConnection", () => {
-  it("classifies probe payloads and only sends DEALIoT auth to /api probes", async () => {
+  it("classifies probe payloads and delegates authentication to the same-origin session", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ status: "ok", service: "management" }))
@@ -77,7 +76,9 @@ describe("fetchModuleConnection", () => {
     const secondHeaders = fetchMock.mock.calls[1][1]?.headers as Headers;
 
     expect(firstHeaders.get("Authorization")).toBeNull();
-    expect(secondHeaders.get("Authorization")).toBe("Bearer local-management-token");
+    expect(secondHeaders.get("Authorization")).toBeNull();
+    expect(fetchMock.mock.calls[0][1]?.credentials).toBe("same-origin");
+    expect(fetchMock.mock.calls[1][1]?.credentials).toBe("same-origin");
   });
 
   it("keeps DEALIoT online when required components are healthy and optional ones are absent", async () => {
@@ -138,7 +139,6 @@ describe("fetchModuleConnection", () => {
       runtimeConfig({
         key: "dealhost",
         apiBaseUrl: "/dealhost",
-        authToken: undefined,
         probes: [
           {
             id: "gateway",
@@ -232,7 +232,6 @@ describe("fetchModuleConnection", () => {
     const connection = await fetchModuleConnection(
       runtimeConfig({
         apiBaseUrl: "",
-        authToken: undefined,
         probes: [
           {
             id: "relative",
@@ -262,7 +261,7 @@ describe("fetchModuleConnection", () => {
     ]);
   });
 
-  it("summarizes text and empty JSON payloads with HTTP fallback details", async () => {
+  it("rejects 2xx text and empty JSON responses instead of reporting them healthy", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(textResponse("plain health response"))
@@ -286,17 +285,186 @@ describe("fetchModuleConnection", () => {
       }),
     );
 
-    expect(connection.status).toBe("online");
+    expect(connection.status).toBe("attention");
     expect(connection.probes).toMatchObject([
       {
         id: "text",
-        status: "online",
-        detail: "HTTP 200",
+        status: "attention",
+        httpStatus: 200,
+        detail: "Expected a JSON health response",
       },
       {
         id: "empty-json",
-        status: "online",
-        detail: "HTTP 200",
+        status: "attention",
+        httpStatus: 200,
+        detail: "Health contract not validated: the JSON object contains no recognized health state",
+      },
+    ]);
+  });
+
+  it("rejects invalid JSON and payloads from a different backend contract", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response("<html>login</html>", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: "ok",
+          service: "not-the-gateway",
+          database: "available",
+          cache: "available",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const connection = await fetchModuleConnection(
+      runtimeConfig({
+        key: "dealhost",
+        apiBaseUrl: "/dealhost",
+        probes: [
+          {
+            id: "invalid-json",
+            label: "Invalid JSON",
+            path: "/invalid-json",
+          },
+          {
+            id: "gateway",
+            label: "Gateway API",
+            path: "/api/gateway/health/",
+            healthContract: {
+              kind: "status",
+              expectedService: "gateway",
+              requiredDependencies: ["database", "cache"],
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(connection.status).toBe("attention");
+    expect(connection.probes).toMatchObject([
+      { id: "invalid-json", status: "attention", httpStatus: 200, detail: "Invalid JSON health response" },
+      {
+        id: "gateway",
+        status: "attention",
+        httpStatus: 200,
+        detail: "Health contract not validated: service must be gateway",
+      },
+    ]);
+  });
+
+  it("validates the configured gateway and readiness payload fields before reporting online", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ status: "ok", service: "gateway", database: "available", cache: "available" }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ status: "ok", service: "gps", database: "available" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const connection = await fetchModuleConnection(
+      runtimeConfig({
+        probes: [
+          {
+            id: "gateway",
+            label: "Gateway API",
+            path: "/gateway",
+            healthContract: {
+              kind: "status",
+              expectedService: "gateway",
+              requiredDependencies: ["database", "cache"],
+            },
+          },
+          {
+            id: "gps",
+            label: "GPS layer",
+            path: "/gps",
+            healthContract: {
+              kind: "status",
+              expectedService: "gps",
+              requiredDependencies: ["database"],
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(connection.status).toBe("online");
+    expect(connection.probes).toMatchObject([
+      { id: "gateway", status: "online" },
+      { id: "gps", status: "online" },
+    ]);
+  });
+
+  it("rejects component summaries with missing or duplicate required checks", async () => {
+    const scope = {
+      required: ["vernemq", "mqtt-kafka-bridge", "kafka"],
+      optional: [],
+      excluded: [],
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          checked_at: "2026-07-19T00:00:00Z",
+          summary: { healthy: 2 },
+          checks: [
+            { id: "vernemq", status: "healthy" },
+            { id: "kafka", status: "healthy" },
+          ],
+          scope,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          checked_at: "2026-07-19T00:00:00Z",
+          summary: { healthy: 3 },
+          checks: [
+            { id: "vernemq", status: "healthy" },
+            { id: "vernemq", status: "healthy" },
+            { id: "kafka", status: "healthy" },
+          ],
+          scope,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const connection = await fetchModuleConnection(
+      runtimeConfig({
+        probes: [
+          {
+            id: "missing-required",
+            label: "Missing required component",
+            path: "/missing",
+            healthContract: { kind: "component-summary" },
+          },
+          {
+            id: "duplicate-required",
+            label: "Duplicate required component",
+            path: "/duplicate",
+            healthContract: { kind: "component-summary" },
+          },
+        ],
+      }),
+    );
+
+    expect(connection.status).toBe("attention");
+    expect(connection.probes).toMatchObject([
+      {
+        id: "missing-required",
+        status: "attention",
+        validationIssue: "contract",
+        detail: "Health contract not validated: component checks must match the required scope exactly",
+      },
+      {
+        id: "duplicate-required",
+        status: "attention",
+        validationIssue: "contract",
+        detail: "Health contract not validated: component check ids must be unique",
       },
     ]);
   });

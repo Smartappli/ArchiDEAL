@@ -7,7 +7,6 @@ interface ImportMetaEnv {
   readonly VITE_DEALDATA_CORE_API_URL?: string;
   readonly VITE_DEALDATA_GPS_API_URL?: string;
   readonly VITE_DEALDATA_SENSOR_API_URL?: string;
-  readonly VITE_DEALIOT_MANAGEMENT_TOKEN?: string;
 }
 
 interface ImportMeta {

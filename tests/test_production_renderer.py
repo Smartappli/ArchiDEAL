@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -53,15 +55,87 @@ class ProductionRendererTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn(expected, result.stderr)
 
+    def render_with_runtime_config(
+        self,
+        temporary: Path,
+        updates: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        kubernetes = temporary / "kubernetes"
+        shutil.copytree(ROOT / "deploy/kubernetes", kubernetes)
+        configuration = kubernetes / "base/configuration.yaml"
+        documents = list(
+            yaml.safe_load_all(configuration.read_text(encoding="utf-8")),
+        )
+        runtime_config = next(
+            document
+            for document in documents
+            if isinstance(document, dict)
+            and document.get("kind") == "ConfigMap"
+            and document.get("metadata", {}).get("name") == "archideal-runtime"
+        )
+        runtime_config["data"].update(updates)
+        configuration.write_text(
+            yaml.safe_dump_all(documents, sort_keys=False),
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                str(kubernetes / "render.py"),
+                "--values",
+                str(kubernetes / "values.example.yaml"),
+                "--output",
+                str(temporary / "rendered"),
+                "--allow-example",
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def render_with_kubernetes_mutation(
+        self,
+        temporary: Path,
+        relative_path: str,
+        mutate,
+    ) -> subprocess.CompletedProcess[str]:
+        kubernetes = temporary / "kubernetes"
+        shutil.copytree(ROOT / "deploy/kubernetes", kubernetes)
+        manifest_path = kubernetes / relative_path
+        documents = list(
+            yaml.safe_load_all(manifest_path.read_text(encoding="utf-8")),
+        )
+        mutate(documents)
+        manifest_path.write_text(
+            yaml.safe_dump_all(documents, sort_keys=False),
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                str(kubernetes / "render.py"),
+                "--values",
+                str(kubernetes / "values.example.yaml"),
+                "--output",
+                str(temporary / "rendered"),
+                "--allow-example",
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
     def test_example_overlay_renders_with_fail_closed_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "rendered"
             result = self.render(output, "--allow-example")
             self.assertEqual(result.returncode, 0, result.stderr)
 
-            release_id = yaml.safe_load(
-                EXAMPLE_VALUES.read_text(encoding="utf-8")
-            )["RELEASE_ID"]
+            release_id = yaml.safe_load(EXAMPLE_VALUES.read_text(encoding="utf-8"))[
+                "RELEASE_ID"
+            ]
 
             documents = []
             for path in output.rglob("*.yaml"):
@@ -72,13 +146,14 @@ class ProductionRendererTests(unittest.TestCase):
                 )
 
             by_kind_name = {
-                (document.get("kind"), document.get("metadata", {}).get("name")): document
+                (
+                    document.get("kind"),
+                    document.get("metadata", {}).get("name"),
+                ): document
                 for document in documents
             }
             self.assertIn(("Job", f"kafka-preflight-{release_id}"), by_kind_name)
-            private_preflight = by_kind_name[
-                ("Job", f"network-preflight-{release_id}")
-            ]
+            private_preflight = by_kind_name[("Job", f"network-preflight-{release_id}")]
             private_container = private_preflight["spec"]["template"]["spec"][
                 "containers"
             ][0]
@@ -88,14 +163,15 @@ class ProductionRendererTests(unittest.TestCase):
             )
             self.assertEqual(private_preflight["spec"]["backoffLimit"], 0)
             self.assertEqual(
-                private_preflight["spec"]["template"]["spec"][
-                    "serviceAccountName"
-                ],
+                private_preflight["spec"]["template"]["spec"]["serviceAccountName"],
                 "archideal-preflight",
             )
             self.assertTrue(private_container["env"])
             self.assertTrue(
-                all("value" in item and "valueFrom" not in item for item in private_container["env"])
+                all(
+                    "value" in item and "valueFrom" not in item
+                    for item in private_container["env"]
+                )
             )
             self.assertNotIn("envFrom", private_container)
             self.assertNotIn(
@@ -108,9 +184,7 @@ class ProductionRendererTests(unittest.TestCase):
                 synthetic_container["command"],
                 ["python", "-m", "management_console.synthetic_publish"],
             )
-            synthetic_env = {
-                item["name"]: item for item in synthetic_container["env"]
-            }
+            synthetic_env = {item["name"]: item for item in synthetic_container["env"]}
             self.assertEqual(
                 synthetic_env["MQTT_USERNAME"]["valueFrom"]["secretKeyRef"]["key"],
                 "mqtt-smoke-username",
@@ -135,8 +209,15 @@ class ProductionRendererTests(unittest.TestCase):
 
             oauth = by_kind_name[("Deployment", "oauth2-proxy")]
             oauth_pod = oauth["spec"]["template"]["spec"]
-            oauth_arguments = set(
-                oauth_pod["containers"][0]["args"]
+            oauth_arguments = set(oauth_pod["containers"][0]["args"])
+            self.assertTrue(
+                {
+                    "--skip-jwt-bearer-tokens=true",
+                    "--bearer-token-login-fallback=false",
+                    "--pass-authorization-header=false",
+                    "--set-authorization-header=false",
+                    "--pass-access-token=true",
+                }.issubset(oauth_arguments)
             )
             self.assertEqual(
                 {
@@ -171,9 +252,7 @@ class ProductionRendererTests(unittest.TestCase):
             dealhost_container = by_kind_name[("Deployment", "dealhost")]["spec"][
                 "template"
             ]["spec"]["containers"][0]
-            dealhost_env = {
-                item["name"]: item for item in dealhost_container["env"]
-            }
+            dealhost_env = {item["name"]: item for item in dealhost_container["env"]}
             self.assertEqual(
                 dealhost_env["VALKEY_URL"]["valueFrom"]["secretKeyRef"]["key"],
                 "valkey-url",
@@ -196,8 +275,9 @@ class ProductionRendererTests(unittest.TestCase):
                 runtime_secret_name,
             )
             self.assertEqual(
-                runtime_external_secret["spec"]["target"]["template"]["metadata"]
-                ["labels"]["archideal.io/release"],
+                runtime_external_secret["spec"]["target"]["template"]["metadata"][
+                    "labels"
+                ]["archideal.io/release"],
                 release_id,
             )
             registry_external_secret = by_kind_name[
@@ -221,9 +301,7 @@ class ProductionRendererTests(unittest.TestCase):
             self.assertEqual(public_backends, {"oauth2-proxy"})
 
             apisix_routes = yaml.safe_load(
-                by_kind_name[("ConfigMap", "apisix-bootstrap")]["data"][
-                    "routes.json"
-                ]
+                by_kind_name[("ConfigMap", "apisix-bootstrap")]["data"]["routes.json"]
             )["routes"]
             for route in apisix_routes:
                 self.assertEqual(
@@ -232,6 +310,14 @@ class ProductionRendererTests(unittest.TestCase):
                     ],
                     "$http_x_forwarded_proto",
                     route["id"],
+                )
+            routes_by_id = {route["id"]: route for route in apisix_routes}
+            for route_id in ("archideal-dealhost", "archideal-dealiot"):
+                self.assertEqual(
+                    routes_by_id[route_id]["plugins"]["proxy-rewrite"]["headers"][
+                        "set"
+                    ]["Authorization"],
+                    "Bearer $http_x_forwarded_access_token",
                 )
 
             apisix = by_kind_name[("Deployment", "apisix")]
@@ -258,16 +344,74 @@ class ProductionRendererTests(unittest.TestCase):
                 console_container["readinessProbe"]["httpGet"],
                 {"path": "/readyz", "port": "http"},
             )
+            console_env = {item["name"]: item for item in console_container["env"]}
+            self.assertEqual(
+                console_env["DEALIOT_REGISTRY_DATABASE_PASSWORD"]["valueFrom"][
+                    "secretKeyRef"
+                ]["key"],
+                "dealiot-registry-database-password",
+            )
+            console_ca_items = {
+                item["key"]
+                for volume in console["spec"]["template"]["spec"]["volumes"]
+                if volume["name"] == "ca"
+                for item in volume["secret"]["items"]
+            }
+            self.assertIn("postgres-ca.crt", console_ca_items)
 
-            dealhost_migration = by_kind_name[(
-                "Job",
-                f"dealhost-migrate-{release_id}",
-            )]
+            dealiot_registry_migration = by_kind_name[
+                ("Job", f"dealiot-registry-mig-{release_id}")
+            ]
+            registry_migration_container = dealiot_registry_migration["spec"][
+                "template"
+            ]["spec"]["containers"][0]
+            self.assertEqual(
+                registry_migration_container["command"],
+                ["python", "-m", "management_console.migrate"],
+            )
+            self.assertEqual(
+                registry_migration_container["image"],
+                console_container["image"],
+            )
+            registry_migration_env = {
+                item["name"]: item for item in registry_migration_container["env"]
+            }
+            self.assertEqual(
+                set(registry_migration_env),
+                {
+                    "DEALIOT_REGISTRY_DATABASE_PASSWORD",
+                    "DEALIOT_REGISTRY_DATABASE_USER",
+                    "DEALIOT_REGISTRY_RUNTIME_DATABASE_USER",
+                },
+            )
+            self.assertEqual(
+                registry_migration_env["DEALIOT_REGISTRY_DATABASE_USER"]["value"],
+                "dealiot_registry_migrator",
+            )
+            self.assertEqual(
+                registry_migration_env["DEALIOT_REGISTRY_RUNTIME_DATABASE_USER"][
+                    "value"
+                ],
+                "dealiot_registry_app",
+            )
+            self.assertEqual(
+                registry_migration_env["DEALIOT_REGISTRY_DATABASE_PASSWORD"][
+                    "valueFrom"
+                ]["secretKeyRef"]["key"],
+                "dealiot-registry-migration-database-password",
+            )
+
+            dealhost_migration = by_kind_name[
+                (
+                    "Job",
+                    f"dealhost-migrate-{release_id}",
+                )
+            ]
             migration_env = {
                 item["name"]: item
-                for item in dealhost_migration["spec"]["template"]["spec"]["containers"][0][
-                    "env"
-                ]
+                for item in dealhost_migration["spec"]["template"]["spec"][
+                    "containers"
+                ][0]["env"]
             }
             self.assertEqual(
                 set(migration_env),
@@ -278,8 +422,79 @@ class ProductionRendererTests(unittest.TestCase):
                 "dealhost.settings.migration",
             )
 
+            runtime_config = by_kind_name[("ConfigMap", "archideal-runtime")]["data"]
+            self.assertEqual(
+                runtime_config["DEALIOT_REGISTRY_DATABASE_HOST"],
+                "dealiot-registry-postgres.example.invalid",
+            )
+            self.assertEqual(
+                runtime_config["DEALIOT_REGISTRY_DATABASE_SSLMODE"],
+                "verify-full",
+            )
+            self.assertEqual(
+                runtime_config["DEALIOT_REGISTRY_DATABASE_USER"],
+                "dealiot_registry_app",
+            )
+            self.assertEqual(
+                runtime_config["DEALIOT_REGISTRY_DATABASE_SSLROOTCERT"],
+                "/var/run/archideal-ca/postgres-ca.crt",
+            )
+            self.assertEqual(
+                runtime_config["MANAGEMENT_CONSOLE_OIDC_READ_ROLES"],
+                "archideal-production-readers",
+            )
+            self.assertEqual(
+                runtime_config["MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES"],
+                "archideal-production-admins",
+            )
+            self.assertEqual(
+                runtime_config["MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM"],
+                "groups",
+            )
+            self.assertEqual(
+                runtime_config["DEALHOST_OIDC_READ_GROUPS"],
+                "archideal-production-readers",
+            )
+            self.assertEqual(
+                runtime_config["DEALHOST_OIDC_ADMIN_GROUPS"],
+                "archideal-production-admins",
+            )
+            self.assertEqual(
+                runtime_config["DEALHOST_OIDC_GROUPS_CLAIM"],
+                "groups",
+            )
+            self.assertEqual(
+                runtime_config["APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS"],
+                "dealhost,dealiot,dealdata-core,dealdata-gps,dealdata-sensor",
+            )
+            self.assertEqual(
+                runtime_config["APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS"],
+                "7000,7001,7002,8000,8080",
+            )
+            self.assertEqual(
+                runtime_config["APISIX_ROUTE_ALLOWED_UPSTREAMS"],
+                "dealhost:8000,dealiot:8080,dealdata-core:7000,"
+                "dealdata-gps:7001,dealdata-sensor:7002",
+            )
+
+            runtime_secret_keys = {
+                item["secretKey"]: item["remoteRef"]["key"]
+                for item in runtime_external_secret["spec"]["data"]
+            }
+            self.assertEqual(
+                runtime_secret_keys["dealiot-registry-database-password"],
+                "replace/archideal/production/postgres/dealiot-registry-password",
+            )
+            self.assertEqual(
+                runtime_secret_keys["dealiot-registry-migration-database-password"],
+                "replace/archideal/production/postgres/"
+                "dealiot-registry-migration-password",
+            )
+
             service_accounts = [
-                document for document in documents if document.get("kind") == "ServiceAccount"
+                document
+                for document in documents
+                if document.get("kind") == "ServiceAccount"
             ]
             self.assertTrue(service_accounts)
             for account in service_accounts:
@@ -355,9 +570,7 @@ class ProductionRendererTests(unittest.TestCase):
             ):
                 monitor = by_kind_name[(monitor_kind, monitor_name)]
                 self.assertEqual(
-                    monitor["metadata"]["labels"][
-                        "monitoring.archideal.io/enabled"
-                    ],
+                    monitor["metadata"]["labels"]["monitoring.archideal.io/enabled"],
                     "true",
                 )
 
@@ -462,7 +675,9 @@ class ProductionRendererTests(unittest.TestCase):
                     service["spec"]["ports"],
                 )
 
-            prometheus_rule = by_kind_name[("PrometheusRule", "archideal-production-slo")]
+            prometheus_rule = by_kind_name[
+                ("PrometheusRule", "archideal-production-slo")
+            ]
             alerts = [
                 rule
                 for group in prometheus_rule["spec"]["groups"]
@@ -480,8 +695,7 @@ class ProductionRendererTests(unittest.TestCase):
                 self.assertIn("slo", alert["labels"])
                 self.assertIn("runbook_url", alert["annotations"])
                 self.assertTrue(
-                    "service" in alert["labels"]
-                    or "by (service)" in alert["expr"],
+                    "service" in alert["labels"] or "by (service)" in alert["expr"],
                     alert["alert"],
                 )
 
@@ -490,6 +704,124 @@ class ProductionRendererTests(unittest.TestCase):
             result = self.render(Path(temporary_directory) / "rendered")
         self.assertEqual(result.returncode, 2)
         self.assertIn("example", result.stderr.lower())
+
+    def test_apisix_dynamic_route_policy_is_fail_closed_and_parseable(self) -> None:
+        invalid_policies = (
+            (
+                {
+                    "APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS": "",
+                    "APISIX_ROUTE_ALLOWED_UPSTREAM_SUFFIXES": "",
+                },
+                "non-empty upstream host or suffix allowlist",
+            ),
+            (
+                {"APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS": "127.0.0.1"},
+                "strict DNS hostnames",
+            ),
+            (
+                {"APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS": ""},
+                "non-empty port allowlist",
+            ),
+            (
+                {"APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS": "7000,not-a-port"},
+                "only numeric ports",
+            ),
+            (
+                {"APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS": "07000"},
+                "canonical ports",
+            ),
+            (
+                {"APISIX_ROUTE_ALLOWED_UPSTREAMS": ""},
+                "non-empty exact host:port allowlist",
+            ),
+            (
+                {"APISIX_ROUTE_ALLOWED_UPSTREAMS": "dealhost:08000"},
+                "canonical DNS host:port pairs",
+            ),
+            (
+                {"APISIX_ROUTE_ALLOWED_UPSTREAMS": "dealhost:8000"},
+                "exactly match the deployed non-interface bootstrap upstreams",
+            ),
+        )
+        for index, (updates, expected) in enumerate(invalid_policies):
+            with (
+                self.subTest(updates=updates),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                result = self.render_with_runtime_config(
+                    Path(directory) / f"case-{index}",
+                    updates,
+                )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(expected, result.stderr)
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_runtime_config(
+                Path(directory) / "suffix-only",
+                {
+                    "APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS": "",
+                    "APISIX_ROUTE_ALLOWED_UPSTREAM_SUFFIXES": (
+                        ".archideal.svc.cluster.local"
+                    ),
+                },
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("Every APISIX exact upstream", result.stderr)
+
+    def test_apisix_oidc_header_boundary_and_network_policy_are_render_gates(
+        self,
+    ) -> None:
+        def leak_raw_token(documents) -> None:
+            config = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "apisix-bootstrap"
+            )
+            routes = json.loads(config["data"]["routes.json"])
+            core_route = next(
+                route
+                for route in routes["routes"]
+                if route["id"] == "archideal-dealdata-core"
+            )
+            core_route["plugins"]["proxy-rewrite"]["headers"]["remove"] = [
+                "Authorization"
+            ]
+            config["data"]["routes.json"] = json.dumps(routes)
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "token-leak",
+                "base/configuration.yaml",
+                leak_raw_token,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must strip Authorization", result.stderr)
+
+        def remove_dealhost_egress(documents) -> None:
+            policy = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "apisix-egress"
+            )
+            dealhost_rule = next(
+                rule
+                for rule in policy["spec"]["egress"]
+                if rule.get("to", [{}])[0]
+                .get("podSelector", {})
+                .get("matchLabels", {})
+                .get("app.kubernetes.io/name")
+                == "dealhost"
+            )
+            dealhost_rule["ports"][0]["port"] = 8001
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "network-drift",
+                "base/network-policies.yaml",
+                remove_dealhost_egress,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("apisix-egress NetworkPolicy", result.stderr)
 
     def test_dependency_ports_must_match_network_policies(self) -> None:
         invalid_values = {
@@ -624,6 +956,13 @@ class ProductionRendererTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assert_value_rejected(key, value, expected)
 
+    def test_admin_group_must_be_distinct_from_edge_admission(self) -> None:
+        self.assert_value_rejected(
+            "OIDC_ADMIN_GROUP",
+            "archideal-production-readers",
+            "must be distinct from OIDC_ALLOWED_GROUP",
+        )
+
     def test_release_id_keeps_every_job_name_within_kubernetes_limits(self) -> None:
         self.assert_value_rejected(
             "RELEASE_ID",
@@ -680,18 +1019,22 @@ class ProductionRendererTests(unittest.TestCase):
         invocation_preparation = script.index(
             'python "$script_dir/prepare-invocation-jobs.py"'
         )
-        bundle_rendering = script.index('kubectl kustomize "$rendered/overlays/production"')
+        bundle_rendering = script.index(
+            'kubectl kustomize "$rendered/overlays/production"'
+        )
         first_kubectl = script.index('known_context="$(kubectl config get-contexts')
         self.assertLess(verification, rendering)
         self.assertLess(rendering, invocation_preparation)
         self.assertLess(invocation_preparation, bundle_rendering)
         self.assertLess(verification, first_kubectl)
-        crd_preflight = script.index('required_crds=(')
-        reference_preflight = script.index('require_cluster_condition()')
+        crd_preflight = script.index("required_crds=(")
+        reference_preflight = script.index("require_cluster_condition()")
         ingress_preflight = script.index(
             'python "$script_dir/validate-ingress-controller.py"'
         )
-        first_mutation = script.index('apply_cluster_file "$rendered/base/namespace.yaml"')
+        first_mutation = script.index(
+            'apply_cluster_file "$rendered/base/namespace.yaml"'
+        )
         self.assertLess(crd_preflight, first_mutation)
         self.assertLess(reference_preflight, first_mutation)
         self.assertLess(ingress_preflight, first_mutation)
@@ -784,7 +1127,7 @@ class ProductionRendererTests(unittest.TestCase):
             script,
         )
         self.assertNotIn("--health-only", script)
-        self.assertNotIn("ARCHIDEAL_INGEST_TOKEN_FILE=\"$(", script)
+        self.assertNotIn('ARCHIDEAL_INGEST_TOKEN_FILE="$(', script)
         self.assertIn(
             'apply_file "$rendered/overlays/production/synthetic-smoke.yaml"',
             script,
@@ -833,7 +1176,9 @@ class ProductionRendererTests(unittest.TestCase):
         )
         self.assertIn('"secret/$runtime_secret_name"', script)
         self.assertIn('python "$script_dir/prepare-invocation-jobs.py"', script)
-        self.assertIn('--synthetic "$rendered/overlays/production/synthetic-smoke.yaml"', script)
+        self.assertIn(
+            '--synthetic "$rendered/overlays/production/synthetic-smoke.yaml"', script
+        )
         self.assertIn('"job/$production_smoke_job"', script)
         self.assertIn('controllers_json="$work_dir/controllers.json"', script)
         self.assertIn('pods_json="$work_dir/pods.json"', script)

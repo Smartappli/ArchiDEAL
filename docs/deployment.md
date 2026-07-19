@@ -100,11 +100,46 @@ CIDR to cover those controller Pod IPs, not a broad node or VPC range.
 
 Before it applies or updates any NetworkPolicy, the deployer launches a new invocation-scoped DNS
 preflight from the `archideal` namespace. Every address returned inside the cluster for all Kafka
-brokers, MQTT, metadata PostgreSQL, data PostgreSQL, Valkey and all three etcd endpoints must be
-inside that dependency's dedicated CIDR. Empty, mixed in-range/out-of-range and uncovered
-dual-stack answers stop promotion. This Job receives no Secret or service-account token and logs no
-resolved address. This protects both the first deployment and upgrades from installing policies
-that do not match the cluster's actual DNS view.
+brokers, MQTT, metadata PostgreSQL, data PostgreSQL, the dedicated DEALIoT registry PostgreSQL,
+Valkey and all three etcd endpoints must be inside that dependency's dedicated CIDR. Empty, mixed
+in-range/out-of-range and uncovered dual-stack answers stop promotion. This Job receives no Secret
+or service-account token and logs no resolved address. This protects both the first deployment and
+upgrades from installing policies that do not match the cluster's actual DNS view.
+
+Before the first release, provision the `dealiot_registry` database at
+`POSTGRES_DEALIOT_REGISTRY_HOST` with distinct `dealiot_registry_migrator` and
+`dealiot_registry_app` login roles. Store their passwords at
+`SECRET_PREFIX/postgres/dealiot-registry-migration-password` and
+`SECRET_PREFIX/postgres/dealiot-registry-password`; the runtime role must not own schema objects or
+inherit from the migrator. The migrator must own (directly or through role membership) the
+`public` schema and have `USAGE, CREATE`; the migration Job checks this before issuing DDL because
+revoking the ambient `PUBLIC` creation grant requires owner rights. Make the TLS certificate valid
+for the database DNS name. The runtime ConfigMap fixes `sslmode=verify-full` and mounts
+`SECRET_PREFIX/pki/postgres-ca.crt`; no password belongs in the values file. Phase 3 runs the
+release-scoped migration Job with the DDL credential, revokes all schema/table privileges from
+`PUBLIC` and the runtime role, then grants the runtime role only schema `USAGE`, device
+`SELECT`/`INSERT`/`UPDATE`, and migration-table `SELECT`. Retirement is an `UPDATE`; the runtime
+role must have no effective or inherited `DELETE`, `TRUNCATE`, object ownership or schema `CREATE`.
+The job verifies that post-grant contract before completing and waits with the other schema Jobs
+before starting a console rollout. Readiness accepts only a strictly ordered suffix of newer
+migrations so an expand/contract rollback remains possible; destructive schema contraction stays
+blocked until the rollback window has closed.
+
+Create separate IdP groups for `OIDC_ALLOWED_GROUP` and `OIDC_ADMIN_GROUP`. The first is the
+oauth2-proxy admission group and grants read-only DEALHost/DEALIoT access; the second grants
+DEALHost administration and DEALIoT writes after introspection. An administrator needs both
+memberships because the edge rejects a principal that lacks `OIDC_ALLOWED_GROUP`. The renderer
+refuses identical group values. Both services read authorization membership only from the pinned
+top-level `groups` claim; names appearing in `scope`, `scp`, `roles` or `realm_access.roles` never
+grant read or administrative access.
+
+Direct API bearer tokens follow the same boundary as browser sessions: oauth2-proxy validates the
+token and writes `X-Forwarded-Access-Token`, APISIX replaces `Authorization` on only the protected
+DEALHost/DEALIoT routes, and the applications introspect that token before applying their read or
+admin group. Those routes remove the raw `X-Forwarded-Access-Token` after the exchange. DEALData,
+DEALInterface and every other non-introspecting upstream explicitly remove both `Authorization`
+and `X-Forwarded-Access-Token`; the original client header and the edge token are never forwarded
+to them.
 
 ```bash
 make production-deploy \
@@ -133,18 +168,24 @@ previous signed release has passed the complete ordered deploy and fresh smoke g
 promotion revalidates all eleven serving controllers, then records a coherent `succeeded` state on
 both the Namespace and Ingress.
 
-The renderer fails on mutable images, unapproved image repositories, example endpoints, incomplete HA dependencies, non-HTTPS
-OIDC/etcd/telemetry endpoints, wildcard access groups and public dependency CIDRs. Secret values are
-never accepted by the values file; they are extracted from the configured `ClusterSecretStore`.
+The renderer fails on mutable images, unapproved image repositories, example endpoints, incomplete
+HA dependencies, non-HTTPS OIDC/etcd/telemetry endpoints, wildcard access groups and public
+dependency CIDRs. It also requires the exact APISIX dynamic `host:port` ceiling to match the
+non-interface bootstrap upstreams, deployed Services and per-upstream `apisix-egress` rules. Secret
+values are never accepted by the values file; they are extracted from the configured
+`ClusterSecretStore`.
 
 The deployer runs the full production smoke gate with the short-lived OIDC bearer token stored in
 the file above. After the runtime `ExternalSecret` is Ready, it copies
 `dealdata-ingest-token` into a mode-0600 temporary file and removes it through the deployer's
 cleanup trap. The gate proves the authenticated DEALHost business API is reachable, anonymous
 access is rejected without following a login redirect, and an unsigned anonymous GitHub webhook
-is rejected with HTTP 401 by DEALHost. It then creates one unique GPS event and one unique sensor
-event through the public edge, replays both, and requires HTTP 201 then HTTP 200 with exactly one
-stored event per layer.
+is rejected with HTTP 401 by DEALHost. With the same short-lived administrator identity, it creates
+a registry device, applies a conditional update, proves a stale ETag returns `412`, retires the
+device and verifies it is no longer listed. It then creates one unique GPS event and one unique
+sensor event through the public edge, replays both, and requires HTTP 201 then HTTP 200 with exactly
+one stored event per layer. The smoke identity must therefore belong to both the edge admission and
+admin groups; a separate negative read-only token test remains required evidence for production GO.
 
 The final gate also runs an invocation-scoped MQTT TLS synthetic with the dedicated
 `mqtt/smoke-username` and `mqtt/smoke-password` secrets. This broker account must have
@@ -190,5 +231,7 @@ same signed-release verifier, ordered deployer, invocation-fresh APISIX/MQTT Job
 smoke. It does not call reverse migrations, `pg_restore`, or any destructive schema operation.
 
 Deployment mechanics do not by themselves authorize a go-live. Record every security, resilience,
-backup, restore and SLO result in [production-readiness.md](production-readiness.md). See the
+backup, restore, durable-audit and SLO result in
+[production-readiness.md](production-readiness.md). The current DEALHost Core NATS notifications
+are disabled in the production baseline and are not a transactional audit log. See the
 backup/restore and disaster-recovery runbooks before the first promotion.

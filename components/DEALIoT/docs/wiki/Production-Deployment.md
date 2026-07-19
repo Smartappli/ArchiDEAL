@@ -46,7 +46,6 @@ Create `dealiot-secrets` with these keys:
 | `MQTT_PASSWORD` | MQTT-Kafka bridge |
 | `KAFKA_SASL_PASSWORD` | Bridge, Flink, Airflow/backfill, Apicurio |
 | `MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET` | Management Console OIDC introspection |
-| `MANAGEMENT_CONSOLE_TOKEN` | Local or migration API auth fallback |
 | `AWS_ACCESS_KEY_ID` | Flink and Airflow/backfill |
 | `AWS_SECRET_ACCESS_KEY` | Flink and Airflow/backfill |
 | `AIRFLOW__CORE__FERNET_KEY` | Airflow |

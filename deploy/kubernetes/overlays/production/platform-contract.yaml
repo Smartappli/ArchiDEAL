@@ -13,6 +13,9 @@ data:
       entrypoint: oauth2-proxy
       tls_only: true
       oidc_allowed_group: "${OIDC_ALLOWED_GROUP}"
+      oidc_admin_group: "${OIDC_ADMIN_GROUP}"
+      oidc_authorization_claim: groups
+      oidc_admin_requires_edge_admission_group: true
       auth_bypass_routes:
         - method: POST
           path: /dealhost/api/gateway/github/webhook/
@@ -47,6 +50,11 @@ data:
     postgresql:
       metadata_endpoint: "${POSTGRES_METADATA_HOST}:5432"
       data_endpoint: "${POSTGRES_DATA_HOST}:5432"
+      dealiot_registry_endpoint: "${POSTGRES_DEALIOT_REGISTRY_HOST}:5432"
+      dealiot_registry_database: dealiot_registry
+      dealiot_registry_runtime_role: dealiot_registry_app
+      dealiot_registry_migration_role: dealiot_registry_migrator
+      transport: tls-verify-full
       synchronous_multi_az_standby: required
       point_in_time_recovery: required
       rpo: 5m

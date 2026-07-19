@@ -107,6 +107,23 @@ services:
       retries: 12
       start_period: 20s
 
+  dealiot-registry-db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dealiot_registry
+      POSTGRES_USER: dealiot_registry
+      POSTGRES_PASSWORD: ${DEALIOT_REGISTRY_DATABASE_PASSWORD:?set DEALIOT_REGISTRY_DATABASE_PASSWORD}
+    volumes:
+      - dealiot-registry-db:/var/lib/postgresql
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dealiot_registry -d dealiot_registry"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   dealdata-core-db:
     image: postgres:18-alpine
     restart: unless-stopped
@@ -387,6 +404,9 @@ services:
       context: ./components/DEALIoT
       dockerfile: management-console/Dockerfile
     restart: unless-stopped
+    depends_on:
+      dealiot-registry-migrate:
+        condition: service_completed_successfully
     environment:
       MANAGEMENT_CONSOLE_PORT: "8080"
       MANAGEMENT_CONSOLE_PROBE_TIMEOUT_SECONDS: "0.5"
@@ -395,15 +415,42 @@ services:
       MQTT_HOST: vernemq
       MQTT_PORT: "1883"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DEALIOT_REGISTRY_DATABASE_HOST: dealiot-registry-db
+      DEALIOT_REGISTRY_DATABASE_PORT: "5432"
+      DEALIOT_REGISTRY_DATABASE_NAME: dealiot_registry
+      DEALIOT_REGISTRY_DATABASE_USER: dealiot_registry
+      DEALIOT_REGISTRY_DATABASE_PASSWORD: ${DEALIOT_REGISTRY_DATABASE_PASSWORD:?set DEALIOT_REGISTRY_DATABASE_PASSWORD}
+      DEALIOT_REGISTRY_DATABASE_SSLMODE: disable
     networks:
       - api
       - event
       - ingest
+      - data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 10
+
+  dealiot-registry-migrate:
+    image: archideal/dealiot-console:${ARCHIDEAL_IMAGE_TAG:-dev}
+    build:
+      context: ./components/DEALIoT
+      dockerfile: management-console/Dockerfile
+    restart: "no"
+    command: ["python", "-m", "management_console.migrate"]
+    environment:
+      DEALIOT_REGISTRY_DATABASE_HOST: dealiot-registry-db
+      DEALIOT_REGISTRY_DATABASE_PORT: "5432"
+      DEALIOT_REGISTRY_DATABASE_NAME: dealiot_registry
+      DEALIOT_REGISTRY_DATABASE_USER: dealiot_registry
+      DEALIOT_REGISTRY_DATABASE_PASSWORD: ${DEALIOT_REGISTRY_DATABASE_PASSWORD:?set DEALIOT_REGISTRY_DATABASE_PASSWORD}
+      DEALIOT_REGISTRY_DATABASE_SSLMODE: disable
+    depends_on:
+      dealiot-registry-db:
+        condition: service_healthy
+    networks:
+      - data
 
   dealinterface:
     image: archideal/dealinterface:${ARCHIDEAL_IMAGE_TAG:-dev}
@@ -490,6 +537,7 @@ volumes:
   dealdata-core-db:
   dealdata-gps-db:
   dealdata-sensor-db:
+  dealiot-registry-db:
   dealhost-valkey:
   dealhost-nats:
   dealhost-data:

@@ -535,8 +535,8 @@ class RepositoryUnitTests(unittest.TestCase):
             self.assertNotIn(forbidden, app_js)
         self.assertIn("dataAttributeName", app_js)
         self.assertIn('publicBasePath = "/dealiot"', app_js)
-        self.assertIn('fetch(`${publicBasePath}/api/architecture`', app_js)
-        self.assertIn('fetch(`${publicBasePath}/api/health`', app_js)
+        self.assertIn("fetch(`${publicBasePath}/api/architecture`", app_js)
+        self.assertIn("fetch(`${publicBasePath}/api/health`", app_js)
         self.assertNotIn("fetch(endpoint", app_js)
 
     def test_public_website_is_externalized_to_dealwebsite(self) -> None:
@@ -865,6 +865,8 @@ class RepositoryUnitTests(unittest.TestCase):
             REPO_ROOT / "flink" / "jobs" / "streaming_minimal.py",
             REPO_ROOT / "management-console" / "management_console" / "app.py",
             REPO_ROOT / "management-console" / "management_console" / "catalog.py",
+            REPO_ROOT / "management-console" / "management_console" / "device_registry.py",
+            REPO_ROOT / "management-console" / "management_console" / "migrate.py",
             REPO_ROOT / "management-console" / "management_console" / "openaire.py",
             REPO_ROOT / "management-console" / "management_console" / "zenodo.py",
             REPO_ROOT / "mqtt-kafka-bridge" / "bridge.py",

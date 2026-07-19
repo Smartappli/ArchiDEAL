@@ -29,15 +29,16 @@ export function PlatformHealth({ connections, isRefreshing, modules, onRefresh }
   const observedConnections = modules
     .map((module) => connections[module.key])
     .filter((connection): connection is ModuleConnection => Boolean(connection));
-  const operationalCount = observedConnections.filter(
-    (connection) => connection.status === "online" || connection.status === "protected",
-  ).length;
+  const operationalCount = observedConnections.filter((connection) => connection.status === "online").length;
+  const protectedCount = observedConnections.filter((connection) => connection.status === "protected").length;
   const issueCount = observedConnections.length - operationalCount;
   const isPending = observedConnections.length < modules.length;
   const status: DisplayStatus = isPending
     ? "pending"
     : issueCount === 0
       ? "online"
+      : protectedCount === observedConnections.length
+        ? "protected"
       : operationalCount > 0 || observedConnections.some((connection) => connection.status === "degraded")
         ? "degraded"
         : "attention";
@@ -48,6 +49,8 @@ export function PlatformHealth({ connections, isRefreshing, modules, onRefresh }
     ? t("platform.checking")
     : issueCount === 0
       ? t("platform.allOperational")
+      : protectedCount === observedConnections.length
+        ? t("platform.protectedOnly")
       : t("platform.issueCount", { count: issueCount });
 
   return (

@@ -35,6 +35,8 @@ ENVIRONMENT = {
     "POSTGRES_METADATA_EGRESS_CIDR": "10.100.2.0/24",
     "POSTGRES_DATA_HOST": "data.example.org",
     "POSTGRES_DATA_EGRESS_CIDR": "10.100.3.0/24",
+    "POSTGRES_DEALIOT_REGISTRY_HOST": "dealiot-registry.example.org",
+    "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR": "10.100.6.0/24",
     "VALKEY_HOST": "valkey.example.org",
     "VALKEY_EGRESS_CIDR": "10.100.4.0/24",
     "ETCD_ENDPOINT_1": "https://etcd-0.example.org:2379",
@@ -50,6 +52,7 @@ APPROVED_ADDRESSES = {
     "mqtt.example.org": ["10.100.1.10"],
     "metadata.example.org": ["10.100.2.10"],
     "data.example.org": ["10.100.3.10"],
+    "dealiot-registry.example.org": ["10.100.6.10"],
     "valkey.example.org": ["10.100.4.10"],
     "etcd-0.example.org": ["10.100.5.10"],
     "etcd-1.example.org": ["10.100.5.11"],
@@ -79,8 +82,8 @@ class PrivateNetworkPreflightTests(unittest.TestCase):
             ENVIRONMENT,
             resolver=resolver_for(APPROVED_ADDRESSES),
         )
-        self.assertEqual(endpoints, 10)
-        self.assertEqual(addresses, 10)
+        self.assertEqual(endpoints, 11)
+        self.assertEqual(addresses, 11)
 
     def test_one_out_of_range_answer_fails_the_complete_contract(self) -> None:
         answers = {key: list(value) for key, value in APPROVED_ADDRESSES.items()}

@@ -42,7 +42,11 @@ are not published on the host.
 APISIX runs in traditional mode backed by a dedicated etcd instance. This is deliberate: DEALHost
 publishes individual routes through `/apisix/admin/routes/{id}`, which is incompatible with
 file-driven standalone mode. The one-shot bootstrap establishes the initial routes; later DEALHost
-updates retain exact and wildcard paths plus the prefix-removal plugin.
+updates may create only non-overlapping `module-` routes. Paths declared by the bootstrap or
+repository manifests remain bootstrap-owned even on an exact path/upstream match, so the dynamic
+API cannot create an ambiguous duplicate or overwrite them. Dynamic route removal is not yet an
+implemented lifecycle operation: routable modules cannot be disabled, deleted, renamed or
+retargeted through DEALHost until an audited APISIX revocation workflow exists.
 
 The Admin API is reachable only on the internal `host` network. Its key is generated locally and is
 never committed.

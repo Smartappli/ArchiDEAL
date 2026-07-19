@@ -71,6 +71,35 @@ describe("PlatformHealth", () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
+  it("does not count authentication-protected modules as operational", () => {
+    const protectedConnection: ModuleConnection = {
+      ...onlineConnection,
+      status: "protected",
+      probes: [
+        {
+          id: "gateway",
+          label: "Gateway",
+          url: "/gateway/health",
+          status: "protected",
+          httpStatus: 401,
+          detail: "HTTP 401",
+          checkedAt: onlineConnection.checkedAt,
+        },
+      ],
+    };
+
+    renderHealth({ dealhost: protectedConnection, dealiot: protectedConnection });
+
+    expect(
+      screen.getByRole("heading", {
+        name: "Health could not be validated: every module API requires authentication.",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("All connected modules are operational.")).not.toBeInTheDocument();
+    expect(screen.getByText("0/2")).toBeInTheDocument();
+    expect(screen.getByText("Access protected")).toBeInTheDocument();
+  });
+
   it("keeps rendering when an API returns an invalid check timestamp", () => {
     renderHealth({ dealhost: { ...onlineConnection, checkedAt: "not-a-date" } });
 

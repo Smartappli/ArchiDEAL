@@ -9,7 +9,7 @@ operations repository and tested against a non-production account before use.
 
 | State | Backup mechanism | Maximum RPO | Restore target | Required evidence |
 | --- | --- | ---: | ---: | --- |
-| PostgreSQL metadata and data | Continuous WAL archiving plus encrypted multi-AZ snapshots and cross-region copy | 5 min | 60 min | Successful PITR and application consistency checks |
+| PostgreSQL metadata, data and DEALIoT registry | Continuous WAL archiving plus encrypted multi-AZ snapshots and cross-region copy | 5 min | 60 min | Successful PITR and application consistency checks, including device revisions and retirement state |
 | Kafka topics | Cross-region replication plus versioned topic, ACL and quota definitions | 5 min | 2 h | Replication lag, topic counts and consumer-offset comparison |
 | MQTT configuration and sessions | Provider replication/snapshot plus versioned ACL and listener configuration | 15 min | 60 min | Client reconnect, persistent-session and shared-subscription test |
 | APISIX etcd | Encrypted hourly snapshots copied cross-region | 1 h | 30 min | `etcdutl snapshot status` or provider verification and route inventory |
@@ -65,12 +65,15 @@ restored control plane:
 
 ## PostgreSQL procedure
 
-1. Select one timestamp before the incident and use it for both metadata and data clusters.
+1. Select one timestamp before the incident and use it for metadata, data and the DEALIoT registry
+   clusters.
 2. Restore provider snapshots and replay WAL to that timestamp into new endpoints.
 3. Verify TLS hostname validation, synchronous standby health and that the recovery timeline is
    writable only in the elected primary region.
 4. Run read-only checks for database names, migration tables, row counts and critical foreign-key
-   relationships. Compare them with the recorded release migration level.
+   relationships. For `dealiot_registry`, verify `dealiot_schema_migrations`, device revision
+   monotonicity and soft-retirement timestamps. Compare them with the recorded release migration
+   level.
 5. Update the private endpoint aliases and secret-manager passwords if the restore created new
    credentials. Render a new release ID and wait for its
    `externalsecret/archideal-runtime-secrets-${RELEASE_ID}` to become Ready. Do not attempt to

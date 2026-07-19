@@ -99,6 +99,8 @@ def validate_compose() -> None:
         "dealdata-gps-consumer",
         "dealdata-sensor-consumer",
         "dealhost",
+        "dealiot-registry-db",
+        "dealiot-registry-migrate",
         "dealiot",
         "dealinterface",
         "apisix-etcd",
@@ -114,6 +116,7 @@ def validate_compose() -> None:
         "dealdata-core-db",
         "dealdata-gps-db",
         "dealdata-sensor-db",
+        "dealiot-registry-db",
     ):
         if "/var/lib/postgresql" not in volume_targets(services[service_name]):
             fail(f"{service_name} must persist the PostgreSQL 18 cluster root")
@@ -130,7 +133,8 @@ def validate_compose() -> None:
         "dealdata-gps-consumer": {"data", "event"},
         "dealdata-sensor-consumer": {"data", "event"},
         "dealhost": {"host", "api"},
-        "dealiot": {"api", "event", "ingest"},
+        "dealiot": {"api", "event", "ingest", "data"},
+        "dealiot-registry-migrate": {"data"},
         "dealinterface": {"edge"},
         "apisix": {"edge", "api", "host"},
     }
@@ -157,6 +161,27 @@ def validate_compose() -> None:
         "http://mqtt-kafka-bridge:8080/readyz"
     ):
         fail("compact DEALIoT bridge health probe must use the bridge readiness endpoint")
+    expected_registry = {
+        "DEALIOT_REGISTRY_DATABASE_HOST": "dealiot-registry-db",
+        "DEALIOT_REGISTRY_DATABASE_NAME": "dealiot_registry",
+        "DEALIOT_REGISTRY_DATABASE_USER": "dealiot_registry",
+        "DEALIOT_REGISTRY_DATABASE_SSLMODE": "disable",
+    }
+    for name, expected in expected_registry.items():
+        if dealiot_env.get(name) != expected:
+            fail(f"compact DEALIoT registry setting {name} drifted")
+    migration_dependencies = services["dealiot-registry-migrate"].get("depends_on", {})
+    if migration_dependencies.get("dealiot-registry-db", {}).get("condition") != (
+        "service_healthy"
+    ):
+        fail("DEALIoT registry migrations must wait for PostgreSQL readiness")
+    if services["dealiot"].get("depends_on", {}).get(
+        "dealiot-registry-migrate", {}
+    ).get("condition") != "service_completed_successfully":
+        fail("DEALIoT must start only after registry migrations complete")
+    dealiot_health = " ".join(services["dealiot"]["healthcheck"]["test"])
+    if "http://127.0.0.1:8080/readyz" not in dealiot_health:
+        fail("compact DEALIoT healthcheck must include registry readiness")
 
     # This root stack is intentionally HTTP-only development infrastructure.
     # DEALData entrypoints run `check --deploy` when DEBUG is false, which would

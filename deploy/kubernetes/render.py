@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import json
 from pathlib import Path
 import re
 import shutil
@@ -87,6 +88,7 @@ def load_image_repository_policy() -> dict[str, str]:
         repositories[key] = repository
     return repositories
 
+
 REQUIRED = {
     "RELEASE_ID",
     "PUBLIC_HOST",
@@ -100,6 +102,7 @@ REQUIRED = {
     "OIDC_ISSUER_URL",
     "OIDC_INTROSPECTION_URL",
     "OIDC_ALLOWED_GROUP",
+    "OIDC_ADMIN_GROUP",
     "OIDC_AUDIENCE",
     "OIDC_EGRESS_CIDR",
     "GITHUB_EGRESS_CIDR",
@@ -107,6 +110,7 @@ REQUIRED = {
     "MQTT_HOST",
     "POSTGRES_METADATA_HOST",
     "POSTGRES_DATA_HOST",
+    "POSTGRES_DEALIOT_REGISTRY_HOST",
     "VALKEY_HOST",
     "ETCD_ENDPOINT_1",
     "ETCD_ENDPOINT_2",
@@ -116,6 +120,7 @@ REQUIRED = {
     "MQTT_EGRESS_CIDR",
     "POSTGRES_METADATA_EGRESS_CIDR",
     "POSTGRES_DATA_EGRESS_CIDR",
+    "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR",
     "VALKEY_EGRESS_CIDR",
     "ETCD_EGRESS_CIDR",
     "POD_CIDR",
@@ -149,12 +154,249 @@ def is_dns_hostname(value: str) -> bool:
     return False
 
 
+def _config_csv(runtime_config: dict, key: str) -> tuple[str, ...]:
+    raw_value = runtime_config.get(key, "")
+    if not isinstance(raw_value, str):
+        fail(f"{key} must be a comma-separated string.")
+    if not raw_value.strip():
+        return ()
+    raw_items = raw_value.split(",")
+    items = tuple(item.strip() for item in raw_items)
+    if any(not item for item in items):
+        fail(f"{key} must not contain empty entries.")
+    return items
+
+
+def _is_internal_dns_name(value: str) -> bool:
+    if (
+        not value
+        or len(value) > 253
+        or value.endswith(".")
+        or value == "localhost"
+        or value.endswith(".localhost")
+        or any(DNS_LABEL.fullmatch(label) is None for label in value.split("."))
+    ):
+        return False
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return not value.replace(".", "").isdigit()
+    return False
+
+
+def _network_policy_pod_names(peer: dict) -> set[str]:
+    selector = peer.get("podSelector", {})
+    names: set[str] = set()
+    label_name = selector.get("matchLabels", {}).get("app.kubernetes.io/name")
+    if isinstance(label_name, str):
+        names.add(label_name)
+    for expression in selector.get("matchExpressions", []):
+        if (
+            expression.get("key") == "app.kubernetes.io/name"
+            and expression.get("operator") == "In"
+        ):
+            names.update(
+                value
+                for value in expression.get("values", [])
+                if isinstance(value, str)
+            )
+    return names
+
+
+def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) -> None:
+    hosts = _config_csv(runtime_config, "APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS")
+    raw_suffixes = _config_csv(
+        runtime_config,
+        "APISIX_ROUTE_ALLOWED_UPSTREAM_SUFFIXES",
+    )
+    ports = _config_csv(runtime_config, "APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS")
+    upstreams = _config_csv(runtime_config, "APISIX_ROUTE_ALLOWED_UPSTREAMS")
+    if not (hosts or raw_suffixes) or not ports or not upstreams:
+        fail(
+            "APISIX dynamic routes require a non-empty upstream host or suffix "
+            "allowlist, a non-empty port allowlist and a non-empty exact "
+            "host:port allowlist."
+        )
+
+    if any(not _is_internal_dns_name(host) for host in hosts):
+        fail(
+            "APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS must contain only strict DNS "
+            "hostnames, never IP addresses or localhost."
+        )
+    suffixes = tuple(suffix.removeprefix(".") for suffix in raw_suffixes)
+    if any(not _is_internal_dns_name(suffix) for suffix in suffixes):
+        fail(
+            "APISIX_ROUTE_ALLOWED_UPSTREAM_SUFFIXES must contain only strict DNS "
+            "suffixes, never IP addresses or localhost."
+        )
+
+    parsed_ports: list[int] = []
+    for raw_port in ports:
+        if not raw_port.isascii() or not raw_port.isdigit():
+            fail("APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS must contain only numeric ports.")
+        port = int(raw_port)
+        if raw_port != str(port) or port < 1 or port > 65535:
+            fail(
+                "APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS must contain canonical ports "
+                "between 1 and 65535."
+            )
+        parsed_ports.append(port)
+    if len(set(parsed_ports)) != len(parsed_ports):
+        fail("APISIX_ROUTE_ALLOWED_UPSTREAM_PORTS must not contain duplicates.")
+
+    allowed_hosts = set(hosts)
+    allowed_suffixes = set(suffixes)
+    exact_pairs: set[tuple[str, int]] = set()
+    for upstream in upstreams:
+        host, separator, raw_port = upstream.rpartition(":")
+        if (
+            not separator
+            or not _is_internal_dns_name(host)
+            or not raw_port.isascii()
+            or not raw_port.isdigit()
+        ):
+            fail(
+                "APISIX_ROUTE_ALLOWED_UPSTREAMS must contain only canonical "
+                "DNS host:port pairs."
+            )
+        port = int(raw_port)
+        if raw_port != str(port) or port < 1 or port > 65535:
+            fail(
+                "APISIX_ROUTE_ALLOWED_UPSTREAMS must contain only canonical "
+                "DNS host:port pairs."
+            )
+        host_is_allowed = host in allowed_hosts or any(
+            host == suffix or host.endswith(f".{suffix}") for suffix in allowed_suffixes
+        )
+        if not host_is_allowed or port not in parsed_ports:
+            fail(
+                "Every APISIX exact upstream must also belong to the host/suffix "
+                "and port allowlists."
+            )
+        pair = (host, port)
+        if pair in exact_pairs:
+            fail("APISIX_ROUTE_ALLOWED_UPSTREAMS must not contain duplicates.")
+        exact_pairs.add(pair)
+
+    bootstrap_config = next(
+        (
+            document
+            for document in documents
+            if document.get("kind") == "ConfigMap"
+            and document.get("metadata", {}).get("name") == "apisix-bootstrap"
+        ),
+        None,
+    )
+    try:
+        bootstrap = json.loads(bootstrap_config["data"]["routes.json"])
+        bootstrap_routes = bootstrap["routes"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        fail(f"APISIX bootstrap routes are not valid JSON: {exc}")
+    if not isinstance(bootstrap_routes, list):
+        fail("APISIX bootstrap routes must be a JSON list.")
+
+    bootstrap_pairs: set[tuple[str, int]] = set()
+    oidc_upstreams = {"dealhost", "dealiot"}
+    for route in bootstrap_routes:
+        try:
+            route_id = route["id"]
+            nodes = route["upstream"]["nodes"]
+            header_policy = route["plugins"]["proxy-rewrite"]["headers"]
+        except (KeyError, TypeError) as exc:
+            fail(f"APISIX bootstrap route contract is incomplete: {exc}")
+        if not isinstance(nodes, dict) or len(nodes) != 1:
+            fail("Every APISIX bootstrap route must have exactly one upstream node.")
+        if not isinstance(header_policy, dict):
+            fail("Every APISIX bootstrap route must define a header policy.")
+        node = next(iter(nodes))
+        host, separator, raw_port = node.rpartition(":")
+        if not separator or not raw_port.isdigit():
+            fail("APISIX bootstrap upstream nodes must use DNS host:port syntax.")
+        pair = (host, int(raw_port))
+        if route_id != "archideal-interface":
+            bootstrap_pairs.add(pair)
+
+        set_headers = header_policy.get("set", {})
+        removed_headers = set(header_policy.get("remove", []))
+        if set_headers.get("X-Forwarded-Proto") != "$http_x_forwarded_proto":
+            fail("Every APISIX route must preserve the trusted edge scheme.")
+        if host in oidc_upstreams:
+            if (
+                set_headers.get("Authorization")
+                != ("Bearer $http_x_forwarded_access_token")
+                or "X-Forwarded-Access-Token" not in removed_headers
+            ):
+                fail(
+                    "Only DEALHost/DEALIoT routes may exchange the forwarded OIDC "
+                    "token for Authorization and must remove the raw token header."
+                )
+        elif (
+            "Authorization" in set_headers
+            or not {"Authorization", "X-Forwarded-Access-Token"} <= removed_headers
+        ):
+            fail(
+                "Non-introspecting APISIX upstreams must strip Authorization and "
+                "X-Forwarded-Access-Token."
+            )
+
+    if exact_pairs != bootstrap_pairs:
+        fail(
+            "APISIX_ROUTE_ALLOWED_UPSTREAMS must exactly match the deployed "
+            "non-interface bootstrap upstreams."
+        )
+
+    services = {
+        document.get("metadata", {}).get("name"): document
+        for document in documents
+        if document.get("kind") == "Service"
+    }
+    apisix_egress = next(
+        (
+            document
+            for document in documents
+            if document.get("kind") == "NetworkPolicy"
+            and document.get("metadata", {}).get("name") == "apisix-egress"
+        ),
+        None,
+    )
+    if apisix_egress is None:
+        fail("The APISIX egress NetworkPolicy is required.")
+    network_pairs: set[tuple[str, int]] = set()
+    for rule in apisix_egress.get("spec", {}).get("egress", []):
+        pod_names: set[str] = set()
+        for peer in rule.get("to", []):
+            pod_names.update(_network_policy_pod_names(peer))
+        rule_ports = {
+            port.get("port")
+            for port in rule.get("ports", [])
+            if port.get("protocol", "TCP") == "TCP"
+            and isinstance(port.get("port"), int)
+        }
+        network_pairs.update(
+            (pod_name, port) for pod_name in pod_names for port in rule_ports
+        )
+
+    for host, port in exact_pairs:
+        service = services.get(host)
+        if service is None:
+            fail(f"APISIX exact upstream Service is not deployed: {host}")
+        service_ports = {
+            item.get("port") for item in service.get("spec", {}).get("ports", [])
+        }
+        pod_name = (
+            service.get("spec", {}).get("selector", {}).get("app.kubernetes.io/name")
+        )
+        if port not in service_ports or (pod_name, port) not in network_pairs:
+            fail(
+                "APISIX exact upstreams must match deployed Service ports and "
+                f"apisix-egress NetworkPolicy rules: {host}:{port}"
+            )
+
+
 def validate_render_scalar(key: str, value: str) -> None:
     """Reject characters that could escape a quoted YAML substitution context."""
     if any(
-        ord(character) < 0x21
-        or ord(character) > 0x7E
-        or character in {'"', "'", "\\"}
+        ord(character) < 0x21 or ord(character) > 0x7E or character in {'"', "'", "\\"}
         for character in value
     ):
         fail(
@@ -250,6 +492,7 @@ def load_values(path: Path, *, allow_example: bool) -> dict[str, str]:
         "MQTT_HOST",
         "POSTGRES_METADATA_HOST",
         "POSTGRES_DATA_HOST",
+        "POSTGRES_DEALIOT_REGISTRY_HOST",
         "VALKEY_HOST",
         "ETCD_TLS_SERVER_NAME",
     ):
@@ -261,6 +504,7 @@ def load_values(path: Path, *, allow_example: bool) -> dict[str, str]:
         "MQTT_EGRESS_CIDR",
         "POSTGRES_METADATA_EGRESS_CIDR",
         "POSTGRES_DATA_EGRESS_CIDR",
+        "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR",
         "VALKEY_EGRESS_CIDR",
         "ETCD_EGRESS_CIDR",
         "POD_CIDR",
@@ -278,6 +522,7 @@ def load_values(path: Path, *, allow_example: bool) -> dict[str, str]:
         "MQTT_EGRESS_CIDR",
         "POSTGRES_METADATA_EGRESS_CIDR",
         "POSTGRES_DATA_EGRESS_CIDR",
+        "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR",
         "VALKEY_EGRESS_CIDR",
         "ETCD_EGRESS_CIDR",
     )
@@ -349,14 +594,15 @@ def load_values(path: Path, *, allow_example: bool) -> dict[str, str]:
         fail("KAFKA_BOOTSTRAP_SERVERS must use at least three distinct hostnames.")
     etcd_urls = [values[f"ETCD_ENDPOINT_{index}"] for index in range(1, 4)]
     etcd_hosts = {
-        parsed_https_urls[f"ETCD_ENDPOINT_{index}"][0].hostname
-        for index in range(1, 4)
+        parsed_https_urls[f"ETCD_ENDPOINT_{index}"][0].hostname for index in range(1, 4)
     }
     if len(set(etcd_urls)) != 3 or len(etcd_hosts) != 3:
         fail("The three etcd endpoints must use three distinct URLs and hostnames.")
-    for key in ("OIDC_ALLOWED_GROUP", "OIDC_AUDIENCE"):
+    for key in ("OIDC_ALLOWED_GROUP", "OIDC_ADMIN_GROUP", "OIDC_AUDIENCE"):
         if not SAFE_IDENTIFIER.fullmatch(values[key]) or ".." in values[key]:
             fail(f"{key} contains unsafe characters.")
+    if values["OIDC_ADMIN_GROUP"] == values["OIDC_ALLOWED_GROUP"]:
+        fail("OIDC_ADMIN_GROUP must be distinct from OIDC_ALLOWED_GROUP.")
     secret_prefix = values["SECRET_PREFIX"]
     if not SAFE_SECRET_PREFIX.fullmatch(secret_prefix) or ".." in secret_prefix:
         fail("SECRET_PREFIX contains unsafe characters.")
@@ -439,8 +685,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         pod_security = pod_spec.get("securityContext", {})
         if (
             pod_security.get("runAsNonRoot") is not True
-            or pod_security.get("seccompProfile", {}).get("type")
-            != "RuntimeDefault"
+            or pod_security.get("seccompProfile", {}).get("type") != "RuntimeDefault"
             or pod_spec.get("automountServiceAccountToken") is not False
         ):
             fail(
@@ -469,8 +714,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
                 )
 
     for workload in workloads.values():
-        annotations = workload["spec"]["template"].get("metadata", {}).get(
-            "annotations", {}
+        annotations = (
+            workload["spec"]["template"].get("metadata", {}).get("annotations", {})
         )
         if not annotations.get("archideal.io/release"):
             fail(f"{workload['metadata']['name']}: PodTemplate lacks release revision.")
@@ -526,9 +771,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         document
         for document in pod_owners
         if document.get("kind") == "Job"
-        and document.get("metadata", {}).get("labels", {}).get(
-            "app.kubernetes.io/name"
-        )
+        and document.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/name")
         == "kafka-preflight"
     )
     preflight_container = kafka_preflight["spec"]["template"]["spec"]["containers"][0]
@@ -538,9 +781,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "dealdata_common.kafka_preflight",
     ]:
         fail("Kafka preflight must invoke the shared DEALData contract module.")
-    preflight_env = {
-        item["name"]: item for item in preflight_container.get("env", [])
-    }
+    preflight_env = {item["name"]: item for item in preflight_container.get("env", [])}
     required_topics = {
         "raw.sensor",
         "raw.gps",
@@ -570,10 +811,12 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "KAFKA_PREFLIGHT_MIN_REPLICATION_FACTOR": "3",
         "KAFKA_PREFLIGHT_MIN_IN_SYNC_REPLICAS": "2",
     }:
-        fail("Kafka preflight topic, partition, replication or ISR contract is incomplete.")
-    preflight_user_ref = preflight_env["DEALDATA_KAFKA_SASL_USERNAME"][
-        "valueFrom"
-    ]["secretKeyRef"]["key"]
+        fail(
+            "Kafka preflight topic, partition, replication or ISR contract is incomplete."
+        )
+    preflight_user_ref = preflight_env["DEALDATA_KAFKA_SASL_USERNAME"]["valueFrom"][
+        "secretKeyRef"
+    ]["key"]
     if preflight_user_ref != "kafka-consumer-username":
         fail("Kafka preflight must use the scoped consumer/describe credential.")
 
@@ -582,9 +825,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             document
             for document in pod_owners
             if document.get("kind") == "Job"
-            and document.get("metadata", {}).get("labels", {}).get(
-                "app.kubernetes.io/name"
-            )
+            and document.get("metadata", {})
+            .get("labels", {})
+            .get("app.kubernetes.io/name")
             == "private-network-preflight"
         ),
         None,
@@ -608,6 +851,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "POSTGRES_METADATA_EGRESS_CIDR",
         "POSTGRES_DATA_HOST",
         "POSTGRES_DATA_EGRESS_CIDR",
+        "POSTGRES_DEALIOT_REGISTRY_HOST",
+        "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR",
         "VALKEY_HOST",
         "VALKEY_EGRESS_CIDR",
         "ETCD_ENDPOINT_1",
@@ -643,7 +888,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     if pod_security.get("runAsUser") != 636 or pod_security.get("fsGroup") != 636:
         fail("APISIX must use the image's validated non-root UID/GID 636 contract.")
     apisix_container = next(
-        container for container in apisix_pod["containers"] if container["name"] == "apisix"
+        container
+        for container in apisix_pod["containers"]
+        if container["name"] == "apisix"
     )
     apisix_health = next(
         (
@@ -664,7 +911,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     if not prepare or not apisix_container.get("securityContext", {}).get(
         "readOnlyRootFilesystem"
     ):
-        fail("APISIX requires the non-root runtime preparation initContainer and read-only root.")
+        fail(
+            "APISIX requires the non-root runtime preparation initContainer and read-only root."
+        )
     if (
         not apisix_health
         or apisix_health.get("command") != ["python", "/bootstrap/health.py"]
@@ -680,7 +929,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         or apisix_health.get("livenessProbe", {}).get("httpGet")
         != {"path": "/healthz", "port": "health"}
     ):
-        fail("APISIX readiness must fail closed on its bounded etcd reachability sidecar.")
+        fail(
+            "APISIX readiness must fail closed on its bounded etcd reachability sidecar."
+        )
     volume_names = {volume["name"] for volume in apisix_pod.get("volumes", [])}
     if "runtime" not in volume_names:
         fail("APISIX requires a writable runtime emptyDir.")
@@ -694,17 +945,23 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         apisix_config_map["data"]["config.yaml"],
         Loader=UniqueKeyLoader,
     )
-    trusted_ca = apisix_config.get("apisix", {}).get("ssl", {}).get(
-        "ssl_trusted_certificate"
+    trusted_ca = (
+        apisix_config.get("apisix", {}).get("ssl", {}).get("ssl_trusted_certificate")
     )
     etcd_tls = apisix_config.get("deployment", {}).get("etcd", {}).get("tls", {})
-    if trusted_ca != "/var/run/archideal-ca/etcd-ca.crt" or {
-        "verify": True,
-        "cert": "/var/run/archideal-ca/etcd-client.crt",
-        "key": "/var/run/archideal-ca/etcd-client.key",
-    }.items() - etcd_tls.items():
+    if (
+        trusted_ca != "/var/run/archideal-ca/etcd-ca.crt"
+        or {
+            "verify": True,
+            "cert": "/var/run/archideal-ca/etcd-client.crt",
+            "key": "/var/run/archideal-ca/etcd-client.key",
+        }.items()
+        - etcd_tls.items()
+    ):
         fail("APISIX external etcd must use verified mutual TLS and the private CA.")
-    ca_volume = next(volume for volume in apisix_pod["volumes"] if volume["name"] == "ca")
+    ca_volume = next(
+        volume for volume in apisix_pod["volumes"] if volume["name"] == "ca"
+    )
     mounted_etcd_keys = {
         item["key"] for item in ca_volume.get("secret", {}).get("items", [])
     }
@@ -714,12 +971,110 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     console = workloads.get("dealiot-console")
     if not console:
         fail("Rendered baseline is missing the DEALIoT management console Deployment.")
-    console_container = console["spec"]["template"]["spec"]["containers"][0]
+    console_pod = console["spec"]["template"]["spec"]
+    console_container = console_pod["containers"][0]
     if console_container.get("readinessProbe", {}).get("httpGet") != {
         "path": "/readyz",
         "port": "http",
     }:
-        fail("DEALIoT console readiness must fail closed on MQTT and Kafka reachability.")
+        fail(
+            "DEALIoT console readiness must fail closed on registry, MQTT and "
+            "Kafka reachability."
+        )
+    console_env = {item["name"]: item for item in console_container.get("env", [])}
+    console_registry_password = (
+        console_env.get("DEALIOT_REGISTRY_DATABASE_PASSWORD", {})
+        .get("valueFrom", {})
+        .get("secretKeyRef", {})
+    )
+    console_ca_volume = next(
+        (
+            volume
+            for volume in console_pod.get("volumes", [])
+            if volume.get("name") == "ca"
+        ),
+        None,
+    )
+    console_ca_keys = {
+        item.get("key")
+        for item in (console_ca_volume or {}).get("secret", {}).get("items", [])
+    }
+    if (
+        console_registry_password.get("key") != "dealiot-registry-database-password"
+        or "postgres-ca.crt" not in console_ca_keys
+    ):
+        fail(
+            "DEALIoT registry access requires its scoped PostgreSQL password and "
+            "the managed PostgreSQL CA."
+        )
+
+    registry_migration = next(
+        (
+            owner
+            for owner in pod_owners
+            if owner.get("kind") == "Job"
+            and owner.get("metadata", {})
+            .get("labels", {})
+            .get("app.kubernetes.io/name")
+            == "dealiot-registry-migrate"
+        ),
+        None,
+    )
+    if not registry_migration:
+        fail("The release-scoped DEALIoT registry migration Job is missing.")
+    registry_migration_pod = registry_migration["spec"]["template"]["spec"]
+    registry_migration_container = registry_migration_pod["containers"][0]
+    registry_migration_env = {
+        item["name"]: item for item in registry_migration_container.get("env", [])
+    }
+    registry_migration_password = (
+        registry_migration_env.get("DEALIOT_REGISTRY_DATABASE_PASSWORD", {})
+        .get("valueFrom", {})
+        .get("secretKeyRef", {})
+    )
+    registry_migration_user = registry_migration_env.get(
+        "DEALIOT_REGISTRY_DATABASE_USER", {}
+    ).get("value")
+    registry_runtime_user = registry_migration_env.get(
+        "DEALIOT_REGISTRY_RUNTIME_DATABASE_USER", {}
+    ).get("value")
+    registry_migration_ca = next(
+        (
+            volume
+            for volume in registry_migration_pod.get("volumes", [])
+            if volume.get("name") == "ca"
+        ),
+        None,
+    )
+    registry_migration_ca_keys = {
+        item.get("key")
+        for item in (registry_migration_ca or {}).get("secret", {}).get("items", [])
+    }
+    if (
+        registry_migration_container.get("image") != console_container.get("image")
+        or registry_migration_container.get("command")
+        != ["python", "-m", "management_console.migrate"]
+        or registry_migration_container.get("envFrom")
+        != [{"configMapRef": {"name": "archideal-runtime"}}]
+        or set(registry_migration_env)
+        != {
+            "DEALIOT_REGISTRY_DATABASE_PASSWORD",
+            "DEALIOT_REGISTRY_DATABASE_USER",
+            "DEALIOT_REGISTRY_RUNTIME_DATABASE_USER",
+        }
+        or registry_migration_user != "dealiot_registry_migrator"
+        or registry_runtime_user != "dealiot_registry_app"
+        or registry_migration_password.get("key")
+        != "dealiot-registry-migration-database-password"
+        or "postgres-ca.crt" not in registry_migration_ca_keys
+        or registry_migration_pod.get("securityContext", {}).get("runAsUser") != 10001
+        or registry_migration_pod.get("securityContext", {}).get("runAsGroup") != 10001
+    ):
+        fail(
+            "DEALIoT registry migrations must use the console image, a distinct "
+            "DDL role/credential, the declared runtime role, verified CA and "
+            "numeric runtime identity."
+        )
 
     for name in ("dealdata-core", "dealdata-gps", "dealdata-sensor"):
         containers = workloads[name]["spec"]["template"]["spec"]["containers"]
@@ -729,14 +1084,17 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "dealdata-gps": 7001,
             "dealdata-sensor": 7002,
         }[name]
-        env = {
-            item["name"]: item.get("value")
-            for item in container.get("env", [])
-        }
+        env = {item["name"]: item.get("value") for item in container.get("env", [])}
         if env.get("RUN_MIGRATIONS") != "0" or env.get("RUN_COLLECTSTATIC") != "0":
             fail(f"{name} must disable entrypoint migrations and collectstatic.")
-        if "command" in container or not container.get("args") or container["args"][0] != "granian":
-            fail(f"{name} must preserve the hardened image entrypoint and pass granian as args.")
+        if (
+            "command" in container
+            or not container.get("args")
+            or container["args"][0] != "granian"
+        ):
+            fail(
+                f"{name} must preserve the hardened image entrypoint and pass granian as args."
+            )
         for probe_name in ("startupProbe", "readinessProbe", "livenessProbe"):
             http_get = container.get(probe_name, {}).get("httpGet")
             if not http_get:
@@ -786,16 +1144,21 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
 
     dealhost = workloads["dealhost"]["spec"]["template"]["spec"]["containers"][0]
     dealhost_env = {item["name"]: item for item in dealhost.get("env", [])}
-    if dealhost_env.get("DJANGO_SETTINGS_MODULE", {}).get("value") != "dealhost.settings.prod":
+    if (
+        dealhost_env.get("DJANGO_SETTINGS_MODULE", {}).get("value")
+        != "dealhost.settings.prod"
+    ):
         fail("DEALHost must load its native fail-closed production settings.")
-    password_ref = dealhost_env.get("DEALHOST_DATABASE_PASSWORD", {}).get(
-        "valueFrom", {}
-    ).get("secretKeyRef", {})
+    password_ref = (
+        dealhost_env.get("DEALHOST_DATABASE_PASSWORD", {})
+        .get("valueFrom", {})
+        .get("secretKeyRef", {})
+    )
     if password_ref.get("key") != "dealhost-database-password":
         fail("DEALHost PostgreSQL password must come from ExternalSecret.")
-    dealhost_valkey_ref = dealhost_env.get("VALKEY_URL", {}).get(
-        "valueFrom", {}
-    ).get("secretKeyRef", {})
+    dealhost_valkey_ref = (
+        dealhost_env.get("VALKEY_URL", {}).get("valueFrom", {}).get("secretKeyRef", {})
+    )
     if dealhost_valkey_ref.get("key") != "valkey-url":
         fail("DEALHost must read its production Valkey TLS URL from ExternalSecret.")
     dealhost_migration = next(
@@ -805,15 +1168,20 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         and owner.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/name")
         == "dealhost-migrate"
     )
-    migration_container = dealhost_migration["spec"]["template"]["spec"]["containers"][0]
+    migration_container = dealhost_migration["spec"]["template"]["spec"]["containers"][
+        0
+    ]
     migration_env = {item["name"]: item for item in migration_container.get("env", [])}
-    migration_password_ref = migration_env.get("DEALHOST_DATABASE_PASSWORD", {}).get(
-        "valueFrom", {}
-    ).get("secretKeyRef", {})
+    migration_password_ref = (
+        migration_env.get("DEALHOST_DATABASE_PASSWORD", {})
+        .get("valueFrom", {})
+        .get("secretKeyRef", {})
+    )
     if (
         migration_env.get("DJANGO_SETTINGS_MODULE", {}).get("value")
         != "dealhost.settings.migration"
-        or set(migration_env) != {"DJANGO_SETTINGS_MODULE", "DEALHOST_DATABASE_PASSWORD"}
+        or set(migration_env)
+        != {"DJANGO_SETTINGS_MODULE", "DEALHOST_DATABASE_PASSWORD"}
         or migration_password_ref.get("key") != "dealhost-database-password"
     ):
         fail("DEALHost migrations must receive only their PostgreSQL credential.")
@@ -830,9 +1198,10 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         }
         if http_get.get("path") != expected_path:
             fail(f"DEALHost {probe_name} must use {expected_path}.")
-        if headers.get("host") != "dealhost" or headers.get(
-            "x-forwarded-proto"
-        ) != "https":
+        if (
+            headers.get("host") != "dealhost"
+            or headers.get("x-forwarded-proto") != "https"
+        ):
             fail(
                 f"DEALHost {probe_name} must send its allowed Host and HTTPS proxy headers."
             )
@@ -843,6 +1212,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         if document.get("kind") == "ConfigMap"
         and document.get("metadata", {}).get("name") == "archideal-runtime"
     )["data"]
+    validate_apisix_route_policy(runtime_config, documents)
     required_dealhost_config = {
         "DEALHOST_DATABASE_ENGINE",
         "DEALHOST_DATABASE_HOST",
@@ -854,6 +1224,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "DEALHOST_OIDC_INTROSPECTION_URL",
         "DEALHOST_OIDC_ISSUER",
         "DEALHOST_OIDC_AUDIENCE",
+        "DEALHOST_OIDC_GROUPS_CLAIM",
         "DEALHOST_OIDC_READ_GROUPS",
         "DEALHOST_OIDC_ADMIN_GROUPS",
         "DJANGO_CSRF_TRUSTED_ORIGINS",
@@ -861,12 +1232,56 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     }
     if not required_dealhost_config <= runtime_config.keys():
         fail("DEALHost native production database/OIDC configuration is incomplete.")
+    required_registry_config = {
+        "DEALIOT_REGISTRY_DATABASE_HOST",
+        "DEALIOT_REGISTRY_DATABASE_PORT",
+        "DEALIOT_REGISTRY_DATABASE_NAME",
+        "DEALIOT_REGISTRY_DATABASE_USER",
+        "DEALIOT_REGISTRY_DATABASE_SSLMODE",
+        "DEALIOT_REGISTRY_DATABASE_SSLROOTCERT",
+        "DEALIOT_REGISTRY_DATABASE_CONNECT_TIMEOUT",
+    }
+    if (
+        not required_registry_config <= runtime_config.keys()
+        or {
+            "DEALIOT_REGISTRY_DATABASE_PORT": "5432",
+            "DEALIOT_REGISTRY_DATABASE_NAME": "dealiot_registry",
+            "DEALIOT_REGISTRY_DATABASE_USER": "dealiot_registry_app",
+            "DEALIOT_REGISTRY_DATABASE_SSLMODE": "verify-full",
+            "DEALIOT_REGISTRY_DATABASE_SSLROOTCERT": (
+                "/var/run/archideal-ca/postgres-ca.crt"
+            ),
+            "DEALIOT_REGISTRY_DATABASE_CONNECT_TIMEOUT": "3",
+        }.items()
+        - runtime_config.items()
+    ):
+        fail(
+            "DEALIoT registry production configuration must use its dedicated "
+            "role/database and verified PostgreSQL TLS."
+        )
+    read_group = runtime_config.get("MANAGEMENT_CONSOLE_OIDC_READ_ROLES")
+    admin_group = runtime_config.get("MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES")
+    if (
+        not read_group
+        or not admin_group
+        or read_group == admin_group
+        or runtime_config.get("DEALHOST_OIDC_READ_GROUPS") != read_group
+        or runtime_config.get("DEALHOST_OIDC_ADMIN_GROUPS") != admin_group
+        or runtime_config.get("DEALHOST_OIDC_GROUPS_CLAIM") != "groups"
+        or runtime_config.get("MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM") != "groups"
+    ):
+        fail(
+            "DEALHost and DEALIoT must share distinct OIDC read/admission and "
+            "write/admin groups and the dedicated top-level groups claim."
+        )
     if (
         runtime_config["DJANGO_CSRF_TRUSTED_ORIGINS"]
         != f"https://{runtime_config['PUBLIC_HOST']}"
         or runtime_config["DEALHOST_SCRIPT_NAME"] != "/dealhost"
     ):
-        fail("DEALHost public CSRF origin and script prefix must match the gateway route.")
+        fail(
+            "DEALHost public CSRF origin and script prefix must match the gateway route."
+        )
     dealdata_users = {
         runtime_config.get("DEALDATA_CORE_DATABASE_USER"),
         runtime_config.get("DEALDATA_GPS_DATABASE_USER"),
@@ -921,7 +1336,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         application_container = owners_by_name[owner_name]["spec"]["template"]["spec"][
             "containers"
         ][0]
-        owner_env = {item["name"]: item for item in application_container.get("env", [])}
+        owner_env = {
+            item["name"]: item for item in application_container.get("env", [])
+        }
         rendered_user_key = (
             owner_env.get("DATABASE_USER", {})
             .get("valueFrom", {})
@@ -951,20 +1368,24 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     }
     if not required_oauth_args <= oauth_args:
         fail("oauth2-proxy is missing a mandatory fail-closed edge option.")
-    allowed_bypass = {
-        "--skip-auth-route=POST=^/dealhost/api/gateway/github/webhook/$"
-    }
+    allowed_bypass = {"--skip-auth-route=POST=^/dealhost/api/gateway/github/webhook/$"}
     configured_bypass = {
         argument for argument in oauth_args if argument.startswith("--skip-auth-route=")
     }
     if configured_bypass != allowed_bypass:
-        fail("oauth2-proxy permits only the exact HMAC-authenticated GitHub webhook bypass.")
-    if not any(argument.startswith("--extra-jwt-issuers=https://") for argument in oauth_args):
+        fail(
+            "oauth2-proxy permits only the exact HMAC-authenticated GitHub webhook bypass."
+        )
+    if not any(
+        argument.startswith("--extra-jwt-issuers=https://") for argument in oauth_args
+    ):
         fail("oauth2-proxy must validate bearer-token issuer and audience.")
     oauth_env = {item["name"]: item for item in oauth.get("env", [])}
-    redis_ref = oauth_env.get("OAUTH2_PROXY_REDIS_CONNECTION_URL", {}).get(
-        "valueFrom", {}
-    ).get("secretKeyRef", {})
+    redis_ref = (
+        oauth_env.get("OAUTH2_PROXY_REDIS_CONNECTION_URL", {})
+        .get("valueFrom", {})
+        .get("secretKeyRef", {})
+    )
     if redis_ref.get("key") != "valkey-url":
         fail("oauth2-proxy HA sessions must use the external Valkey TLS URL.")
     valkey_validator = next(
@@ -975,13 +1396,14 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         ),
         None,
     )
-    validator_env = {
-        item["name"]: item
-        for item in valkey_validator.get("env", [])
-    } if valkey_validator else {}
-    validator_ref = validator_env.get("VALKEY_URL", {}).get(
-        "valueFrom", {}
-    ).get("secretKeyRef", {})
+    validator_env = (
+        {item["name"]: item for item in valkey_validator.get("env", [])}
+        if valkey_validator
+        else {}
+    )
+    validator_ref = (
+        validator_env.get("VALKEY_URL", {}).get("valueFrom", {}).get("secretKeyRef", {})
+    )
     if (
         not valkey_validator
         or valkey_validator.get("image") != dealhost.get("image")
@@ -1018,7 +1440,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "dealdata-consumer-egress": {5432, 9093},
         "dealdata-migration-egress": {5432},
         "kafka-preflight-egress": {9093},
-        "dealiot-console-egress": {443, 8883, 9093},
+        "dealiot-console-egress": {443, 5432, 8883, 9093},
+        "dealiot-registry-migration-egress": {5432},
         "mqtt-kafka-bridge-egress": {8883, 9093},
         "production-smoke-egress": {8883},
     }
@@ -1033,6 +1456,24 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         }
         if actual_ports != expected_ports:
             fail(f"{policy_name} has an unexpected external dependency port set.")
+    registry_cidr = private_preflight_env["POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR"][
+        "value"
+    ]
+    for policy_name in (
+        "dealiot-console-egress",
+        "dealiot-registry-migration-egress",
+    ):
+        registry_policy_cidrs = {
+            peer.get("ipBlock", {}).get("cidr")
+            for rule in network_policies[policy_name]["spec"].get("egress", [])
+            if any(port.get("port") == 5432 for port in rule.get("ports", []))
+            for peer in rule.get("to", [])
+        }
+        if registry_policy_cidrs != {registry_cidr}:
+            fail(
+                f"{policy_name} must permit only the approved DEALIoT registry CIDR "
+                "on PostgreSQL/5432."
+            )
     if "runtime-external-dependencies" in network_policies:
         fail("The broad runtime external dependency policy is forbidden.")
 
@@ -1073,9 +1514,12 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             fail(f"{policy_name} exposes unexpected workload ports to monitoring.")
         for rule in policy["spec"].get("ingress", []):
             for source in rule.get("from", []):
-                if source.get("podSelector", {}).get("matchLabels", {}).get(
-                    "monitoring.archideal.io/scraper"
-                ) != "true":
+                if (
+                    source.get("podSelector", {})
+                    .get("matchLabels", {})
+                    .get("monitoring.archideal.io/scraper")
+                    != "true"
+                ):
                     fail(f"{policy_name} must admit only labelled scraper pods.")
 
     services = {
@@ -1089,8 +1533,12 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             for port in services[name]["spec"].get("ports", [])
             if port.get("name") == "metrics"
         ]
-        if metrics_ports != [{"name": "metrics", "port": 9101, "targetPort": "metrics"}]:
-            fail(f"Service/{name} must expose only the isolated metrics target on port 9101.")
+        if metrics_ports != [
+            {"name": "metrics", "port": 9101, "targetPort": "metrics"}
+        ]:
+            fail(
+                f"Service/{name} must expose only the isolated metrics target on port 9101."
+            )
 
     external_secrets = [
         document for document in documents if document.get("kind") == "ExternalSecret"
@@ -1098,9 +1546,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     runtime_external_secrets = [
         item
         for item in external_secrets
-        if item.get("metadata", {}).get("name", "").startswith(
-            "archideal-runtime-secrets-"
-        )
+        if item.get("metadata", {})
+        .get("name", "")
+        .startswith("archideal-runtime-secrets-")
     ]
     if (
         len(external_secrets) != 2
@@ -1125,8 +1573,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             or not data
             or len(secret_keys_for_target) != len(set(secret_keys_for_target))
             or any(
-                not item.get("secretKey")
-                or not item.get("remoteRef", {}).get("key")
+                not item.get("secretKey") or not item.get("remoteRef", {}).get("key")
                 for item in data
             )
         ):
@@ -1145,8 +1592,10 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     ):
         fail("The private registry ExternalSecret must be a docker config Secret.")
     runtime_external_secret = runtime_external_secrets[0]
-    runtime_release = runtime_external_secret.get("metadata", {}).get("labels", {}).get(
-        "archideal.io/release"
+    runtime_release = (
+        runtime_external_secret.get("metadata", {})
+        .get("labels", {})
+        .get("archideal.io/release")
     )
     runtime_secret_name = f"archideal-runtime-secrets-{runtime_release}"
     runtime_spec = runtime_external_secret["spec"]
@@ -1168,16 +1617,11 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         )
 
     for owner in pod_owners:
-        owner_release = (
-            owner.get("spec", {})
-            .get("template", {})
-            .get("metadata", {})
-            .get("annotations", {})
-            .get("archideal.io/release")
-            or owner.get("metadata", {})
-            .get("labels", {})
-            .get("archideal.io/release")
-        )
+        owner_release = owner.get("spec", {}).get("template", {}).get(
+            "metadata", {}
+        ).get("annotations", {}).get("archideal.io/release") or owner.get(
+            "metadata", {}
+        ).get("labels", {}).get("archideal.io/release")
         if owner_release != runtime_release:
             fail(
                 f"{owner['metadata']['name']}: Pod owner and runtime Secret "
@@ -1216,9 +1660,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         item["secretKey"]: item
         for item in runtime_external_secret["spec"].get("data", [])
     }
-    valkey_remote_key = runtime_secret_items.get("valkey-url", {}).get(
-        "remoteRef", {}
-    ).get("key", "")
+    valkey_remote_key = (
+        runtime_secret_items.get("valkey-url", {}).get("remoteRef", {}).get("key", "")
+    )
     if not valkey_remote_key.endswith("/valkey/tls-url"):
         fail("The production Valkey URL must come from the dedicated TLS secret entry.")
     scoped_kafka_keys = {
@@ -1229,22 +1673,56 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "kafka-consumer-username",
         "kafka-consumer-password",
     }
-    if not scoped_kafka_keys <= secret_keys or {
-        "kafka-sasl-username",
-        "kafka-sasl-password",
-    } & secret_keys:
+    if (
+        not scoped_kafka_keys <= secret_keys
+        or {
+            "kafka-sasl-username",
+            "kafka-sasl-password",
+        }
+        & secret_keys
+    ):
         fail("Kafka console, producer and consumer credentials must be separated.")
     if not {"mqtt-smoke-username", "mqtt-smoke-password"} <= secret_keys:
-        fail("The production synthetic requires a dedicated MQTT publish-only credential.")
+        fail(
+            "The production synthetic requires a dedicated MQTT publish-only credential."
+        )
+    registry_password_remote_key = (
+        runtime_secret_items.get(
+            "dealiot-registry-database-password",
+            {},
+        )
+        .get("remoteRef", {})
+        .get("key", "")
+    )
+    if not registry_password_remote_key.endswith("/postgres/dealiot-registry-password"):
+        fail(
+            "The DEALIoT registry must use its dedicated PostgreSQL password "
+            "from the secret store."
+        )
+    registry_migration_password_remote_key = (
+        runtime_secret_items.get(
+            "dealiot-registry-migration-database-password",
+            {},
+        )
+        .get("remoteRef", {})
+        .get("key", "")
+    )
+    if not registry_migration_password_remote_key.endswith(
+        "/postgres/dealiot-registry-migration-password"
+    ):
+        fail(
+            "The DEALIoT registry migrator must use a separate PostgreSQL password "
+            "from the secret store."
+        )
 
     synthetic_job = next(
         (
             document
             for document in documents
             if document.get("kind") == "Job"
-            and document.get("metadata", {}).get("labels", {}).get(
-                "app.kubernetes.io/name"
-            )
+            and document.get("metadata", {})
+            .get("labels", {})
+            .get("app.kubernetes.io/name")
             == "production-smoke"
         ),
         None,
@@ -1253,8 +1731,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         fail("The production MQTT-to-database synthetic Job is missing.")
     synthetic_container = synthetic_job["spec"]["template"]["spec"]["containers"][0]
     synthetic_env = {item["name"]: item for item in synthetic_container.get("env", [])}
-    synthetic_release = synthetic_job["metadata"].get("labels", {}).get(
-        "archideal.io/release"
+    synthetic_release = (
+        synthetic_job["metadata"].get("labels", {}).get("archideal.io/release")
     )
     if (
         synthetic_container.get("command")
@@ -1283,9 +1761,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             document
             for document in documents
             if document.get("kind") == "Job"
-            and document.get("metadata", {}).get("labels", {}).get(
-                "app.kubernetes.io/name"
-            )
+            and document.get("metadata", {})
+            .get("labels", {})
+            .get("app.kubernetes.io/name")
             == "apisix-bootstrap"
         ),
         None,
@@ -1295,7 +1773,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         or apisix_bootstrap_job.get("metadata", {}).get("name")
         != f"apisix-bootstrap-{synthetic_release}"
     ):
-        fail("The APISIX bootstrap Job template must be scoped to the rendered release.")
+        fail(
+            "The APISIX bootstrap Job template must be scoped to the rendered release."
+        )
     service_accounts = [
         document for document in documents if document.get("kind") == "ServiceAccount"
     ]
@@ -1304,7 +1784,9 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         if "archideal-registry-credentials" not in pull_names:
             fail(f"{account['metadata']['name']} lacks private GHCR credentials.")
 
-    ingresses = [document for document in documents if document.get("kind") == "Ingress"]
+    ingresses = [
+        document for document in documents if document.get("kind") == "Ingress"
+    ]
     for ingress in ingresses:
         for rule in ingress["spec"].get("rules", []):
             for path in rule.get("http", {}).get("paths", []):
@@ -1336,11 +1818,13 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
                 "X-Forwarded-Proto value."
             )
     for route_id in ("archideal-dealhost", "archideal-dealiot"):
-        authorization = protected[route_id]["plugins"]["proxy-rewrite"]["headers"]["set"].get(
-            "Authorization"
-        )
+        authorization = protected[route_id]["plugins"]["proxy-rewrite"]["headers"][
+            "set"
+        ].get("Authorization")
         if authorization != "Bearer $http_x_forwarded_access_token":
-            fail(f"{route_id} must forward oauth2-proxy's access token for introspection.")
+            fail(
+                f"{route_id} must forward oauth2-proxy's access token for introspection."
+            )
 
 
 def main() -> int:
@@ -1358,17 +1842,23 @@ def main() -> int:
         or output in ROOT.parents
         or output == Path(output.anchor)
     ):
-        fail("The rendered output must be outside and must not contain deploy/kubernetes.")
+        fail(
+            "The rendered output must be outside and must not contain deploy/kubernetes."
+        )
     values = load_values(args.values.resolve(), allow_example=args.allow_example)
     if output.exists():
         if not args.force:
             fail(f"Output already exists: {output}; pass --force to replace it.")
         marker = output / GENERATED_MARKER
-        unexpected_entries = {
-            entry.name
-            for entry in output.iterdir()
-            if entry.name not in {GENERATED_MARKER, "base", "overlays"}
-        } if output.is_dir() else {output.name}
+        unexpected_entries = (
+            {
+                entry.name
+                for entry in output.iterdir()
+                if entry.name not in {GENERATED_MARKER, "base", "overlays"}
+            }
+            if output.is_dir()
+            else {output.name}
+        )
         if (
             not output.is_dir()
             or not marker.is_file()

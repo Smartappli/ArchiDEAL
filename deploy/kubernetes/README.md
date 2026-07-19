@@ -68,10 +68,11 @@ and every one of its Pod IPs must be inside `INGRESS_PROXY_CIDR`. The same stand
 labels are the only cross-namespace peers accepted by the oauth2-proxy ingress NetworkPolicy.
 The platform preflight also requires a Ready labelled scraper and schedulable Linux/amd64 nodes in
 three labelled zones. After the registry pull Secret is Ready, a fresh invocation-scoped Job uses
-cluster DNS to resolve every Kafka, MQTT, metadata PostgreSQL, data PostgreSQL, Valkey and etcd
-endpoint. It rejects an empty answer or any returned IPv4/IPv6 address outside that dependency's
-configured CIDR before any NetworkPolicy is changed. The Job receives only non-secret endpoint and
-CIDR values; no runtime credential is read or logged. A fresh invocation-scoped Kafka preflight
+cluster DNS to resolve every Kafka, MQTT, metadata PostgreSQL, data PostgreSQL, DEALIoT registry
+PostgreSQL, Valkey and etcd endpoint. It rejects an empty answer or any returned IPv4/IPv6 address
+outside that dependency's configured CIDR before any NetworkPolicy is changed. The Job receives
+only non-secret endpoint and CIDR values; no runtime credential is read or logged. A fresh
+invocation-scoped Kafka preflight
 then requires all seven ingestion/DLQ topics to
 have at least three partitions, replication factor 3, two current in-sync replicas,
 `min.insync.replicas >= 2` and disabled unclean leader election. It stops on the first failed
@@ -124,9 +125,9 @@ The renderer rejects missing or unknown values, mutable or non-allowlisted image
 all-zero image digests, `.invalid` endpoints, wildcard hosts, non-RFC1918 dependency ranges,
 overlapping dependency/Pod ranges and unresolved placeholders. `RELEASE_ID` is limited to 39
 DNS-label characters so every static migration/preflight Job name remains within Kubernetes'
-63-character limit. Kafka, MQTT, metadata PostgreSQL,
-data PostgreSQL, Valkey and etcd each require a distinct CIDR (a `/32` is valid) so egress policy is
-scoped by both destination and port. Public OIDC, GitHub and OpenTelemetry ranges must be
+63-character limit. Kafka, MQTT, metadata PostgreSQL, data PostgreSQL, DEALIoT registry PostgreSQL,
+Valkey and etcd each require a distinct CIDR (a `/32` is valid) so egress policy is scoped by both
+destination and port. Public OIDC, GitHub and OpenTelemetry ranges must be
 change-reviewed and no broader than `/20` for IPv4 or `/48` for IPv6; the read-only platform
 preflight resolves those public endpoints from the promotion host, while the invocation-scoped Job
 validates private dependency answers from inside the cluster. Both reject addresses outside their
@@ -170,7 +171,29 @@ PostgreSQL credentials are also split. Provision roles `dealdata_core`, `dealdat
 `dealdata_sensor`, each restricted to its namesake database, and store their passwords at
 `postgres/dealdata-core-password`, `postgres/dealdata-gps-password` and
 `postgres/dealdata-sensor-password` below `SECRET_PREFIX`. No DEALData layer may own or connect
-with another layer's role.
+with another layer's role. Provision the separate `dealiot_registry` database with two login
+roles on the endpoint configured by `POSTGRES_DEALIOT_REGISTRY_HOST`:
+`dealiot_registry_migrator` owns the `public` schema (directly or through role membership), has
+`USAGE, CREATE`, and owns schema objects; `dealiot_registry_app` is the runtime role.
+Store their distinct passwords at `postgres/dealiot-registry-migration-password` and
+`postgres/dealiot-registry-password`. The runtime role must not own the database or inherit from
+the migrator. Its server certificate must be valid for that hostname and chain to
+`pki/postgres-ca.crt`; both roles use `verify-full` and can reach only
+`POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR` on TCP/5432.
+
+The release Job `dealiot-registry-mig-${RELEASE_ID}` runs
+`python -m management_console.migrate` with the same digest-pinned console image and the dedicated
+migrator credential before any application rollout. Migrations take a PostgreSQL advisory
+transaction lock, preflight the migrator's owner/`USAGE`/`CREATE` rights before DDL, record
+checksums, revoke all schema/table privileges from both `PUBLIC` and the runtime role, and grant
+only schema `USAGE`, device `SELECT`/`INSERT`/`UPDATE`, and migration-table `SELECT`. Retirement is
+an `UPDATE`; effective/inherited `CREATE`, `DELETE`, `TRUNCATE` and ownership make the job and
+production readiness fail closed. An already-applied file whose contents changed fails the release.
+Registry readiness accepts only an ordered suffix of newer migrations to support expand/contract
+rollback; do not remove columns, tables or compatible constraints until the rollback window is
+closed. Do not run this command from serving Pods or in parallel with the ordered deployer. The
+registry database stores device metadata only: MQTT credentials and ACLs remain owned by the
+broker/secret manager.
 
 ## Exposure and tenancy
 
@@ -183,6 +206,23 @@ allowed repository, event type and delivery identifier with the secret-manager w
 No other method or path bypasses OIDC. HA sessions are stored in the external Valkey service using
 the secret-managed TLS URL. APISIX proxy traffic is accepted only from oauth2-proxy; its Admin API
 is accepted only from the route bootstrap Job and DEALHost.
+
+`OIDC_ALLOWED_GROUP` and `OIDC_ADMIN_GROUP` must be different identity-provider groups. Edge
+admission and read-only DEALHost/DEALIoT operations require the former; DEALHost administration and
+DEALIoT registry creation, update and retirement require the latter. Because oauth2-proxy enforces
+edge admission first, an administrator must belong to both groups. Do not make the admin group an
+alias of, or automatically grant it to, every admitted reader.
+
+For browser sessions and directly supplied bearer tokens, oauth2-proxy validates issuer, audience
+and admission-group membership, emits the validated access token only in
+`X-Forwarded-Access-Token`, and does not trust or forward the caller's original `Authorization`
+header. The protected APISIX DEALHost and DEALIoT routes replace that header with
+`Bearer $http_x_forwarded_access_token`; each application then introspects the forwarded token and
+enforces its read/admin role mapping, while APISIX removes the raw forwarded-token header. All
+non-introspecting upstreams remove both `Authorization` and `X-Forwarded-Access-Token`. The
+renderer checks that policy on every bootstrap route and also proves that the exact dynamic-route
+host/port ceiling matches deployed Services and `apisix-egress`; no client-supplied identity header
+is accepted as an authorization source or leaked to another module.
 
 This is an operator-only, single-tenant edge. Multi-tenant or anonymous/public exposure is not
 supported until DEALHost, DEALData and DEALIoT implement and enforce a shared tenant identity and
@@ -197,7 +237,12 @@ Do not reuse a release ID with different images or migrations.
 
 The APISIX bootstrap owns the reserved `archideal-` route-ID prefix. It upserts the desired base
 routes and deletes obsolete routes in that namespace after all upserts succeed. DEALHost dynamic
-routes use the separate `module-` prefix and are preserved.
+routes use the separate `module-` prefix and are preserved. They can never claim a bootstrap or
+manifest path, including an exact match. No audited `module-` route delete exists yet, so DEALHost
+blocks disable/delete/rename/retarget mutations for every routable module. The current module
+manifests remain `production_ready=false`; consequently the supported production baseline uses
+only bootstrap routes. Enabling a dynamic production route requires both an explicit manifest
+review (`production_ready=true`) and completion of the revocation/audit prerequisite.
 
 Every PodTemplate carries `archideal.io/release`. During promotion the deployer also stamps a
 runtime revision derived from the live runtime Secret and ConfigMaps, so a same-image secret or

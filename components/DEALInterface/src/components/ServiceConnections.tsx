@@ -33,6 +33,12 @@ const probeSummaryLabels: Partial<Record<string, MessageKey>> = {
   unreachable: "service.summaryUnreachable",
 };
 
+const validationIssueLabels: Record<NonNullable<ModuleProbeResult["validationIssue"]>, MessageKey> = {
+  "non-json": "service.validationNonJson",
+  "invalid-json": "service.validationInvalidJson",
+  contract: "service.validationContract",
+};
+
 function formatCheckedAt(value: string | undefined, locale: string) {
   if (!value) {
     return undefined;
@@ -51,6 +57,9 @@ function formatCheckedAt(value: string | undefined, locale: string) {
 }
 
 function formatProbeDetail(probe: ModuleProbeResult, t: (key: MessageKey, params?: Record<string, string | number>) => string) {
+  if (probe.validationIssue) {
+    return t(validationIssueLabels[probe.validationIssue]);
+  }
   if (!probe.summary) {
     return probe.detail;
   }
@@ -64,8 +73,8 @@ function formatProbeDetail(probe: ModuleProbeResult, t: (key: MessageKey, params
     .join(", ");
 }
 
-function countOnline(probes: ModuleProbeResult[]) {
-  return probes.filter((probe) => probe.status === "online" || probe.status === "protected").length;
+function countHealthy(probes: ModuleProbeResult[]) {
+  return probes.filter((probe) => probe.status === "online").length;
 }
 
 export function ServiceConnections({
@@ -102,7 +111,7 @@ export function ServiceConnections({
         {modules.map((module) => {
           const connection = connections[module.key];
           const probeTotal = runtimes[module.key].probes.length;
-          const onlineTotal = connection ? countOnline(connection.probes) : 0;
+          const healthyTotal = connection ? countHealthy(connection.probes) : 0;
           const checkedAt = formatCheckedAt(connection?.checkedAt, language) ?? t("service.pending");
 
           return (
@@ -115,7 +124,7 @@ export function ServiceConnections({
             >
               <span>{module.name}</span>
               {connection ? <StatusPill status={connection.status} /> : <strong>{t("service.waitingTile")}</strong>}
-              <small>{t("service.probeOverview", { online: onlineTotal, total: probeTotal, checkedAt })}</small>
+              <small>{t("service.probeOverview", { healthy: healthyTotal, total: probeTotal, checkedAt })}</small>
             </button>
           );
         })}

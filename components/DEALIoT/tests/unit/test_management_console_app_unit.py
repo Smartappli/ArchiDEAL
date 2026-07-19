@@ -130,6 +130,22 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.parse_http_url(value)
 
+    def test_canonical_origin_normalizes_defaults_and_rejects_url_surface(self) -> None:
+        self.assertEqual(app.canonical_origin("HTTPS://EXAMPLE.NET:443"), "https://example.net")
+        self.assertEqual(
+            app.canonical_origin("http://[2001:db8::1]:8080"),
+            "http://[2001:db8::1]:8080",
+        )
+        for value in (
+            "null",
+            "https://user@example.net",
+            "https://example.net/path",
+            "https://example.net?next=evil",
+            "ftp://example.net",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                app.canonical_origin(value)
+
     def test_runtime_probe_overrides_cover_registered_components(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
             self.assertIsNone(app.mqtt_probe())
@@ -347,9 +363,7 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
         def fake_probe(component: dict[str, str]) -> dict[str, str]:
             return {
                 "id": component["id"],
-                "status": (
-                    "unreachable" if component["id"] == "mqtt-kafka-bridge" else "healthy"
-                ),
+                "status": ("unreachable" if component["id"] == "mqtt-kafka-bridge" else "healthy"),
                 "detail": "test",
             }
 
@@ -358,11 +372,7 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
             patch("management_console.app.probe_component", side_effect=fake_probe),
             patch.dict(
                 "os.environ",
-                {
-                    "MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS": (
-                        "vernemq,mqtt-kafka-bridge,kafka"
-                    )
-                },
+                {"MANAGEMENT_CONSOLE_REQUIRED_COMPONENT_IDS": ("vernemq,mqtt-kafka-bridge,kafka")},
                 clear=True,
             ),
         ):
@@ -466,6 +476,24 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
             app.read_json_body(FakeBodyHandler(b'["not", "object"]'))
         with self.assertRaises(ValueError):
             app.read_json_body(FakeBodyHandler(b"{}", app.MAX_REQUEST_BYTES + 1))
+        for invalid_length in (-1, "not-an-integer"):
+            with (
+                self.subTest(length=invalid_length),
+                self.assertRaisesRegex(ValueError, "non-negative integer"),
+            ):
+                handler = FakeBodyHandler(b"{}")
+                handler.headers["Content-Length"] = str(invalid_length)
+                app.read_json_body(handler)
+
+    def test_discard_body_closes_connection_for_invalid_or_oversized_length(self) -> None:
+        for invalid_length in ("-1", "not-an-integer", str(app.MAX_REQUEST_BYTES + 1)):
+            with self.subTest(length=invalid_length):
+                handler = object.__new__(app.ManagementConsoleHandler)
+                handler.headers = {"Content-Length": invalid_length}
+                handler.rfile = io.BytesIO(b"{}")
+                handler.close_connection = False
+                handler.discard_request_body()
+                self.assertTrue(handler.close_connection)
 
     def test_configured_bind_host_rejects_wildcard_without_explicit_opt_in(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
@@ -633,6 +661,66 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
                 response = read_json_from_request(authorized_post)
             self.assertEqual(response["status"], "queued")
 
+    def test_mutations_require_json_and_reject_cross_origin_browser_requests(self) -> None:
+        with running_console_server() as base_url:
+            environment = {
+                "MANAGEMENT_CONSOLE_TOKEN": "unit-token",
+                "MANAGEMENT_CONSOLE_PUBLIC_ORIGIN": base_url,
+            }
+            with (
+                patch.dict("os.environ", environment, clear=True),
+                patch(
+                    "management_console.app.trigger_media_backfill",
+                    return_value=(HTTPStatus.ACCEPTED, {"status": "queued"}),
+                ) as trigger,
+            ):
+                common_headers = {
+                    "Authorization": "Bearer unit-token",
+                    "Content-Type": "application/json; charset=utf-8",
+                }
+                same_origin = request.Request(  # noqa: S310
+                    f"{base_url}/api/operations/trigger-media-backfill",
+                    data=b"{}",
+                    method="POST",
+                    headers={**common_headers, "Origin": base_url},
+                )
+                self.assertEqual(read_json_from_request(same_origin)["status"], "queued")
+
+                non_browser = request.Request(  # noqa: S310
+                    f"{base_url}/api/operations/trigger-media-backfill",
+                    data=b"{}",
+                    method="POST",
+                    headers=common_headers,
+                )
+                self.assertEqual(read_json_from_request(non_browser)["status"], "queued")
+
+                cross_origin = request.Request(  # noqa: S310
+                    f"{base_url}/api/operations/trigger-media-backfill",
+                    data=b"{}",
+                    method="POST",
+                    headers={**common_headers, "Origin": "https://evil.example"},
+                )
+                with self.assertRaises(error.HTTPError) as blocked_origin:
+                    open_test_http_url(cross_origin)
+                self.assertEqual(blocked_origin.exception.code, HTTPStatus.FORBIDDEN)
+
+                wrong_media_type = request.Request(  # noqa: S310
+                    f"{base_url}/api/operations/trigger-media-backfill",
+                    data=b"{}",
+                    method="POST",
+                    headers={
+                        "Authorization": "Bearer unit-token",
+                        "Content-Type": "text/plain",
+                    },
+                )
+                with self.assertRaises(error.HTTPError) as blocked_media_type:
+                    open_test_http_url(wrong_media_type)
+                self.assertEqual(
+                    blocked_media_type.exception.code,
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                )
+            self.assertEqual(trigger.call_count, 2)
+
     def test_unified_dealiot_prefix_serves_ui_assets_and_api(self) -> None:
         with (
             patch.dict("os.environ", {}, clear=True),
@@ -683,7 +771,7 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
                 open_test_http_url(post)
             self.assertEqual(blocked_post.exception.code, HTTPStatus.UNAUTHORIZED)
 
-    def test_production_mode_accepts_configured_bearer_for_static_and_api_routes(self) -> None:
+    def test_production_mode_rejects_static_token_even_without_startup_validation(self) -> None:
         environment = {
             "MANAGEMENT_CONSOLE_PRODUCTION_MODE": "true",
             "MANAGEMENT_CONSOLE_TOKEN": "unit-token",
@@ -693,28 +781,28 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
             running_console_server() as base_url,
         ):
             for path in ("/", "/api/datasets/zenodo"):
-                with self.subTest(path=path):
+                with self.subTest(path=path), self.assertRaises(error.HTTPError) as blocked:
                     authorized = request.Request(  # noqa: S310
                         f"{base_url}{path}",
                         headers={"Authorization": "Bearer unit-token"},
                     )
-                    with open_test_http_url(authorized) as response:
-                        self.assertEqual(response.status, HTTPStatus.OK)
-                        self.assertEqual(
-                            response.headers["Strict-Transport-Security"],
-                            "max-age=31536000; includeSubDomains",
-                        )
+                    open_test_http_url(authorized)
+                self.assertEqual(blocked.exception.code, HTTPStatus.UNAUTHORIZED)
+                self.assertEqual(
+                    blocked.exception.headers["Strict-Transport-Security"],
+                    "max-age=31536000; includeSubDomains",
+                )
 
-    def test_oidc_introspection_maps_read_and_write_roles(self) -> None:
+    def test_oidc_introspection_maps_read_and_write_groups(self) -> None:
         active_read = app.SimpleHttpResponse(
             HTTPStatus.OK,
             b'{"active":true,"iss":"https://identity.test","aud":"archideal",'
-            b'"realm_access":{"roles":["dealiot-read"]}}',
+            b'"sub":"reader-123","groups":["dealiot-read"]}',
         )
         active_write = app.SimpleHttpResponse(
             HTTPStatus.OK,
             b'{"active":true,"iss":"https://identity.test","aud":["archideal"],'
-            b'"roles":["dealiot-write"]}',
+            b'"sub":"writer-123","groups":["dealiot-write"]}',
         )
         oidc_env = {
             "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": "https://identity.test/introspect",
@@ -736,16 +824,69 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
         ):
             self.assertEqual(app.authorization_level("Bearer write-token"), "write")
 
-    def test_oidc_groups_claim_maps_to_console_roles(self) -> None:
+    def test_scope_and_role_claims_cannot_elevate_oidc_reader(self) -> None:
+        active_reader_with_admin_decoys = app.SimpleHttpResponse(
+            HTTPStatus.OK,
+            b'{"active":true,"iss":"https://identity.test","aud":"archideal",'
+            b'"sub":"reader-123","groups":["dealiot-read"],'
+            b'"scope":"openid dealiot-admin","roles":["dealiot-admin"],'
+            b'"realm_access":{"roles":["dealiot-admin"]}}',
+        )
+        oidc_env = {
+            "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": "https://identity.test/introspect",
+            "MANAGEMENT_CONSOLE_OIDC_ISSUER": "https://identity.test",
+            "MANAGEMENT_CONSOLE_OIDC_AUDIENCE": "archideal",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_ID": "console",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET": "secret",
+        }
+
+        with (
+            patch.dict("os.environ", oidc_env, clear=True),
+            patch(
+                "management_console.app.open_http_request",
+                return_value=active_reader_with_admin_decoys,
+            ),
+        ):
+            principal = app.authenticated_principal("Bearer reader-token")
+
+        self.assertIsNotNone(principal)
+        self.assertEqual(principal.level, "read")
+        self.assertEqual(principal.roles, frozenset({"dealiot-read"}))
+
+    def test_oidc_uses_only_the_configured_group_claim(self) -> None:
+        active_reader = app.SimpleHttpResponse(
+            HTTPStatus.OK,
+            b'{"active":true,"iss":"https://identity.test","aud":"archideal",'
+            b'"sub":"reader-123","entitlements":["dealiot-read"],'
+            b'"groups":["dealiot-admin"]}',
+        )
+        oidc_env = {
+            "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": "https://identity.test/introspect",
+            "MANAGEMENT_CONSOLE_OIDC_ISSUER": "https://identity.test",
+            "MANAGEMENT_CONSOLE_OIDC_AUDIENCE": "archideal",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_ID": "console",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET": "secret",
+            "MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM": "entitlements",
+        }
+
+        with (
+            patch.dict("os.environ", oidc_env, clear=True),
+            patch("management_console.app.open_http_request", return_value=active_reader),
+        ):
+            principal = app.authenticated_principal("Bearer reader-token")
+
+        self.assertIsNotNone(principal)
+        self.assertEqual(principal.level, "read")
+        self.assertEqual(principal.roles, frozenset({"dealiot-read"}))
+
+    def test_oidc_groups_claim_maps_to_console_access(self) -> None:
         active_operator = app.SimpleHttpResponse(
             HTTPStatus.OK,
             b'{"active":true,"iss":"https://identity.test","aud":"archideal",'
-            b'"groups":["archideal-operators"]}',
+            b'"sub":"operator-123","groups":["archideal-operators"]}',
         )
         oidc_env = {
-            "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": (
-                "https://identity.test/introspect"
-            ),
+            "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": ("https://identity.test/introspect"),
             "MANAGEMENT_CONSOLE_OIDC_CLIENT_ID": "console",
             "MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET": "secret",
             "MANAGEMENT_CONSOLE_OIDC_ISSUER": "https://identity.test",
@@ -791,6 +932,32 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
             ):
                 self.assertIsNone(app.authorization_level("Bearer id-token"))
 
+    def test_oidc_introspection_requires_one_stable_subject(self) -> None:
+        oidc_env = {
+            "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": "https://identity.test/introspect",
+            "MANAGEMENT_CONSOLE_OIDC_ISSUER": "https://identity.test",
+            "MANAGEMENT_CONSOLE_OIDC_AUDIENCE": "archideal",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_ID": "console",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET": "secret",
+            "MANAGEMENT_CONSOLE_OIDC_READ_ROLES": "dealiot-read",
+        }
+        invalid_responses = (
+            b'{"active":true,"iss":"https://identity.test","aud":"archideal",'
+            b'"username":"shared-fallback","groups":["dealiot-read"]}',
+            b'{"active":true,"iss":"https://identity.test","aud":"archideal",'
+            b'"sub":" padded ","groups":["dealiot-read"]}',
+        )
+        for body in invalid_responses:
+            with (
+                self.subTest(body=body),
+                patch.dict("os.environ", oidc_env, clear=True),
+                patch(
+                    "management_console.app.open_http_request",
+                    return_value=app.SimpleHttpResponse(HTTPStatus.OK, body),
+                ),
+            ):
+                self.assertIsNone(app.authenticated_principal("Bearer id-token"))
+
     def test_production_auth_validation_rejects_incomplete_oidc(self) -> None:
         with (
             patch.dict(
@@ -804,6 +971,72 @@ class ManagementConsoleAppUnitTests(unittest.TestCase):
                 clear=True,
             ),
             self.assertRaisesRegex(RuntimeError, "Incomplete production"),
+        ):
+            app.validate_production_auth_config()
+
+    def test_production_auth_validation_rejects_static_token(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "MANAGEMENT_CONSOLE_PRODUCTION_MODE": "true",
+                    "MANAGEMENT_CONSOLE_TOKEN": "static-token",
+                    "MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM": "groups",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(RuntimeError, "not accepted in production"),
+        ):
+            app.validate_production_auth_config()
+
+    def test_production_auth_validation_requires_https_public_origin(self) -> None:
+        oidc_env = {
+            "MANAGEMENT_CONSOLE_PRODUCTION_MODE": "true",
+            "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": "https://identity.test/introspect",
+            "MANAGEMENT_CONSOLE_OIDC_ISSUER": "https://identity.test",
+            "MANAGEMENT_CONSOLE_OIDC_AUDIENCE": "archideal",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_ID": "console",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET": "secret",
+            "MANAGEMENT_CONSOLE_OIDC_READ_ROLES": "dealiot-read",
+            "MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES": "dealiot-admin",
+        }
+        for origin, message in (
+            (None, "Incomplete production request boundary"),
+            ("http://console.test", "must use HTTPS"),
+            ("https://console.test/path", "Invalid MANAGEMENT_CONSOLE_PUBLIC_ORIGIN"),
+        ):
+            environment = dict(oidc_env)
+            if origin is not None:
+                environment["MANAGEMENT_CONSOLE_PUBLIC_ORIGIN"] = origin
+            with (
+                self.subTest(origin=origin),
+                patch.dict("os.environ", environment, clear=True),
+                self.assertRaisesRegex(RuntimeError, message),
+            ):
+                app.validate_production_auth_config()
+
+        with patch.dict(
+            "os.environ",
+            {**oidc_env, "MANAGEMENT_CONSOLE_PUBLIC_ORIGIN": "https://console.test"},
+            clear=True,
+        ):
+            app.validate_production_auth_config()
+
+    def test_production_auth_validation_rejects_ambiguous_group_claim(self) -> None:
+        oidc_env = {
+            "MANAGEMENT_CONSOLE_PRODUCTION_MODE": "true",
+            "MANAGEMENT_CONSOLE_OIDC_INTROSPECTION_URL": "https://identity.test/introspect",
+            "MANAGEMENT_CONSOLE_OIDC_ISSUER": "https://identity.test",
+            "MANAGEMENT_CONSOLE_OIDC_AUDIENCE": "archideal",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_ID": "console",
+            "MANAGEMENT_CONSOLE_OIDC_CLIENT_SECRET": "secret",
+            "MANAGEMENT_CONSOLE_OIDC_GROUPS_CLAIM": "realm_access.roles",
+            "MANAGEMENT_CONSOLE_OIDC_READ_ROLES": "dealiot-read",
+            "MANAGEMENT_CONSOLE_OIDC_WRITE_ROLES": "dealiot-admin",
+        }
+        with (
+            patch.dict("os.environ", oidc_env, clear=True),
+            self.assertRaisesRegex(RuntimeError, "dedicated top-level group claim"),
         ):
             app.validate_production_auth_config()
 

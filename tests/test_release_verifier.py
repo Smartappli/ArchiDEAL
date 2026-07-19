@@ -206,6 +206,9 @@ class ReleaseVerifierTests(unittest.TestCase):
             "MQTT_HOST": "mqtt.prod.internal.corp",
             "POSTGRES_METADATA_HOST": "metadata-postgres.prod.internal.corp",
             "POSTGRES_DATA_HOST": "data-postgres.prod.internal.corp",
+            "POSTGRES_DEALIOT_REGISTRY_HOST": (
+                "dealiot-registry-postgres.prod.internal.corp"
+            ),
             "VALKEY_HOST": "valkey.prod.internal.corp",
             "ETCD_ENDPOINT_1": "https://etcd-0.prod.internal.corp:2379",
             "ETCD_ENDPOINT_2": "https://etcd-1.prod.internal.corp:2379",
