@@ -8,6 +8,7 @@ import { DeviceManagementPanel } from "./DeviceManagementPanel";
 import { ManagementAreaPanel } from "./ManagementAreaPanel";
 import { RoutePublicationPanel } from "./RoutePublicationPanel";
 import { StatusPill } from "./StatusPill";
+import { UserManagementPanel } from "./UserManagementPanel";
 
 interface WorkspaceArea {
   id: string;
@@ -61,6 +62,11 @@ const workspaceCopy: Record<ModuleKey, WorkspaceCopy> = {
         id: "domains",
         title: "workspace.dealhost.domains.title",
         description: "workspace.dealhost.domains.description",
+      },
+      {
+        id: "users",
+        title: "workspace.dealhost.users.title",
+        description: "workspace.dealhost.users.description",
       },
     ],
   },
@@ -132,6 +138,9 @@ export function ModuleWorkspace({
     }
     if (module.key === "dealhost" && activeArea.id === "domains") {
       return <RoutePublicationPanel {...sharedProps} />;
+    }
+    if (module.key === "dealhost" && activeArea.id === "users") {
+      return <UserManagementPanel {...sharedProps} />;
     }
     if (module.key === "dealdata" && activeArea.id === "access") {
       return <DatasetAccessPanel {...sharedProps} />;

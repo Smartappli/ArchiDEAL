@@ -2457,6 +2457,107 @@ h2 {
   transform: translateX(0.25rem);
 }
 
+.user-search {
+  display: grid;
+  gap: 0.35rem;
+  color: #4d574c;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.user-search input {
+  min-height: 2.75rem;
+  padding: 0.65rem 0.75rem;
+  color: var(--ink);
+  font: inherit;
+  background: #fffdf5;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+}
+
+.user-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.user-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.2rem;
+}
+
+.user-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  padding: 0.9rem;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+}
+
+.user-groups legend {
+  padding-inline: 0.35rem;
+  font-weight: 800;
+}
+
+.user-groups label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.user-groups p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+}
+
+.user-password-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: end;
+  padding: 1rem;
+  background: rgba(47, 111, 159, 0.06);
+  border: 1px solid rgba(47, 111, 159, 0.2);
+  border-radius: 1rem;
+}
+
+.user-password-form h3 {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.user-password-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: #4d574c;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.user-password-form input {
+  min-height: 2.75rem;
+  padding: 0.65rem 0.75rem;
+  color: var(--ink);
+  font: inherit;
+  background: #fffdf5;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+}
+
+.user-password-form button {
+  min-height: 2.75rem;
+  padding: 0.65rem 1rem;
+  color: #fffdf5;
+  font-weight: 800;
+  background: var(--ink);
+  border: 0;
+  border-radius: 999px;
+}
+
 @media (max-width: 1080px) {
   .sidebar {
     position: sticky;
@@ -2553,5 +2654,14 @@ h2 {
 
   .management-detail-form__actions > button {
     flex: 1 1 9rem;
+  }
+
+  .user-groups,
+  .user-password-form {
+    grid-template-columns: 1fr;
+  }
+
+  .user-password-form button {
+    width: 100%;
   }
 }
