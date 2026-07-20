@@ -36,6 +36,32 @@ Le checkout doit être placé à l'avance sur `ARCHIDEAL_BRANCH` (`git switch ma
 configuration d'exemple). Cette contrainte permet d'identifier sans ambiguïté le commit réellement
 déployé et d'y revenir en cas d'échec.
 
+### Installation automatisée
+
+Depuis un checkout propre appartenant au compte de service, l'installateur configure les
+répertoires, copie le fichier Compose secret, installe une copie root-owned stable de l'updater,
+exécute son `--dry-run` sous le compte cible puis ajoute un bloc borné à sa crontab :
+
+```bash
+sudo deploy/vps/install-auto-update.sh \
+  --user archideal \
+  --repo /srv/archideal \
+  --compose-env /srv/archideal/.env \
+  --branch main \
+  --interval-minutes 10
+```
+
+L'installation échoue avant d'activer cron si le dépôt est modifié, si le remote n'est pas
+joignable, si Compose est invalide ou si le compte ne peut pas joindre Docker. Une réexécution
+remplace seulement la copie de l'updater et le bloc cron géré ; elle conserve les autres entrées
+cron, la configuration existante compatible et le fichier secret. Pour remplacer explicitement
+ce dernier, ajoutez `--replace-compose-env --compose-env /chemin/vers/le/nouveau.env`.
+
+La copie exécutée par cron se trouve dans `/usr/local/libexec/archideal/update-vps.sh`. Elle reste
+stable pendant que le checkout Git est avancé ou restauré.
+
+### Installation manuelle
+
 Exemple, en adaptant l'utilisateur et les chemins :
 
 ```bash
