@@ -548,6 +548,8 @@ def load_values(path: Path, *, allow_example: bool) -> dict[str, str]:
         for other_key in private_dependency_keys[index + 1 :]:
             if networks[key].overlaps(networks[other_key]):
                 fail(f"{key} must not overlap {other_key}.")
+    if networks["KUBERNETES_API_EGRESS_CIDR"].prefixlen != 32:
+        fail("KUBERNETES_API_EGRESS_CIDR must identify exactly one IPv4 API endpoint.")
     for key in ("OIDC_EGRESS_CIDR", "GITHUB_EGRESS_CIDR", "OTEL_EGRESS_CIDR"):
         network = networks[key]
         minimum_prefix = 20 if network.version == 4 else 48
@@ -1646,6 +1648,73 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         }
         if actual_ports != expected_ports:
             fail(f"{policy_name} has an unexpected external dependency port set.")
+
+    controller_ingress = network_policies.get(
+        "dealhost-runtime-controller-ingress", {}
+    )
+    controller_ingress_sources = {
+        name
+        for rule in controller_ingress.get("spec", {}).get("ingress", [])
+        for source in rule.get("from", [])
+        for name in _network_policy_pod_names(source)
+    }
+    controller_ingress_ports = {
+        port.get("port")
+        for rule in controller_ingress.get("spec", {}).get("ingress", [])
+        for port in rule.get("ports", [])
+    }
+    controller_clients = network_policies.get(
+        "dealhost-runtime-controller-clients-egress", {}
+    )
+    controller_client_names = _network_policy_pod_names(
+        controller_clients.get("spec", {})
+    )
+    controller_client_destinations = {
+        name
+        for rule in controller_clients.get("spec", {}).get("egress", [])
+        for destination in rule.get("to", [])
+        for name in _network_policy_pod_names(destination)
+    }
+    controller_client_ports = {
+        port.get("port")
+        for rule in controller_clients.get("spec", {}).get("egress", [])
+        for port in rule.get("ports", [])
+    }
+    if (
+        controller_ingress_sources != {"dealhost", "dealhost-runtime-worker"}
+        or controller_ingress_ports != {8081}
+        or controller_client_names != {"dealhost", "dealhost-runtime-worker"}
+        or controller_client_destinations != {"dealhost-runtime-controller"}
+        or controller_client_ports != {8081, 8443}
+    ):
+        fail(
+            "Runtime-controller traffic must be isolated to DEALHost and its worker "
+            "on the internal TLS Service path."
+        )
+
+    runtime_apps_default_deny = network_policies.get(
+        "runtime-apps-default-deny", {}
+    )
+    runtime_apps_dns = network_policies.get("runtime-apps-allow-dns-egress", {})
+    runtime_dns_ports = {
+        (port.get("protocol"), port.get("port"))
+        for rule in runtime_apps_dns.get("spec", {}).get("egress", [])
+        for port in rule.get("ports", [])
+    }
+    if (
+        runtime_apps_default_deny.get("metadata", {}).get("namespace")
+        != "archideal-runtime-apps"
+        or runtime_apps_default_deny.get("spec", {}).get("podSelector") != {}
+        or set(runtime_apps_default_deny.get("spec", {}).get("policyTypes", []))
+        != {"Ingress", "Egress"}
+        or runtime_apps_dns.get("metadata", {}).get("namespace")
+        != "archideal-runtime-apps"
+        or runtime_dns_ports != {("UDP", 53), ("TCP", 53)}
+    ):
+        fail(
+            "The managed-application namespace must be default-deny with only its "
+            "explicit DNS baseline."
+        )
     registry_cidr = private_preflight_env["POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR"][
         "value"
     ]
@@ -1799,6 +1868,15 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         for item in external_secrets
         if item["metadata"]["name"] == "archideal-registry-credentials"
     ]
+    registry_namespaces = {
+        item.get("metadata", {}).get("namespace")
+        for item in registry_external_secrets
+    }
+    if registry_namespaces != {None, "archideal-runtime-apps"}:
+        fail(
+            "Private registry credentials must be reconciled independently in the "
+            "platform and managed-application namespaces."
+        )
     for registry_external_secret in registry_external_secrets:
         if (
             registry_external_secret["spec"].get("refreshPolicy") != "Periodic"
@@ -1864,6 +1942,22 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         fail(
             "The runtime-controller TLS ExternalSecret must be a release-scoped "
             "CreatedOnce kubernetes.io/tls Secret with certificate, PKCS#8 key and CA."
+        )
+    controller_tls_items = {
+        item["secretKey"]: item for item in controller_tls_spec.get("data", [])
+    }
+    expected_tls_suffixes = {
+        "tls.crt": "/pki/dealhost-runtime-controller-tls.crt",
+        "tls.key": "/pki/dealhost-runtime-controller-tls.pkcs8.key",
+        "ca.crt": "/pki/dealhost-runtime-controller-ca.crt",
+    }
+    if any(
+        not controller_tls_items[key]["remoteRef"]["key"].endswith(suffix)
+        for key, suffix in expected_tls_suffixes.items()
+    ):
+        fail(
+            "Runtime-controller certificate, PKCS#8 key and CA must use their "
+            "dedicated secret-store entries."
         )
 
     for owner in pod_owners:
