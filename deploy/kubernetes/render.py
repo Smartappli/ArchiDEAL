@@ -34,6 +34,31 @@ RFC1918_NETWORKS = tuple(
     ipaddress.ip_network(cidr)
     for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
+RUNTIME_APPS_NAMESPACE = "archideal-runtime-apps"
+RUNTIME_APPS_NETWORK_POLICIES = frozenset(
+    {"runtime-apps-default-deny", "runtime-apps-allow-dns-egress"}
+)
+RUNTIME_EXPOSURE_KINDS = frozenset(
+    {
+        "Gateway",
+        "GRPCRoute",
+        "HTTPRoute",
+        "Ingress",
+        "ReferenceGrant",
+        "ServiceExport",
+        "TCPRoute",
+        "TLSRoute",
+        "UDPRoute",
+    }
+)
+EXPECTED_APISIX_BOOTSTRAP_UPSTREAMS = {
+    "archideal-dealhost": ("dealhost", 8000),
+    "archideal-dealiot": ("dealiot", 8080),
+    "archideal-dealdata-core": ("dealdata-core", 7000),
+    "archideal-dealdata-gps": ("dealdata-gps", 7001),
+    "archideal-dealdata-sensor": ("dealdata-sensor", 7002),
+    "archideal-interface": ("dealinterface", 8080),
+}
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -183,6 +208,14 @@ def _is_internal_dns_name(value: str) -> bool:
     except ValueError:
         return not value.replace(".", "").isdigit()
     return False
+
+
+def _is_runtime_upstream_host(value: str) -> bool:
+    labels = value.casefold().split(".")
+    return (
+        RUNTIME_APPS_NAMESPACE in labels
+        or bool(labels and labels[0].startswith("dealrt-"))
+    )
 
 
 def _network_policy_pod_names(peer: dict) -> set[str]:
