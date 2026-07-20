@@ -28,9 +28,10 @@ expand/contract).
 ## Installation
 
 Le VPS doit disposer de Git, Docker Engine, Docker Compose v2, Bash, `flock`, `timeout`, Python 3.12+
-et PyYAML. Utilisez un compte de service non privilégié membre du groupe Docker, un dépôt qui lui
-appartient et une clé Git de déploiement en lecture seule. Pré-enregistrez la clé d'hôte SSH ; ne
-placez jamais de jeton dans l'URL du remote, la crontab ou les arguments du script.
+et PyYAML. Un daemon cron actif et compatible avec `/etc/cron.d` (par exemple `cron` sous
+Debian/Ubuntu) est requis. Utilisez un compte de service non privilégié membre du groupe Docker,
+un dépôt qui lui appartient et une clé Git de déploiement en lecture seule. Pré-enregistrez la clé
+d'hôte SSH ; ne placez jamais de jeton dans l'URL du remote, cron ou les arguments du script.
 
 Le checkout doit être placé à l'avance sur `ARCHIDEAL_BRANCH` (`git switch main` avec la
 configuration d'exemple). Cette contrainte permet d'identifier sans ambiguïté le commit réellement
@@ -40,10 +41,11 @@ déployé et d'y revenir en cas d'échec.
 
 Depuis un checkout propre appartenant au compte de service, l'installateur configure les
 répertoires, copie le fichier Compose secret, installe une copie root-owned stable de l'updater,
-exécute son `--dry-run` sous le compte cible puis ajoute un bloc borné à sa crontab :
+exécute son `--dry-run` sous le compte cible puis installe une tâche système dédiée dans
+`/etc/cron.d/archideal-vps-auto-update`. Il ne modifie jamais la crontab du compte :
 
 ```bash
-sudo deploy/vps/install-auto-update.sh \
+sudo ./deploy/vps/install-auto-update.sh \
   --user archideal \
   --repo /srv/archideal \
   --compose-env /srv/archideal/.env \
@@ -53,12 +55,26 @@ sudo deploy/vps/install-auto-update.sh \
 
 L'installation échoue avant d'activer cron si le dépôt est modifié, si le remote n'est pas
 joignable, si Compose est invalide ou si le compte ne peut pas joindre Docker. Une réexécution
-remplace seulement la copie de l'updater et le bloc cron géré ; elle conserve les autres entrées
-cron, la configuration existante compatible et le fichier secret. Pour remplacer explicitement
-ce dernier, ajoutez `--replace-compose-env --compose-env /chemin/vers/le/nouveau.env`.
+met à jour seulement la copie de l'updater et le fichier cron dédié ; elle conserve la crontab,
+la configuration identique et le fichier secret. Si les options produisent une configuration
+différente, relisez-les puis ajoutez explicitement `--replace-config`. Pour remplacer le secret,
+ajoutez `--replace-compose-env --compose-env /chemin/vers/le/nouveau.env`. Le nouveau secret n'est
+installé qu'après la réussite du dry-run.
 
 La copie exécutée par cron se trouve dans `/usr/local/libexec/archideal/update-vps.sh`. Elle reste
 stable pendant que le checkout Git est avancé ou restauré.
+
+Si l'installation manuelle ci-dessous a déjà créé les répertoires au nom du compte de service,
+transférez uniquement leur propriété et leur mode avant d'utiliser l'installateur automatisé (les
+fichiers secrets qu'ils contiennent restent au compte de service en mode `0600`) :
+
+```bash
+sudo chown root:archideal /etc/archideal /var/log/archideal /var/lib/archideal
+sudo chmod 0750 /etc/archideal /var/log/archideal /var/lib/archideal
+```
+
+Supprimez aussi toute ancienne ligne manuelle appelant `update-vps.sh` dans la crontab du compte
+afin d'éviter deux planifications du même updater.
 
 ### Installation manuelle
 
