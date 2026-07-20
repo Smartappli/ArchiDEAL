@@ -985,7 +985,7 @@ describe("App live module integrations", () => {
       revision: 1,
       configuration: {},
       secret_refs: {},
-      scaling: { api: { mode: "fixed", replicas: 1 } },
+      scaling: {},
       components: [{
         module_id: 9,
         slug: "api",
@@ -1024,7 +1024,7 @@ describe("App live module integrations", () => {
       if (url === "/dealhost/api/hosting/runtime-environments/?page=1&page_size=100") {
         return jsonResponse({ count: 1, next: null, previous: null, results: [environment] });
       }
-      if (url === "/dealhost/api/hosting/deployments/?application_id=4&page=1&page_size=100") {
+      if (url === "/dealhost/api/hosting/deployments/?application_id=4&active=true&page=1&page_size=100") {
         return jsonResponse({ count: 0, next: null, previous: null, results: [] });
       }
       if (url === "/dealhost/api/hosting/deployments/" && method === "POST") {

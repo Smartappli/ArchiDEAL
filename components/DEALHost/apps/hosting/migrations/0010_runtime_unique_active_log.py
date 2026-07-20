@@ -15,6 +15,8 @@ def fail_duplicate_active_logs(apps, schema_editor):
         .filter(active_count__gt=1)
     )
     for group in duplicate_deployments.iterator():
+        # Preserve the oldest RUNNING capture because it may already have reached
+        # the controller; if none started, preserve the oldest QUEUED request.
         candidates = runtime_operation.objects.filter(
             deployment_id=group["deployment_id"],
             operation_type="log_snapshot",
