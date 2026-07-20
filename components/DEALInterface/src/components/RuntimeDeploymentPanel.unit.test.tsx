@@ -416,3 +416,16 @@ it.each([
     }
   },
 );
+
+it("rejects a log look-back period outside the backend contract", async () => {
+  api.listRuntimeDeployments.mockResolvedValue(page([deployment]));
+  renderPanel();
+
+  await screen.findByRole("heading", { name: "Runtime logs" });
+  const sinceSeconds = screen.getByLabelText("Look-back period (seconds)");
+  fireEvent.change(sinceSeconds, { target: { value: "604801" } });
+  fireEvent.submit(sinceSeconds.closest("form") as HTMLFormElement);
+
+  expect(await screen.findByText(/Log requests require 1 to 1,000 lines/)).toBeInTheDocument();
+  expect(api.requestRuntimeLogSnapshot).not.toHaveBeenCalled();
+});

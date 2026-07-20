@@ -345,6 +345,8 @@ export function RuntimeDeploymentPanel({
     setMutationProblem(undefined);
     setSuccessKey(undefined);
     setActiveOperation(undefined);
+    setOperations([]);
+    setOperationHistoryProblem(undefined);
     setLogSnapshot(undefined);
   }, [selectedApplication?.id]);
 
@@ -391,7 +393,8 @@ export function RuntimeDeploymentPanel({
         setActiveOperation((current) => {
           if (current?.deployment_id !== selectedDeployment.id) return resumableOperation;
           if (!isPendingOperation(current)) return resumableOperation ?? current;
-          return page.results.find((operation) => operation.id === current.id) ?? current;
+          const listedCurrent = page.results.find((operation) => operation.id === current.id);
+          return isPendingOperation(listedCurrent) ? listedCurrent : current;
         });
       })
       .catch((error: unknown) => {
@@ -483,7 +486,7 @@ export function RuntimeDeploymentPanel({
       controller.abort();
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [activeOperation?.id, operationPending, t]);
+  }, [activeOperation?.id, operationPending, operationReloadKey, t]);
 
   async function deployApplication(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
