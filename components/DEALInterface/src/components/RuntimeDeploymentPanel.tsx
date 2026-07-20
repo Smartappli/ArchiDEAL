@@ -197,9 +197,10 @@ export function RuntimeDeploymentPanel({
   const versionOptions = selectedApplication?.versions ?? [];
   const operationPending = isPendingOperation(activeOperation);
   const runtimeUnavailable = Boolean(selectedDeployment && selectedEnvironment?.enabled !== true);
-  const runtimeBusy = isMutating || operationPending || Boolean(
+  const runtimeTransitionBusy = isMutating || operationPending || Boolean(
     selectedDeployment && TRANSITIONAL_STATES.has(selectedDeployment.observed_state),
-  ) || runtimeUnavailable;
+  );
+  const runtimeBusy = runtimeTransitionBusy || runtimeUnavailable;
   const configuredMaxLogLines = selectedEnvironment?.capabilities.logs.max_lines;
   const maxLogLines = Math.min(
     MAX_LOG_TAIL_LINES,
@@ -850,7 +851,7 @@ export function RuntimeDeploymentPanel({
                         <button disabled={readOnly || runtimeBusy || !canRestart || selectedEnvironment?.capabilities.restart === false} onClick={() => performAction("restart")} type="button">
                           {t("management.runtime.restart")}
                         </button>
-                        <button className="management-button--danger" disabled={readOnly || runtimeBusy} onClick={undeploy} type="button">
+                        <button className="management-button--danger" disabled={readOnly || runtimeTransitionBusy} onClick={undeploy} type="button">
                           {t("management.runtime.undeploy")}
                         </button>
                       </div>

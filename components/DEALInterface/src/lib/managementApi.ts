@@ -654,6 +654,7 @@ export interface RuntimeEnvironment {
   policy: {
     requires_image_digest: boolean;
     allowed_registries: string[];
+    allowed_secret_refs: string[];
     stateless_only: boolean;
   };
 }
@@ -824,12 +825,44 @@ function runtimePage<T>(payload: RuntimePage<T>): RuntimePage<T> {
   return payload;
 }
 
+async function listAllRuntimePages<T>(
+  initialPath: string,
+  allowedPathname: string,
+  signal?: AbortSignal,
+): Promise<RuntimePage<T>> {
+  const results: T[] = [];
+  const seenPaths = new Set<string>();
+  let path: string | undefined = initialPath;
+
+  for (let pageIndex = 0; path !== undefined && pageIndex < 100; pageIndex += 1) {
+    if (seenPaths.has(path)) {
+      throw new ManagementApiError({
+        kind: "server",
+        message: "The runtime management API returned a cyclic pagination link.",
+        retryable: true,
+      });
+    }
+    seenPaths.add(path);
+    const page = runtimePage(await managementRequest<RuntimePage<T>>(path, { signal }));
+    results.push(...page.results);
+    path = nextCollectionPath(page.next, path, allowedPathname);
+  }
+  if (path !== undefined) {
+    throw new ManagementApiError({
+      kind: "server",
+      message: "The runtime management API exceeded the supported pagination depth.",
+      retryable: true,
+    });
+  }
+  return { count: results.length, next: null, previous: null, results };
+}
+
 export async function listRuntimeEnvironments(signal?: AbortSignal) {
-  const payload = await managementRequest<RuntimePage<RuntimeEnvironment>>(
+  return listAllRuntimePages<RuntimeEnvironment>(
     "/dealhost/api/hosting/runtime-environments/?page=1&page_size=100",
-    { signal },
+    "/dealhost/api/hosting/runtime-environments/",
+    signal,
   );
-  return runtimePage(payload);
 }
 
 export async function listRuntimeDeployments(
@@ -848,11 +881,11 @@ export async function listRuntimeDeployments(
     page: "1",
     page_size: "100",
   });
-  const payload = await managementRequest<RuntimePage<RuntimeDeployment>>(
+  return listAllRuntimePages<RuntimeDeployment>(
     `/dealhost/api/hosting/deployments/?${query.toString()}`,
-    { signal },
+    "/dealhost/api/hosting/deployments/",
+    signal,
   );
-  return runtimePage(payload);
 }
 
 export function getRuntimeDeployment(deploymentId: string, signal?: AbortSignal) {

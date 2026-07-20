@@ -68,6 +68,7 @@ const environment: RuntimeEnvironment = {
   policy: {
     requires_image_digest: true,
     allowed_registries: ["ghcr.io/smartappli"],
+    allowed_secret_refs: ["database-url"],
     stateless_only: true,
   },
 };
@@ -377,6 +378,30 @@ it("confirms asynchronous undeployment and uses the selected runtime revision", 
 
   await userEvent.click(await screen.findByRole("button", { name: "Undeploy runtime" }));
   expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("Field portal"));
+  await waitFor(() => expect(api.undeployRuntimeDeployment).toHaveBeenCalledWith(
+    deployment,
+    "runtime-command-001",
+  ));
+});
+
+it("keeps cleanup available when an operator disables the runtime environment", async () => {
+  api.listRuntimeEnvironments.mockResolvedValue(page([{ ...environment, enabled: false }]));
+  api.listRuntimeDeployments.mockResolvedValue(page([deployment]));
+  api.undeployRuntimeDeployment.mockResolvedValue({
+    deployment: { ...deployment, desired_state: "absent", observed_state: "deleting", revision: 6 },
+    operation: operation("undeploy"),
+  });
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  renderPanel();
+
+  await screen.findByRole("heading", { name: "Runtime deployment" });
+  expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Restart" })).toBeDisabled();
+  const undeployButton = screen.getByRole("button", { name: "Undeploy runtime" });
+  expect(undeployButton).toBeEnabled();
+  await userEvent.click(undeployButton);
+
   await waitFor(() => expect(api.undeployRuntimeDeployment).toHaveBeenCalledWith(
     deployment,
     "runtime-command-001",

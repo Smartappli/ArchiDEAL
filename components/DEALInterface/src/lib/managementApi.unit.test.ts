@@ -481,6 +481,46 @@ describe("managementRequest", () => {
     ]);
   });
 
+  it("loads every runtime environment and deployment page", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        count: 2,
+        next: "/dealhost/api/hosting/runtime-environments/?page=2&page_size=100",
+        previous: null,
+        results: [{ slug: "first" }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        count: 2,
+        next: null,
+        previous: "/dealhost/api/hosting/runtime-environments/?page=1&page_size=100",
+        results: [{ slug: "second" }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        count: 2,
+        next: "/dealhost/api/hosting/deployments/?application_id=4&page=2&page_size=100",
+        previous: null,
+        results: [{ id: "deployment-first" }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        count: 2,
+        next: null,
+        previous: "/dealhost/api/hosting/deployments/?application_id=4&page=1&page_size=100",
+        results: [{ id: "deployment-second" }],
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const environments = await listRuntimeEnvironments();
+    const deployments = await listRuntimeDeployments(4);
+
+    expect(environments.results.map((item) => item.slug)).toEqual(["first", "second"]);
+    expect(deployments.results.map((item) => item.id)).toEqual([
+      "deployment-first",
+      "deployment-second",
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("rejects runtime writes without valid revisions or idempotency keys before fetch", () => {
     const application = {
       id: 4,

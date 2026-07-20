@@ -971,6 +971,7 @@ describe("App live module integrations", () => {
       policy: {
         requires_image_digest: true,
         allowed_registries: ["ghcr.io/smartappli"],
+        allowed_secret_refs: [],
         stateless_only: true,
       },
     };
