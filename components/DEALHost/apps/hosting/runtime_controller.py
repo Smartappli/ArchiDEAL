@@ -71,7 +71,12 @@ class RuntimeControllerClient:
             json=payload,
             expected_statuses={200, 201, 202},
         )
-        return _snapshot(data, require_id=True)
+        deployment_id = payload.get("deployment_id")
+        return _snapshot(
+            data,
+            require_id=True,
+            expected_id=deployment_id if isinstance(deployment_id, str) else "",
+        )
 
     def update(
         self,
@@ -87,7 +92,7 @@ class RuntimeControllerClient:
             json=payload,
             expected_statuses={200, 202},
         )
-        return _snapshot(data, fallback_id=controller_id)
+        return _snapshot(data, fallback_id=controller_id, expected_id=controller_id)
 
     def action(
         self,
@@ -106,7 +111,7 @@ class RuntimeControllerClient:
             json=payload,
             expected_statuses={200, 202},
         )
-        return _snapshot(data, fallback_id=controller_id)
+        return _snapshot(data, fallback_id=controller_id, expected_id=controller_id)
 
     def undeploy(
         self,
@@ -122,7 +127,7 @@ class RuntimeControllerClient:
             json=payload,
             expected_statuses={200, 202},
         )
-        return _snapshot(data, fallback_id=controller_id)
+        return _snapshot(data, fallback_id=controller_id, expected_id=controller_id)
 
     def status(self, controller_id: str, *, request_id: str) -> RuntimeSnapshot:
         data = self._request(
@@ -131,7 +136,7 @@ class RuntimeControllerClient:
             request_id=request_id,
             expected_statuses={200},
         )
-        return _snapshot(data, fallback_id=controller_id)
+        return _snapshot(data, fallback_id=controller_id, expected_id=controller_id)
 
     def logs(
         self,
@@ -271,6 +276,7 @@ def _snapshot(
     *,
     fallback_id: str = "",
     require_id: bool = False,
+    expected_id: str = "",
 ) -> RuntimeSnapshot:
     controller_id = data.get("id", fallback_id)
     state = data.get("state")
@@ -285,6 +291,16 @@ def _snapshot(
     ):
         raise RuntimeControllerError(
             "Runtime controller omitted its deployment identifier."
+        )
+    try:
+        _identifier(controller_id)
+    except RuntimeControllerError as exc:
+        raise RuntimeControllerError(
+            "Runtime controller returned an invalid deployment identifier."
+        ) from exc
+    if expected_id and controller_id != expected_id:
+        raise RuntimeControllerError(
+            "Runtime controller returned an inconsistent deployment identifier."
         )
     if state not in ALLOWED_RUNTIME_STATES:
         raise RuntimeControllerError("Runtime controller returned an invalid state.")
@@ -306,6 +322,11 @@ def _snapshot(
     validated_components = tuple(
         _component_snapshot(component) for component in components
     )
+    component_slugs = [component["slug"] for component in validated_components]
+    if len(component_slugs) != len(set(component_slugs)):
+        raise RuntimeControllerError(
+            "Runtime controller returned duplicate runtime components."
+        )
     return RuntimeSnapshot(
         controller_id=controller_id,
         state=state,

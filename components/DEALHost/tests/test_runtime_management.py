@@ -359,9 +359,26 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
     ) -> None:
         created = self.queue_deployment(key="runtime-priority-deploy")
         deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
-        active = deployment.operations.get()
-        active.status = RuntimeOperation.Status.RUNNING
-        active.save(update_fields=["status"])
+        original = deployment.operations.get()
+        original.status = RuntimeOperation.Status.SUCCEEDED
+        original.finished_at = timezone.now()
+        original.save(update_fields=["status", "finished_at"])
+        active_log = RuntimeOperation.objects.create(
+            deployment=deployment,
+            operation_type=RuntimeOperation.OperationType.LOG_SNAPSHOT,
+            status=RuntimeOperation.Status.QUEUED,
+            idempotency_key="runtime-priority-active-log",
+            request_hash="a" * 64,
+            target_generation=deployment.generation,
+        )
+        active_mutation = RuntimeOperation.objects.create(
+            deployment=deployment,
+            operation_type=RuntimeOperation.OperationType.CONFIGURE,
+            status=RuntimeOperation.Status.RUNNING,
+            idempotency_key="runtime-priority-active-mutation",
+            request_hash="b" * 64,
+            target_generation=deployment.generation,
+        )
         for index in range(25):
             RuntimeOperation.objects.create(
                 deployment=deployment,
@@ -379,9 +396,14 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 26)
-        self.assertEqual(response.data["results"][0]["id"], str(active.id))
+        self.assertEqual(response.data["count"], 28)
+        self.assertEqual(
+            response.data["results"][0]["id"],
+            str(active_mutation.id),
+        )
         self.assertEqual(response.data["results"][0]["status"], "running")
+        self.assertEqual(response.data["results"][1]["id"], str(active_log.id))
+        self.assertEqual(response.data["results"][1]["status"], "queued")
 
     def test_only_one_log_snapshot_is_active_and_logs_do_not_block_mutations(
         self,

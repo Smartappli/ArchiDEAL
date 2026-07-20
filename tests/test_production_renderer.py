@@ -1078,7 +1078,139 @@ class ProductionRendererTests(unittest.TestCase):
                 allow_apisix_to_runtime_apps,
             )
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("must not select the runtime-apps namespace", result.stderr)
+        self.assertIn("must contain exactly the reviewed core pod peers", result.stderr)
+
+        def add_empty_apisix_peer(documents) -> None:
+            policy = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "apisix-egress"
+            )
+            policy["spec"]["egress"].append(
+                {
+                    "to": [{}],
+                    "ports": [{"protocol": "TCP", "port": 80}],
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "apisix-empty-peer",
+                "base/network-policies.yaml",
+                add_empty_apisix_peer,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must contain exactly the reviewed core pod peers", result.stderr)
+
+        def overlap_apisix_ipblock_with_pods(documents) -> None:
+            policy = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "apisix-egress"
+            )
+            etcd_rule = next(
+                rule
+                for rule in policy["spec"]["egress"]
+                if rule.get("ports") == [{"protocol": "TCP", "port": 2379}]
+            )
+            etcd_rule["to"] = [{"ipBlock": {"cidr": "${POD_CIDR}"}}]
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "apisix-pod-cidr",
+                "base/network-policies.yaml",
+                overlap_apisix_ipblock_with_pods,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must contain exactly the reviewed core pod peers", result.stderr)
+
+        for policy_name, port in (
+            ("dealhost-runtime-controller-clients-egress", 8081),
+            ("dealhost-runtime-worker-egress", 5432),
+            ("dealhost-runtime-controller-egress", 443),
+        ):
+            with (
+                self.subTest(runtime_egress_policy=policy_name),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+
+                def add_empty_runtime_egress_peer(
+                    documents,
+                    policy_name=policy_name,
+                    port=port,
+                ) -> None:
+                    policy = next(
+                        document
+                        for document in documents
+                        if document.get("metadata", {}).get("name") == policy_name
+                    )
+                    policy["spec"]["egress"].append(
+                        {
+                            "to": [{}],
+                            "ports": [{"protocol": "TCP", "port": port}],
+                        }
+                    )
+
+                result = self.render_with_kubernetes_mutation(
+                    Path(directory) / policy_name,
+                    "base/network-policies.yaml",
+                    add_empty_runtime_egress_peer,
+                )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(policy_name, result.stderr)
+            self.assertIn("additional or broad peers are forbidden", result.stderr)
+
+        def add_empty_runtime_controller_ingress_peer(documents) -> None:
+            policy = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name")
+                == "dealhost-runtime-controller-ingress"
+            )
+            policy["spec"]["ingress"].append(
+                {
+                    "from": [{}],
+                    "ports": [{"protocol": "TCP", "port": 8081}],
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-controller-empty-peer",
+                "base/network-policies.yaml",
+                add_empty_runtime_controller_ingress_peer,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(
+            "must contain exactly the runtime worker and monitoring scraper peers",
+            result.stderr,
+        )
+
+        def add_empty_runtime_worker_ingress_peer(documents) -> None:
+            policy = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name")
+                == "dealhost-runtime-worker-ingress"
+            )
+            policy["spec"]["ingress"].append(
+                {
+                    "from": [{}],
+                    "ports": [{"protocol": "TCP", "port": 9102}],
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-worker-empty-peer",
+                "base/network-policies.yaml",
+                add_empty_runtime_worker_ingress_peer,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(
+            "must contain exactly the monitoring scraper peer",
+            result.stderr,
+        )
 
     def test_dependency_ports_must_match_network_policies(self) -> None:
         invalid_values = {
@@ -1272,6 +1404,62 @@ class ProductionRendererTests(unittest.TestCase):
                 )
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(f"must not contain {kind}", result.stderr)
+
+        def add_explicitly_runtime_scoped_ingress(documents) -> None:
+            documents.append(
+                {
+                    "apiVersion": "networking.k8s.io/v1",
+                    "kind": "Ingress",
+                    "metadata": {
+                        "name": "runtime-exposure-outside-tree",
+                        "namespace": "archideal-runtime-apps",
+                    },
+                    "spec": {},
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-ingress-outside-tree",
+                "base/services.yaml",
+                add_explicitly_runtime_scoped_ingress,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must not contain Ingress", result.stderr)
+
+        def add_unreviewed_runtime_namespace_label(documents) -> None:
+            namespace = next(
+                document
+                for document in documents
+                if document.get("kind") == "Namespace"
+            )
+            namespace["metadata"]["labels"]["runtime.archideal.io/unreviewed"] = "true"
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-namespace-extra-label",
+                "runtime-apps/namespace.yaml",
+                add_unreviewed_runtime_namespace_label,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("exactly its reviewed production Namespace", result.stderr)
+
+        def import_additional_runtime_resource(documents) -> None:
+            kustomization = next(
+                document
+                for document in documents
+                if document.get("kind") == "Kustomization"
+            )
+            kustomization["resources"].append("../base/services.yaml")
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-kustomization-import",
+                "runtime-apps/kustomization.yaml",
+                import_additional_runtime_resource,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("exactly the reviewed local baseline resources", result.stderr)
 
         def add_runtime_network_policy(documents) -> None:
             documents.append(

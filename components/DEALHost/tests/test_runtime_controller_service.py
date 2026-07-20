@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -413,6 +414,46 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             self.kubernetes.resources,
         )
 
+    async def test_concurrent_undeploys_both_return_deleted(self) -> None:
+        await self.reconciler.deploy(self.desired(), request_id="request-deploy")
+        absent = self.desired(generation=2, desired_state="absent")
+        original_observe = self.reconciler.observe
+        both_observing = asyncio.Event()
+        observer_count = 0
+
+        async def synchronized_observe(deployment_id: str):
+            nonlocal observer_count
+            observer_count += 1
+            if observer_count == 2:
+                both_observing.set()
+            await both_observing.wait()
+            return await original_observe(deployment_id)
+
+        self.reconciler.observe = synchronized_observe  # type: ignore[method-assign]
+        results = await asyncio.gather(
+            self.reconciler.undeploy(
+                DEPLOYMENT_ID,
+                request_id="request-delete-1",
+                desired=absent,
+            ),
+            self.reconciler.undeploy(
+                DEPLOYMENT_ID,
+                request_id="request-delete-2",
+                desired=absent,
+            ),
+        )
+
+        self.assertEqual([result.state for result in results], ["deleted", "deleted"])
+        self.assertEqual(
+            [result.observed_generation for result in results],
+            [2, 2],
+        )
+        self.assertNotIn(
+            (self.settings.namespace, "ConfigMap", state_name(DEPLOYMENT_ID)),
+            self.kubernetes.resources,
+        )
+
+        apply_count = sum(call[0] == "apply" for call in self.kubernetes.calls)
         replay = await self.reconciler.undeploy(
             DEPLOYMENT_ID,
             request_id="request-0008",
@@ -420,6 +461,10 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(replay.state, "deleted")
         self.assertEqual(replay.observed_generation, 2)
+        self.assertEqual(
+            sum(call[0] == "apply" for call in self.kubernetes.calls),
+            apply_count,
+        )
         self.assertNotIn(
             (self.settings.namespace, "ConfigMap", state_name(DEPLOYMENT_ID)),
             self.kubernetes.resources,

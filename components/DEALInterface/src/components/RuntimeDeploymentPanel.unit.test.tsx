@@ -448,6 +448,26 @@ it("resumes a queued operation from history and retries a transient polling fail
   expect(await screen.findByText("The runtime operation completed successfully.")).toBeInTheDocument();
 }, 8_000);
 
+it("keeps lifecycle, configuration and cleanup available while a log snapshot is pending", async () => {
+  const queuedLog: RuntimeOperation = {
+    ...operation("log_snapshot"),
+    status: "queued",
+    started_at: null,
+    finished_at: null,
+    progress: { stage: "queued", percent: null },
+    result: null,
+  };
+  api.listRuntimeDeployments.mockResolvedValue(page([deployment]));
+  api.listRuntimeOperations.mockResolvedValue(page([queuedLog]));
+  renderPanel();
+
+  expect(await screen.findAllByText("Queued")).toHaveLength(2);
+  expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Undeploy runtime" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Apply configuration and scaling" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Request log snapshot" })).toBeDisabled();
+});
+
 it.each([
   ["stopped", true, false, false],
   ["failed", true, true, false],

@@ -207,6 +207,8 @@ class RuntimeReconciler:
             if desired is None:
                 return RuntimeResult(deployment_id, "deleted", "", 0, ())
             current_desired = desired
+            if not await self._assert_owned_resources(current_desired):
+                return self._deleted_result(current_desired)
         else:
             current_desired = self._desired_from_state(current)
             if desired is not None:
@@ -229,7 +231,8 @@ class RuntimeReconciler:
             await self.kubernetes.delete("ConfigMap", state_name(deployment_id))
             return self._deleted_result(current_desired)
 
-        await self._assert_owned_resources(current_desired)
+        if current is not None:
+            await self._assert_owned_resources(current_desired)
 
         await self.kubernetes.apply(
             state_config_map(
@@ -248,7 +251,13 @@ class RuntimeReconciler:
                 "ConfigMap",
                 component_name(deployment_id, component.slug, suffix="-cfg"),
             )
-        return await self.observe(deployment_id)
+        try:
+            return await self.observe(deployment_id)
+        except RuntimeNotFound:
+            # A timed-out DELETE may be retried while the first request is still
+            # completing.  The other request can remove the terminal state
+            # ConfigMap between our resource deletion and observation.
+            return self._deleted_result(current_desired)
 
     async def observe(self, deployment_id: str) -> RuntimeResult:
         state = await self._state(deployment_id)
@@ -495,8 +504,8 @@ class RuntimeReconciler:
                     code="secret_reference_unavailable",
                 )
 
-    async def _assert_owned_resources(self, desired: DesiredDeployment) -> None:
-        await self._assert_owned(
+    async def _assert_owned_resources(self, desired: DesiredDeployment) -> bool:
+        present = await self._assert_owned(
             "ConfigMap",
             state_name(desired.deployment_id),
             desired,
@@ -516,12 +525,16 @@ class RuntimeReconciler:
                     ),
                 ),
             ):
-                await self._assert_owned(
-                    kind,
-                    resource_name,
-                    desired,
-                    component_slug=component.slug,
+                present = (
+                    await self._assert_owned(
+                        kind,
+                        resource_name,
+                        desired,
+                        component_slug=component.slug,
+                    )
+                    or present
                 )
+        return present
 
     async def _assert_owned(
         self,
@@ -530,10 +543,10 @@ class RuntimeReconciler:
         desired: DesiredDeployment,
         *,
         component_slug: str = "",
-    ) -> None:
+    ) -> bool:
         resource = await self.kubernetes.get(kind, name)
         if resource is None:
-            return
+            return False
         metadata = resource.get("metadata")
         labels = metadata.get("labels") if isinstance(metadata, dict) else None
         expected = {
@@ -553,6 +566,7 @@ class RuntimeReconciler:
             raise RuntimeConflict(
                 "A target Kubernetes resource is not owned by this runtime deployment."
             )
+        return True
 
     @staticmethod
     def _deletion_desired(

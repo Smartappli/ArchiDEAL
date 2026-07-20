@@ -236,42 +236,6 @@ def _network_policy_pod_names(peer: dict) -> set[str]:
     return names
 
 
-def _network_policy_peer_targets_runtime(peer: dict) -> bool:
-    namespace_selector = peer.get("namespaceSelector", {})
-    namespace_labels = namespace_selector.get("matchLabels", {})
-    if namespace_labels.get("kubernetes.io/metadata.name") == RUNTIME_APPS_NAMESPACE:
-        return True
-    for expression in namespace_selector.get("matchExpressions", []):
-        if (
-            expression.get("key") == "kubernetes.io/metadata.name"
-            and expression.get("operator") == "In"
-            and RUNTIME_APPS_NAMESPACE in expression.get("values", [])
-        ):
-            return True
-
-    pod_selector = peer.get("podSelector", {})
-    match_labels = pod_selector.get("matchLabels", {})
-    if (
-        match_labels.get("app.kubernetes.io/managed-by")
-        == "dealhost-runtime-controller"
-        or match_labels.get("app.kubernetes.io/part-of") == "archideal-runtime"
-        or any(
-            isinstance(value, str) and value.startswith("dealrt-")
-            for value in match_labels.values()
-        )
-    ):
-        return True
-    for expression in pod_selector.get("matchExpressions", []):
-        values = expression.get("values", [])
-        if expression.get("key") == "archideal.io/runtime-deployment" or any(
-            isinstance(value, str)
-            and (value.startswith("dealrt-") or value == "archideal-runtime")
-            for value in values
-        ):
-            return True
-    return False
-
-
 def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) -> None:
     hosts = _config_csv(runtime_config, "APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS")
     raw_suffixes = _config_csv(
@@ -774,7 +738,65 @@ def validate_runtime_apps_fail_closed(
 ) -> None:
     """Reject every static ingress path into the managed-application namespace."""
 
-    for document in runtime_documents:
+    expected_kustomization = {
+        "apiVersion": "kustomize.config.k8s.io/v1beta1",
+        "kind": "Kustomization",
+        "resources": [
+            "namespace.yaml",
+            "serviceaccount.yaml",
+            "rbac.yaml",
+            "resource-governance.yaml",
+            "network-policies.yaml",
+            "registry-external-secret.yaml",
+        ],
+    }
+    runtime_kustomizations = [
+        document
+        for document in runtime_documents
+        if document.get("kind") == "Kustomization"
+    ]
+    if runtime_kustomizations != [expected_kustomization]:
+        fail(
+            "Runtime-apps kustomization must contain exactly the reviewed local "
+            "baseline resources; patches, generators, components and remote or "
+            "additional resources are forbidden."
+        )
+
+    expected_namespace = {
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {
+            "name": RUNTIME_APPS_NAMESPACE,
+            "labels": {
+                "app.kubernetes.io/part-of": "archideal",
+                "archideal.io/environment": "production",
+                "archideal.io/purpose": "managed-applications",
+                "pod-security.kubernetes.io/audit": "restricted",
+                "pod-security.kubernetes.io/audit-version": "latest",
+                "pod-security.kubernetes.io/enforce": "restricted",
+                "pod-security.kubernetes.io/enforce-version": "latest",
+                "pod-security.kubernetes.io/warn": "restricted",
+                "pod-security.kubernetes.io/warn-version": "latest",
+            },
+        },
+    }
+    runtime_namespaces = [
+        document
+        for document in runtime_documents
+        if document.get("kind") == "Namespace"
+    ]
+    if runtime_namespaces != [expected_namespace]:
+        fail(
+            "Runtime-apps must contain exactly its reviewed production Namespace "
+            "with the restricted Pod Security Standard labels."
+        )
+
+    explicitly_runtime_scoped = [
+        document
+        for document in all_documents
+        if document.get("metadata", {}).get("namespace") == RUNTIME_APPS_NAMESPACE
+    ]
+    for document in [*runtime_documents, *explicitly_runtime_scoped]:
         kind = document.get("kind")
         name = document.get("metadata", {}).get("name", "<unnamed>")
         if kind in RUNTIME_EXPOSURE_KINDS:
@@ -882,7 +904,7 @@ def validate_runtime_apps_fail_closed(
         )
 
 
-def validate_runtime_contracts(documents: list[dict]) -> None:
+def validate_runtime_contracts(documents: list[dict], values: dict[str, str]) -> None:
     workloads = {
         document["metadata"]["name"]: document
         for document in documents
@@ -1939,44 +1961,154 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             fail(f"{policy_name} has an unexpected external dependency port set.")
 
     controller_ingress = network_policies.get("dealhost-runtime-controller-ingress", {})
-    controller_ingress_sources = {
-        name
-        for rule in controller_ingress.get("spec", {}).get("ingress", [])
-        for source in rule.get("from", [])
-        for name in _network_policy_pod_names(source)
+    expected_controller_ingress = {
+        "podSelector": {
+            "matchLabels": {"app.kubernetes.io/name": "dealhost-runtime-controller"}
+        },
+        "policyTypes": ["Ingress"],
+        "ingress": [
+            {
+                "from": [
+                    {
+                        "podSelector": {
+                            "matchLabels": {
+                                "app.kubernetes.io/name": "dealhost-runtime-worker"
+                            }
+                        }
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 8081}],
+            },
+            {
+                "from": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {
+                                "kubernetes.io/metadata.name": values[
+                                    "MONITORING_NAMESPACE"
+                                ]
+                            }
+                        },
+                        "podSelector": {
+                            "matchLabels": {"monitoring.archideal.io/scraper": "true"}
+                        },
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 8081}],
+            },
+        ],
     }
-    controller_ingress_ports = {
-        port.get("port")
-        for rule in controller_ingress.get("spec", {}).get("ingress", [])
-        for port in rule.get("ports", [])
-    }
+    if controller_ingress.get("spec") != expected_controller_ingress:
+        fail(
+            "dealhost-runtime-controller-ingress must contain exactly the runtime "
+            "worker and monitoring scraper peers on TCP/8081; additional or broad "
+            "peers are forbidden."
+        )
+
     controller_clients = network_policies.get(
         "dealhost-runtime-controller-clients-egress", {}
     )
-    controller_client_names = _network_policy_pod_names(
-        controller_clients.get("spec", {})
-    )
-    controller_client_destinations = {
-        name
-        for rule in controller_clients.get("spec", {}).get("egress", [])
-        for destination in rule.get("to", [])
-        for name in _network_policy_pod_names(destination)
+    expected_controller_clients = {
+        "podSelector": {
+            "matchLabels": {"app.kubernetes.io/name": "dealhost-runtime-worker"}
+        },
+        "policyTypes": ["Egress"],
+        "egress": [
+            {
+                "to": [
+                    {
+                        "podSelector": {
+                            "matchLabels": {
+                                "app.kubernetes.io/name": (
+                                    "dealhost-runtime-controller"
+                                )
+                            }
+                        }
+                    }
+                ],
+                "ports": [
+                    {"protocol": "TCP", "port": 8081},
+                    {"protocol": "TCP", "port": 8443},
+                ],
+            }
+        ],
     }
-    controller_client_ports = {
-        port.get("port")
-        for rule in controller_clients.get("spec", {}).get("egress", [])
-        for port in rule.get("ports", [])
-    }
-    if (
-        controller_ingress_sources != {"dealhost-runtime-worker"}
-        or controller_ingress_ports != {8081}
-        or controller_client_names != {"dealhost-runtime-worker"}
-        or controller_client_destinations != {"dealhost-runtime-controller"}
-        or controller_client_ports != {8081, 8443}
-    ):
+    if controller_clients.get("spec") != expected_controller_clients:
         fail(
-            "Runtime-controller traffic must be isolated to the runtime worker on "
-            "the internal TLS Service path."
+            "dealhost-runtime-controller-clients-egress must contain exactly the "
+            "runtime worker to controller peer on TCP/8081 and TCP/8443; additional "
+            "or broad peers are forbidden."
+        )
+
+    expected_runtime_dependency_egress = {
+        "dealhost-runtime-worker-egress": {
+            "podSelector": {
+                "matchLabels": {"app.kubernetes.io/name": "dealhost-runtime-worker"}
+            },
+            "policyTypes": ["Egress"],
+            "egress": [
+                {
+                    "to": [
+                        {"ipBlock": {"cidr": values["POSTGRES_METADATA_EGRESS_CIDR"]}}
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 5432}],
+                },
+                {
+                    "to": [{"ipBlock": {"cidr": values["VALKEY_EGRESS_CIDR"]}}],
+                    "ports": [{"protocol": "TCP", "port": 6380}],
+                },
+            ],
+        },
+        "dealhost-runtime-controller-egress": {
+            "podSelector": {
+                "matchLabels": {"app.kubernetes.io/name": "dealhost-runtime-controller"}
+            },
+            "policyTypes": ["Egress"],
+            "egress": [
+                {
+                    "to": [{"ipBlock": {"cidr": values["KUBERNETES_API_EGRESS_CIDR"]}}],
+                    "ports": [{"protocol": "TCP", "port": 443}],
+                }
+            ],
+        },
+    }
+    for policy_name, expected_spec in expected_runtime_dependency_egress.items():
+        if network_policies.get(policy_name, {}).get("spec") != expected_spec:
+            fail(
+                f"{policy_name} must match its exact reviewed dependency peers and "
+                "ports; additional or broad peers are forbidden."
+            )
+
+    runtime_worker_ingress = network_policies.get("dealhost-runtime-worker-ingress", {})
+    expected_runtime_worker_ingress = {
+        "podSelector": {
+            "matchLabels": {"app.kubernetes.io/name": "dealhost-runtime-worker"}
+        },
+        "policyTypes": ["Ingress"],
+        "ingress": [
+            {
+                "from": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {
+                                "kubernetes.io/metadata.name": values[
+                                    "MONITORING_NAMESPACE"
+                                ]
+                            }
+                        },
+                        "podSelector": {
+                            "matchLabels": {"monitoring.archideal.io/scraper": "true"}
+                        },
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 9102}],
+            }
+        ],
+    }
+    if runtime_worker_ingress.get("spec") != expected_runtime_worker_ingress:
+        fail(
+            "dealhost-runtime-worker-ingress must contain exactly the monitoring "
+            "scraper peer on TCP/9102; additional or broad peers are forbidden."
         )
 
     runtime_apps_default_deny = network_policies.get("runtime-apps-default-deny", {})
@@ -2027,22 +2159,82 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         if document.get("kind") == "NetworkPolicy"
         and document.get("metadata", {}).get("name") == "apisix-egress"
     )
-    apisix_egress_ports = {
-        port["port"]
-        for rule in apisix_policy["spec"].get("egress", [])
-        for port in rule.get("ports", [])
+    expected_apisix_egress = {
+        "podSelector": {"matchLabels": {"app.kubernetes.io/name": "apisix"}},
+        "policyTypes": ["Egress"],
+        "egress": [
+            {
+                "to": [
+                    {
+                        "podSelector": {
+                            "matchLabels": {"app.kubernetes.io/name": "dealhost"}
+                        }
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 8000}],
+            },
+            {
+                "to": [
+                    {
+                        "podSelector": {
+                            "matchExpressions": [
+                                {
+                                    "key": "app.kubernetes.io/name",
+                                    "operator": "In",
+                                    "values": ["dealinterface", "dealiot-console"],
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 8080}],
+            },
+            {
+                "to": [
+                    {
+                        "podSelector": {
+                            "matchLabels": {"app.kubernetes.io/name": "dealdata-core"}
+                        }
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 7000}],
+            },
+            {
+                "to": [
+                    {
+                        "podSelector": {
+                            "matchLabels": {"app.kubernetes.io/name": "dealdata-gps"}
+                        }
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 7001}],
+            },
+            {
+                "to": [
+                    {
+                        "podSelector": {
+                            "matchLabels": {"app.kubernetes.io/name": "dealdata-sensor"}
+                        }
+                    }
+                ],
+                "ports": [{"protocol": "TCP", "port": 7002}],
+            },
+            {
+                "to": [{"ipBlock": {"cidr": values["ETCD_EGRESS_CIDR"]}}],
+                "ports": [{"protocol": "TCP", "port": 2379}],
+            },
+            {
+                "to": [{"ipBlock": {"cidr": values["OTEL_EGRESS_CIDR"]}}],
+                "ports": [{"protocol": "TCP", "port": 443}],
+            },
+        ],
     }
-    if any(
-        _network_policy_peer_targets_runtime(peer)
-        for rule in apisix_policy["spec"].get("egress", [])
-        for peer in rule.get("to", [])
-    ):
+    if apisix_policy.get("spec") != expected_apisix_egress:
         fail(
-            "APISIX egress must not select the runtime-apps namespace or runtime "
-            "pods while runtime exposure is unsupported."
+            "APISIX egress must contain exactly the reviewed core pod peers and "
+            "the configured etcd/OTLP ipBlocks; additional or broad peers are "
+            "forbidden."
         )
-    if not {443, 2379} <= apisix_egress_ports:
-        fail("APISIX NetworkPolicy must allow OTLP HTTPS/443 and etcd TLS/2379.")
 
     policies = {
         document["metadata"]["name"]: document
@@ -2896,7 +3088,7 @@ def main() -> int:
     documents = validate_yaml_tree(output)
     runtime_documents = validate_yaml_tree(output / "runtime-apps")
     validate_runtime_apps_fail_closed(runtime_documents, documents)
-    validate_runtime_contracts(documents)
+    validate_runtime_contracts(documents, values)
     print(f"Rendered and validated Kubernetes baseline in {output}")
     return 0
 

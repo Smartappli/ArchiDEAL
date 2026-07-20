@@ -107,11 +107,11 @@ Upstream modules (containers/services Django)
 - `GET/POST /api/hosting/tools/` : catalogue CRUD des outils (chaque outil peut lier plusieurs modules).
 - `GET/POST /api/hosting/applications/` : catalogue CRUD des applications (chaque application peut lier plusieurs modules) ; le CRUD de catalogue ne déploie rien sans appel runtime explicite.
 - `GET /api/hosting/runtime-environments/` : environnements Kubernetes autorisés et capacités disponibles.
-- `GET/POST /api/hosting/deployments/` : état désiré/observé et création asynchrone d'un déploiement runtime.
+- `GET/POST /api/hosting/deployments/` : état désiré/observé et création asynchrone d'un déploiement runtime. La liste accepte `application_id`, `environment`, `observed_state` et `active=true|false`; DEALInterface utilise le filtre actif et suit toutes ses pages afin que l'historique supprimé ne masque jamais un déploiement administrable.
 - `GET/PATCH/DELETE /api/hosting/deployments/{uuid}/` : lecture, configuration conditionnelle et déploiement inverse avec ETag fort.
 - `POST /api/hosting/deployments/{uuid}/actions/` : `start`, `stop`, `restart` ou `scale` selon les capacités de l'environnement.
-- `GET /api/hosting/deployments/{uuid}/operations/` et `GET /api/hosting/operations/{uuid}/` : historique et suivi des opérations durables.
-- `POST /api/hosting/deployments/{uuid}/log-requests/` : snapshot borné et éphémère des journaux d'un composant.
+- `GET /api/hosting/deployments/{uuid}/operations/` et `GET /api/hosting/operations/{uuid}/` : historique et suivi des opérations durables; les opérations actives sont placées avant l'historique terminal pour permettre une reprise fiable après rechargement.
+- `POST /api/hosting/deployments/{uuid}/log-requests/` : snapshot borné et éphémère des journaux d'un composant. Un seul snapshot peut être actif par déploiement; il ne bloque pas une action de cycle de vie, une configuration ou un undeploy.
 - `GET/POST /api/hosting/datasets/` : catalogue des datasets et listes de visibilité. Les lectures authentifiées sont limitées aux entrées actives attribuées directement ou via un groupe ; le staff voit tout et réalise les mutations. Les mises à jour et suppressions exigent la révision courante dans `If-Match`. Ces listes ne contrôlent pas l'accès aux événements GPS ou Sensor de DEALData.
 - `GET /api/hosting/dataset-principals/` (edge monorepo :
   `GET /dealhost/api/hosting/dataset-principals/`) : catalogue staff-only minimal pour
@@ -347,6 +347,12 @@ de logs sont limités par l'environnement, conservés cinq minutes dans le cache
 supprimés; leur réponse utilise `Cache-Control: private, no-store`. Les domaines
 personnalisés ne sont pas exposés tant que DNS, certificats et callback OIDC ne disposent
 pas d'un contrat transactionnel commun.
+
+Après un undeploy terminal, le contrôleur supprime aussi son ConfigMap d'état, une fois
+les Deployments, Services, HPAs et ConfigMaps de composants effectivement absents. Un
+DELETE rejoué sans état reconstruit uniquement l'état transitoire nécessaire au nettoyage,
+puis le retire. Les anciens tombstones `phase=deleted` sont récupérés à l'admission d'un
+nouveau déploiement afin de ne pas épuiser le quota du namespace.
 
 Variables principales :
 

@@ -6,6 +6,7 @@ from django.test import SimpleTestCase
 from apps.hosting.runtime_controller import (
     RuntimeControllerClient,
     RuntimeControllerError,
+    _snapshot,
 )
 from dealhost.settings.env import RuntimeControllerConfig
 
@@ -92,4 +93,45 @@ class RuntimeControllerClientTests(SimpleTestCase):
                 tail=10,
                 since_seconds=60,
                 request_id="operation-123",
+            )
+
+    def test_snapshot_rejects_an_inconsistent_identifier(self) -> None:
+        with self.assertRaisesMessage(
+            RuntimeControllerError,
+            "inconsistent deployment identifier",
+        ):
+            _snapshot(
+                {
+                    "id": "another-runtime",
+                    "state": "running",
+                    "observed_generation": 1,
+                    "components": [],
+                },
+                expected_id="expected-runtime",
+            )
+
+    def test_snapshot_rejects_duplicate_component_slugs(self) -> None:
+        component = {
+            "slug": "runtime-api",
+            "image_digest": "ghcr.io/smartappli/runtime@sha256:" + "a" * 64,
+            "desired_replicas": 1,
+            "ready_replicas": 1,
+            "available_replicas": 1,
+            "state": "running",
+            "health": "healthy",
+            "restart_count": 0,
+        }
+
+        with self.assertRaisesMessage(
+            RuntimeControllerError,
+            "duplicate runtime components",
+        ):
+            _snapshot(
+                {
+                    "id": "expected-runtime",
+                    "state": "running",
+                    "observed_generation": 1,
+                    "components": [component, dict(component)],
+                },
+                expected_id="expected-runtime",
             )

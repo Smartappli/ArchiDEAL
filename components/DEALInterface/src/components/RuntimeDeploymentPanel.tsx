@@ -196,8 +196,10 @@ export function RuntimeDeploymentPanel({
   }, [activeDeployments, environments]);
   const versionOptions = selectedApplication?.versions ?? [];
   const operationPending = isPendingOperation(activeOperation);
+  const logOperationPending = operationPending && activeOperation?.type === "log_snapshot";
+  const mutationOperationPending = operationPending && activeOperation?.type !== "log_snapshot";
   const runtimeUnavailable = Boolean(selectedDeployment && selectedEnvironment?.enabled !== true);
-  const runtimeTransitionBusy = isMutating || operationPending || Boolean(
+  const runtimeTransitionBusy = isMutating || mutationOperationPending || Boolean(
     selectedDeployment && TRANSITIONAL_STATES.has(selectedDeployment.observed_state),
   );
   const runtimeBusy = runtimeTransitionBusy || runtimeUnavailable;
@@ -912,19 +914,19 @@ export function RuntimeDeploymentPanel({
                         <form onSubmit={requestLogs}>
                           <label>
                             <span>{t("management.runtime.component")}</span>
-                            <select disabled={readOnly || runtimeBusy} onChange={(event) => setLogComponent(event.target.value)} required value={logComponent}>
+                            <select disabled={readOnly || runtimeBusy || logOperationPending} onChange={(event) => setLogComponent(event.target.value)} required value={logComponent}>
                               {selectedDeployment.components.map((component) => <option key={component.module_id} value={component.slug}>{component.slug}</option>)}
                             </select>
                           </label>
                           <label>
                             <span>{t("management.runtime.tailLines")}</span>
-                            <input disabled={readOnly || runtimeBusy} max={maxLogLines} min={1} onChange={(event) => setLogTailLines(event.target.valueAsNumber)} required type="number" value={logTailLines} />
+                            <input disabled={readOnly || runtimeBusy || logOperationPending} max={maxLogLines} min={1} onChange={(event) => setLogTailLines(event.target.valueAsNumber)} required type="number" value={logTailLines} />
                           </label>
                           <label>
                             <span>{t("management.runtime.sinceSeconds")}</span>
-                            <input disabled={readOnly || runtimeBusy} max={MAX_LOG_SINCE_SECONDS} min={1} onChange={(event) => setLogSinceSeconds(event.target.valueAsNumber)} required type="number" value={logSinceSeconds} />
+                            <input disabled={readOnly || runtimeBusy || logOperationPending} max={MAX_LOG_SINCE_SECONDS} min={1} onChange={(event) => setLogSinceSeconds(event.target.valueAsNumber)} required type="number" value={logSinceSeconds} />
                           </label>
-                          <button disabled={readOnly || runtimeBusy || !logComponent || selectedEnvironment?.capabilities.logs === undefined} type="submit">{t("management.runtime.requestLogs")}</button>
+                          <button disabled={readOnly || runtimeBusy || logOperationPending || !logComponent || selectedEnvironment?.capabilities.logs === undefined} type="submit">{t("management.runtime.requestLogs")}</button>
                         </form>
                         {logSnapshot ? (
                           <div className="runtime-logs__snapshot">
