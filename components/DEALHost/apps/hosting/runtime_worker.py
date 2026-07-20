@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from datetime import timedelta
@@ -24,6 +25,7 @@ TRANSITIONAL_STATES = {"pending", "reconciling", "deleting"}
 MAX_OPERATION_ATTEMPTS = 5
 MAX_RECONCILIATION_AGE = timedelta(minutes=30)
 LOG_TTL_SECONDS = 300
+logger = logging.getLogger(__name__)
 
 
 class RuntimeOperationProcessor:
@@ -57,8 +59,8 @@ class RuntimeOperationProcessor:
         except (RuntimeControllerUnavailable, RuntimeControllerError) as exc:
             self._record_controller_failure(operation, lease_token, exc)
         except Exception:
+            logger.exception("Unexpected runtime worker failure for operation %s", operation.id)
             self._record_unexpected_failure(operation, lease_token)
-            raise
         return True
 
     def run(self, *, once: bool = False, poll_seconds: float = 2.0) -> None:
@@ -392,13 +394,14 @@ class RuntimeOperationProcessor:
             locked.lease_token = None
             locked.lease_expires_at = None
             locked.save()
-            deployment = RuntimeDeployment.objects.select_for_update().get(
-                pk=locked.deployment_id
-            )
-            deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
-            deployment.last_error = str(exc)[:500]
-            deployment.revision += 1
-            deployment.save()
+            if locked.operation_type != RuntimeOperation.OperationType.LOG_SNAPSHOT:
+                deployment = RuntimeDeployment.objects.select_for_update().get(
+                    pk=locked.deployment_id
+                )
+                deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
+                deployment.last_error = str(exc)[:500]
+                deployment.revision += 1
+                deployment.save()
 
     def _record_unexpected_failure(
         self,
@@ -421,13 +424,14 @@ class RuntimeOperationProcessor:
             locked.lease_token = None
             locked.lease_expires_at = None
             locked.save()
-            deployment = RuntimeDeployment.objects.select_for_update().get(
-                pk=locked.deployment_id
-            )
-            deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
-            deployment.last_error = "The runtime worker failed unexpectedly."
-            deployment.revision += 1
-            deployment.save()
+            if locked.operation_type != RuntimeOperation.OperationType.LOG_SNAPSHOT:
+                deployment = RuntimeDeployment.objects.select_for_update().get(
+                    pk=locked.deployment_id
+                )
+                deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
+                deployment.last_error = "The runtime worker failed unexpectedly."
+                deployment.revision += 1
+                deployment.save()
 
 
 def _controller_payload(
