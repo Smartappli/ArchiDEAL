@@ -1063,9 +1063,7 @@ class ProductionRendererTests(unittest.TestCase):
                                 }
                             },
                             "podSelector": {
-                                "matchLabels": {
-                                    "app.kubernetes.io/name": "dealrt-test"
-                                }
+                                "matchLabels": {"app.kubernetes.io/name": "dealrt-test"}
                             },
                         }
                     ],

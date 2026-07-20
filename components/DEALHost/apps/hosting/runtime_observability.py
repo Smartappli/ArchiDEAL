@@ -302,9 +302,7 @@ def _handler_for(health: RuntimeWorkerHealth) -> type[BaseHTTPRequestHandler]:
                 live = health.is_live()
                 status = HTTPStatus.OK if live else HTTPStatus.SERVICE_UNAVAILABLE
                 payload = (
-                    b'{"status":"ok"}\n'
-                    if live
-                    else b'{"status":"unavailable"}\n'
+                    b'{"status":"ok"}\n' if live else b'{"status":"unavailable"}\n'
                 )
                 self._send(status, payload, "application/json")
                 return
