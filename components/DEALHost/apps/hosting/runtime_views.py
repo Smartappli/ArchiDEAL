@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAdminUser
 from rest_framework.request import Request
@@ -39,6 +39,15 @@ from .serializers import (
 
 
 IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+
+
+class RuntimeIdempotencyConflict(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = {
+        "detail": "The idempotency key was claimed by a concurrent runtime request.",
+        "code": "idempotency_conflict",
+    }
+    default_code = "idempotency_conflict"
 
 
 class RuntimePagination(PageNumberPagination):
@@ -149,6 +158,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                 locked_application = HostedApplication.objects.select_for_update().get(
                     pk=application.pk
                 )
+                locked_replay = self._replay(request, request_hash)
+                if locked_replay is not None:
+                    return locked_replay
                 revision_response = _application_precondition(
                     request,
                     locked_application,
@@ -244,6 +256,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             return unavailable
         with transaction.atomic():
             locked = self._locked_deployment(deployment.pk)
+            locked_replay = self._replay(request, request_hash)
+            if locked_replay is not None:
+                return locked_replay
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
@@ -299,6 +314,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             return unavailable
         with transaction.atomic():
             locked = self._locked_deployment(deployment.pk)
+            locked_replay = self._replay(request, request_hash)
+            if locked_replay is not None:
+                return locked_replay
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
@@ -344,6 +362,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
         action_name = serializer.validated_data["action"]
         with transaction.atomic():
             locked = self._locked_deployment(deployment.pk)
+            locked_replay = self._replay(request, request_hash)
+            if locked_replay is not None:
+                return locked_replay
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
@@ -437,6 +458,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             return unavailable
         with transaction.atomic():
             locked = self._locked_deployment(deployment.pk)
+            locked_replay = self._replay_operation(request, request_hash)
+            if locked_replay is not None:
+                return locked_replay
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
@@ -593,16 +617,23 @@ def _create_operation(
     operation_payload = dict(payload)
     if operation_type != RuntimeOperation.OperationType.LOG_SNAPSHOT:
         operation_payload["desired_state"] = deployment.desired_state
-    return RuntimeOperation.objects.create(
-        deployment=deployment,
-        operation_type=operation_type,
-        payload=operation_payload,
-        idempotency_key=key,
-        request_hash=request_hash,
-        target_generation=deployment.generation,
-        actor=actor,
-        actor_label=actor_label,
-    )
+    try:
+        # Keep the unique-key failure inside a savepoint. Raising the API exception
+        # then unwinds the caller's outer transaction, including its desired-state
+        # mutation, instead of leaking an IntegrityError as a 500 response.
+        with transaction.atomic():
+            return RuntimeOperation.objects.create(
+                deployment=deployment,
+                operation_type=operation_type,
+                payload=operation_payload,
+                idempotency_key=key,
+                request_hash=request_hash,
+                target_generation=deployment.generation,
+                actor=actor,
+                actor_label=actor_label,
+            )
+    except IntegrityError as exc:
+        raise RuntimeIdempotencyConflict() from exc
 
 
 def _idempotency_replay(

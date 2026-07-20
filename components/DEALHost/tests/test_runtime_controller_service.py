@@ -355,6 +355,24 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(any(call[0] == "apply" for call in self.kubernetes.calls))
 
+    async def test_generation_replay_is_idempotent_but_conflicting_reuse_fails(self) -> None:
+        desired = self.desired()
+        first = await self.reconciler.deploy(desired, request_id="request-0011")
+        replay = await self.reconciler.deploy(desired, request_id="request-0012")
+        self.assertEqual(replay.deployment_id, first.deployment_id)
+        self.assertEqual(replay.observed_generation, first.observed_generation)
+
+        conflicting_payload = runtime_payload()
+        conflicting_payload["configuration"]["runtime-api"]["MODE"] = "changed"
+        conflicting = parse_desired_deployment(conflicting_payload, self.settings)
+        apply_count = sum(call[0] == "apply" for call in self.kubernetes.calls)
+        with self.assertRaises(RuntimeConflict):
+            await self.reconciler.deploy(conflicting, request_id="request-0013")
+        self.assertEqual(
+            sum(call[0] == "apply" for call in self.kubernetes.calls),
+            apply_count,
+        )
+
     async def test_undeploy_keeps_stable_id_and_generation_tombstone(self) -> None:
         await self.reconciler.deploy(self.desired(), request_id="request-0007")
         absent = self.desired(generation=2, desired_state="absent")

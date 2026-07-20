@@ -42,6 +42,7 @@ class RuntimeControllerClientTests(SimpleTestCase):
             base_url="https://runtime-controller.internal",
             token="controller-test-token",  # nosec B106 - test fixture.
             timeout_seconds=5,
+            ca_file="/var/run/runtime-controller-ca/ca.crt",
         )
 
     @patch("apps.hosting.runtime_controller.httpx.Client", RecordingHttpClient)
@@ -57,6 +58,10 @@ class RuntimeControllerClientTests(SimpleTestCase):
         self.assertEqual(result.lines, ("ready",))
         self.assertFalse(RecordingHttpClient.client_options["follow_redirects"])
         self.assertFalse(RecordingHttpClient.client_options["trust_env"])
+        self.assertEqual(
+            RecordingHttpClient.client_options["verify"],
+            "/var/run/runtime-controller-ca/ca.crt",
+        )
         self.assertEqual(
             RecordingHttpClient.request_options["params"],
             {

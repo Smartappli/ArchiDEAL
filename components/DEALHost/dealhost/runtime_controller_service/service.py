@@ -464,11 +464,11 @@ class RuntimeReconciler:
                 secret_name != resolved_secret_name(self.settings, logical_name)
                 or not isinstance(keys, list)
                 or len(keys) > 50
-                or len(keys) != len(set(keys))
                 or any(
                     not isinstance(key, str) or not _ENV_KEY.fullmatch(key)
                     for key in keys
                 )
+                or len(keys) != len(set(keys))
                 or not requested_keys.issubset(keys)
             ):
                 raise ContractError(
