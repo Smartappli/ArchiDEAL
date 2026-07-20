@@ -519,10 +519,13 @@ def _create_operation(
     key = _idempotency_key(request)
     assert key is not None
     actor, actor_label = _actor(request)
+    operation_payload = dict(payload)
+    if operation_type != RuntimeOperation.OperationType.LOG_SNAPSHOT:
+        operation_payload["desired_state"] = deployment.desired_state
     return RuntimeOperation.objects.create(
         deployment=deployment,
         operation_type=operation_type,
-        payload=payload,
+        payload=operation_payload,
         idempotency_key=key,
         request_hash=request_hash,
         target_generation=deployment.generation,
