@@ -20,7 +20,7 @@ from .runtime_controller import (
 )
 
 
-TRANSITIONAL_STATES = {"pending", "reconciling", "deleting", "unknown"}
+TRANSITIONAL_STATES = {"pending", "reconciling", "deleting"}
 MAX_OPERATION_ATTEMPTS = 5
 LOG_TTL_SECONDS = 300
 
@@ -107,7 +107,9 @@ class RuntimeOperationProcessor:
         if operation.operation_type == RuntimeOperation.OperationType.LOG_SNAPSHOT:
             logs = self.controller.logs(
                 deployment.controller_id,
+                component=operation.payload["component"],
                 tail=operation.payload["tail_lines"],
+                since_seconds=operation.payload["since_seconds"],
                 request_id=str(operation.id),
             )
             self._complete_logs(operation, lease_token, logs)
@@ -189,7 +191,10 @@ class RuntimeOperationProcessor:
                 locked_operation.lease_expires_at = None
                 locked_operation.save()
                 return
-            if snapshot.state == RuntimeDeployment.ObservedState.FAILED:
+            if snapshot.state in {
+                RuntimeDeployment.ObservedState.FAILED,
+                RuntimeDeployment.ObservedState.UNKNOWN,
+            }:
                 locked_operation.status = RuntimeOperation.Status.FAILED
                 locked_operation.error = {
                     "code": "runtime_reconciliation_failed",
@@ -292,6 +297,13 @@ class RuntimeOperationProcessor:
             locked.lease_token = None
             locked.lease_expires_at = None
             locked.save()
+            deployment = RuntimeDeployment.objects.select_for_update().get(
+                pk=locked.deployment_id
+            )
+            deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
+            deployment.last_error = "The runtime worker failed unexpectedly."
+            deployment.revision += 1
+            deployment.save()
 
     def _record_controller_failure(
         self,

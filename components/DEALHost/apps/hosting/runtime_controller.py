@@ -130,14 +130,30 @@ class RuntimeControllerClient:
         self,
         controller_id: str,
         *,
+        component: str,
         tail: int,
+        since_seconds: int,
         request_id: str,
     ) -> RuntimeLogs:
+        if (
+            not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", component)
+            or not isinstance(tail, int)
+            or isinstance(tail, bool)
+            or not 1 <= tail <= 1000
+            or not isinstance(since_seconds, int)
+            or isinstance(since_seconds, bool)
+            or not 1 <= since_seconds <= 604_800
+        ):
+            raise RuntimeControllerError("Runtime log request is invalid.")
         data = self._request(
             "GET",
             f"/v1/deployments/{_identifier(controller_id)}/logs",
             request_id=request_id,
-            params={"tail": tail},
+            params={
+                "component": component,
+                "tail": tail,
+                "since_seconds": since_seconds,
+            },
             expected_statuses={200},
         )
         raw_lines = data.get("lines")
