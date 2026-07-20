@@ -1,0 +1,402 @@
+from __future__ import annotations
+
+from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.test import override_settings
+from django.urls import reverse
+from django.utils import timezone
+from rest_framework.test import APITestCase
+
+from apps.hosting.models import (
+    ApplicationVersion,
+    HostedApplication,
+    Module,
+    ModuleRuntimeProfile,
+    RuntimeDeployment,
+    RuntimeEnvironment,
+    RuntimeOperation,
+)
+from apps.hosting.runtime_controller import RuntimeLogs, RuntimeSnapshot
+from apps.hosting.runtime_release import sha256_json
+from apps.hosting.runtime_worker import RuntimeOperationProcessor
+from dealhost.settings.env import RuntimeControllerConfig
+
+
+ENABLED_CONTROLLER = RuntimeControllerConfig(
+    base_url="https://runtime-controller.internal",
+    token="test-runtime-controller-token",
+    timeout_seconds=5,
+)
+DISABLED_CONTROLLER = RuntimeControllerConfig(
+    base_url="",
+    token="",
+    timeout_seconds=5,
+)
+
+
+class RuntimeFixtureMixin:
+    def setUp(self) -> None:
+        super().setUp()
+        self.admin = get_user_model().objects.create_user(
+            username="runtime-admin",
+            password="irrelevant",  # nosec B106 - test-only fixture.
+            is_staff=True,
+        )
+        self.client.force_authenticate(self.admin)
+        self.environment = RuntimeEnvironment.objects.create(
+            slug="production",
+            name="Production",
+            description="Isolated production namespace",
+            enabled=True,
+            capabilities={
+                "start_stop": True,
+                "restart": True,
+                "scaling": {
+                    "fixed": {"min_replicas": 1, "max_replicas": 10},
+                    "autoscaling": {
+                        "enabled": True,
+                        "min_replicas": 1,
+                        "max_replicas": 10,
+                    },
+                },
+                "logs": {"max_lines": 500, "max_bytes": 262144},
+                "domains": False,
+            },
+            policy={
+                "requires_image_digest": True,
+                "allowed_registries": ["ghcr.io/smartappli/"],
+                "stateless_only": True,
+            },
+        )
+        self.module = Module.objects.create(
+            name="Runtime API",
+            slug="runtime-api",
+            image=f"ghcr.io/smartappli/runtime-api@sha256:{'a' * 64}",
+            deployment_target=Module.DeploymentTarget.KUBERNETES,
+            enabled=True,
+        )
+        profile_spec = {
+            "kind": "deployment",
+            "container_port": 8080,
+            "healthcheck_path": "/health/ready",
+            "resources": {
+                "requests": {"cpu": "100m", "memory": "128Mi"},
+                "limits": {"cpu": "500m", "memory": "512Mi"},
+            },
+            "configuration": {
+                "plain": ["FEATURE_FLAG"],
+                "secret": ["DATABASE_PASSWORD"],
+            },
+            "network_egress": [],
+        }
+        ModuleRuntimeProfile.objects.create(
+            module=self.module,
+            spec=profile_spec,
+            spec_digest=sha256_json(profile_spec),
+            enabled=True,
+            verified_at=timezone.now(),
+        )
+        self.application = HostedApplication.objects.create(
+            name="Runtime portal",
+            slug="runtime-portal",
+            current_version="1.2.3",
+            enabled=True,
+        )
+        self.application.modules.add(self.module)
+        self.version = ApplicationVersion.objects.create(
+            application=self.application,
+            version="1.2.3",
+            source="ci",
+            notes="Signed release metadata",
+        )
+
+    def deployment_payload(self) -> dict[str, object]:
+        return {
+            "application_id": self.application.id,
+            "environment": self.environment.slug,
+            "version": self.version.version,
+            "configuration": {"runtime-api": {"FEATURE_FLAG": "enabled"}},
+            "secret_refs": {
+                "runtime-api": {"DATABASE_PASSWORD": "runtime-database"}
+            },
+            "scaling": {"runtime-api": {"mode": "fixed", "replicas": 2}},
+        }
+
+    def queue_deployment(self, *, key: str = "runtime-create-0001"):
+        return self.client.post(
+            reverse("deployments-list"),
+            self.deployment_payload(),
+            format="json",
+            HTTP_IF_MATCH=f'"{self.application.revision}"',
+            HTTP_IDEMPOTENCY_KEY=key,
+        )
+
+
+@override_settings(RUNTIME_CONTROLLER=ENABLED_CONTROLLER, RUNTIME_ENABLED=True)
+class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
+    def test_lists_allowlisted_environments_and_queues_an_idempotent_deploy(self) -> None:
+        environments = self.client.get(reverse("runtime-environments-list"))
+        self.assertEqual(environments.status_code, 200)
+        self.assertEqual(environments.data["results"][0]["slug"], "production")
+        self.assertTrue(environments.data["results"][0]["enabled"])
+
+        created = self.queue_deployment()
+        self.assertEqual(created.status_code, 202)
+        self.assertEqual(created.data["deployment"]["environment"], "production")
+        self.assertEqual(created.data["deployment"]["version"], "1.2.3")
+        self.assertEqual(created.data["deployment"]["desired_state"], "running")
+        self.assertEqual(created.data["operation"]["type"], "deploy")
+        self.assertEqual(created.data["operation"]["status"], "queued")
+        self.assertEqual(
+            created.data["deployment"]["components"][0]["image_digest"],
+            self.module.image,
+        )
+
+        replay = self.queue_deployment()
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay["Idempotent-Replay"], "true")
+        self.assertEqual(replay.data["operation"]["id"], created.data["operation"]["id"])
+        self.assertEqual(RuntimeDeployment.objects.count(), 1)
+        self.assertEqual(RuntimeOperation.objects.count(), 1)
+
+    def test_rejects_stale_revisions_and_idempotency_key_reuse(self) -> None:
+        stale = self.client.post(
+            reverse("deployments-list"),
+            self.deployment_payload(),
+            format="json",
+            HTTP_IF_MATCH='"99"',
+            HTTP_IDEMPOTENCY_KEY="runtime-create-stale",
+        )
+        self.assertEqual(stale.status_code, 412)
+        self.assertEqual(stale.data["code"], "stale_revision")
+
+        created = self.queue_deployment(key="runtime-shared-key")
+        self.assertEqual(created.status_code, 202)
+        changed_payload = self.deployment_payload()
+        changed_payload["scaling"] = {
+            "runtime-api": {"mode": "fixed", "replicas": 4}
+        }
+        conflict = self.client.post(
+            reverse("deployments-list"),
+            changed_payload,
+            format="json",
+            HTTP_IF_MATCH=f'"{self.application.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-shared-key",
+        )
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.data["code"], "idempotency_conflict")
+
+    def test_configuration_rejects_secret_values_and_path_like_references(self) -> None:
+        payload = self.deployment_payload()
+        payload["configuration"] = {
+            "runtime-api": {"DATABASE_PASSWORD": "do-not-store-this"}
+        }
+        secret_value = self.client.post(
+            reverse("deployments-list"),
+            payload,
+            format="json",
+            HTTP_IF_MATCH=f'"{self.application.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-secret-value",
+        )
+        self.assertEqual(secret_value.status_code, 400)
+
+        payload = self.deployment_payload()
+        payload["secret_refs"] = {
+            "runtime-api": {"DATABASE_PASSWORD": "a/../../other-secret"}
+        }
+        traversal = self.client.post(
+            reverse("deployments-list"),
+            payload,
+            format="json",
+            HTTP_IF_MATCH=f'"{self.application.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-secret-traversal",
+        )
+        self.assertEqual(traversal.status_code, 400)
+
+    def test_queues_config_actions_logs_and_soft_undeploy_with_etags(self) -> None:
+        created = self.queue_deployment()
+        deployment_id = created.data["deployment"]["id"]
+        deployment = RuntimeDeployment.objects.get(pk=deployment_id)
+        deploy_operation = deployment.operations.get()
+        deploy_operation.status = RuntimeOperation.Status.SUCCEEDED
+        deploy_operation.finished_at = timezone.now()
+        deploy_operation.save()
+        deployment.observed_state = RuntimeDeployment.ObservedState.RUNNING
+        deployment.save()
+
+        configured = self.client.patch(
+            reverse("deployments-detail", args=[deployment_id]),
+            {
+                "configuration": {"runtime-api": {"FEATURE_FLAG": "disabled"}},
+                "secret_refs": {
+                    "runtime-api": {"DATABASE_PASSWORD": "runtime-database"}
+                },
+                "scaling": {"runtime-api": {"mode": "fixed", "replicas": 3}},
+            },
+            format="json",
+            HTTP_IF_MATCH='"1"',
+            HTTP_IDEMPOTENCY_KEY="runtime-configure-1",
+        )
+        self.assertEqual(configured.status_code, 202)
+        self.assertEqual(configured.data["deployment"]["revision"], 2)
+        self.assertEqual(configured.data["operation"]["type"], "configure")
+
+        configure_operation = RuntimeOperation.objects.get(
+            pk=configured.data["operation"]["id"]
+        )
+        configure_operation.status = RuntimeOperation.Status.SUCCEEDED
+        configure_operation.finished_at = timezone.now()
+        configure_operation.save()
+        deployment.refresh_from_db()
+        deployment.observed_state = RuntimeDeployment.ObservedState.RUNNING
+        deployment.save()
+
+        stopped = self.client.post(
+            reverse("deployments-actions", args=[deployment_id]),
+            {"action": "stop"},
+            format="json",
+            HTTP_IF_MATCH='"2"',
+            HTTP_IDEMPOTENCY_KEY="runtime-stop-1",
+        )
+        self.assertEqual(stopped.status_code, 202)
+        self.assertEqual(stopped.data["deployment"]["desired_state"], "stopped")
+
+        stop_operation = RuntimeOperation.objects.get(pk=stopped.data["operation"]["id"])
+        stop_operation.status = RuntimeOperation.Status.SUCCEEDED
+        stop_operation.finished_at = timezone.now()
+        stop_operation.save()
+        deployment.refresh_from_db()
+        deployment.observed_state = RuntimeDeployment.ObservedState.STOPPED
+        deployment.controller_id = "controller-runtime-1"
+        deployment.save()
+
+        logs = self.client.post(
+            reverse("deployments-log-requests", args=[deployment_id]),
+            {"component": "runtime-api", "tail_lines": 100, "since_seconds": 60},
+            format="json",
+            HTTP_IF_MATCH='"3"',
+            HTTP_IDEMPOTENCY_KEY="runtime-logs-1",
+        )
+        self.assertEqual(logs.status_code, 202)
+        self.assertEqual(logs.data["type"], "log_snapshot")
+
+        log_operation = RuntimeOperation.objects.get(pk=logs.data["id"])
+        log_operation.status = RuntimeOperation.Status.SUCCEEDED
+        log_operation.finished_at = timezone.now()
+        log_operation.save()
+        deployment.refresh_from_db()
+        removed = self.client.delete(
+            reverse("deployments-detail", args=[deployment_id]),
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-undeploy-1",
+        )
+        self.assertEqual(removed.status_code, 202)
+        self.assertEqual(removed.data["deployment"]["desired_state"], "absent")
+        self.assertEqual(removed.data["deployment"]["observed_state"], "deleting")
+
+    def test_runtime_endpoints_are_staff_only(self) -> None:
+        reader = get_user_model().objects.create_user(
+            username="runtime-reader",
+            password="irrelevant",  # nosec B106 - test-only fixture.
+        )
+        self.client.force_authenticate(reader)
+        self.assertEqual(self.client.get(reverse("runtime-environments-list")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("deployments-list")).status_code, 403)
+
+
+@override_settings(RUNTIME_CONTROLLER=DISABLED_CONTROLLER, RUNTIME_ENABLED=False)
+class RuntimeUnavailableApiTests(RuntimeFixtureMixin, APITestCase):
+    def test_controller_is_fail_closed_and_never_simulates_a_deploy(self) -> None:
+        environments = self.client.get(reverse("runtime-environments-list"))
+        self.assertFalse(environments.data["results"][0]["enabled"])
+
+        response = self.queue_deployment()
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data["code"], "runtime_backend_unavailable")
+        self.assertFalse(RuntimeDeployment.objects.exists())
+
+
+class FakeRuntimeController:
+    def __init__(self, module: Module) -> None:
+        self.module = module
+
+    def deploy(self, payload, *, request_id: str) -> RuntimeSnapshot:
+        return self.snapshot("running", payload["generation"])
+
+    def update(self, controller_id, payload, *, request_id: str) -> RuntimeSnapshot:
+        return self.snapshot("running", payload["generation"])
+
+    def action(self, controller_id, action_name, payload, *, request_id: str) -> RuntimeSnapshot:
+        state = "stopped" if action_name == "stop" else "running"
+        return self.snapshot(state, payload["generation"])
+
+    def undeploy(self, controller_id, *, request_id: str) -> RuntimeSnapshot:
+        return self.snapshot("deleted", 2)
+
+    def status(self, controller_id, *, request_id: str) -> RuntimeSnapshot:
+        return self.snapshot("running", 1)
+
+    def logs(self, controller_id, *, tail: int, request_id: str) -> RuntimeLogs:
+        return RuntimeLogs(("ready", "request complete"), "cursor-1", False)
+
+    def snapshot(self, state: str, generation: int) -> RuntimeSnapshot:
+        return RuntimeSnapshot(
+            controller_id="controller-runtime-1",
+            state=state,
+            message="",
+            observed_generation=generation,
+            components=(
+                {
+                    "slug": self.module.slug,
+                    "image_digest": self.module.image,
+                    "desired_replicas": 2,
+                    "ready_replicas": 2 if state == "running" else 0,
+                    "available_replicas": 2 if state == "running" else 0,
+                    "state": state,
+                    "health": "healthy" if state == "running" else "stopped",
+                    "restart_count": 0,
+                    "last_error": "",
+                },
+            ),
+        )
+
+
+@override_settings(RUNTIME_CONTROLLER=ENABLED_CONTROLLER, RUNTIME_ENABLED=True)
+class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
+    def test_worker_reconciles_deploy_and_keeps_logs_only_in_ttl_cache(self) -> None:
+        created = self.queue_deployment()
+        self.assertEqual(created.status_code, 202)
+        operation_id = created.data["operation"]["id"]
+        processor = RuntimeOperationProcessor(
+            worker_id="test-worker",
+            controller=FakeRuntimeController(self.module),
+        )
+        self.assertTrue(processor.process_next())
+
+        operation = RuntimeOperation.objects.get(pk=operation_id)
+        deployment = operation.deployment
+        deployment.refresh_from_db()
+        self.assertEqual(operation.status, RuntimeOperation.Status.SUCCEEDED)
+        self.assertEqual(deployment.observed_state, RuntimeDeployment.ObservedState.RUNNING)
+        self.assertEqual(deployment.controller_id, "controller-runtime-1")
+        self.assertEqual(deployment.components.get().ready_replicas, 2)
+
+        logs = self.client.post(
+            reverse("deployments-log-requests", args=[deployment.id]),
+            {"component": "runtime-api", "tail_lines": 2, "since_seconds": 60},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-worker-logs",
+        )
+        self.assertEqual(logs.status_code, 202)
+        self.assertTrue(processor.process_next())
+        log_operation = RuntimeOperation.objects.get(pk=logs.data["id"])
+        self.assertEqual(log_operation.status, RuntimeOperation.Status.SUCCEEDED)
+        self.assertNotIn("ready", str(log_operation.result))
+        cached = cache.get(f"dealhost:runtime-log:{log_operation.id}")
+        self.assertEqual(cached["content"], "ready\nrequest complete")
+
+        detail = self.client.get(reverse("operations-detail", args=[log_operation.id]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.data["result"]["content"], "ready\nrequest complete")
+        self.assertEqual(detail["Cache-Control"], "private, no-store")

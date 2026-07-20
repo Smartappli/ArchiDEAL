@@ -169,3 +169,4 @@ NATS = {
 }
 
 RUNTIME_CONTROLLER = runtime_controller_config()
+RUNTIME_ENABLED = get_env("DEALHOST_RUNTIME_ENABLED", "false").strip().lower() == "true"

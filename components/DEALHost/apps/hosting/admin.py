@@ -5,6 +5,12 @@ from .models import (
     Dataset,
     HostedApplication,
     Module,
+    ModuleRuntimeProfile,
+    RuntimeComponent,
+    RuntimeDeployment,
+    RuntimeEnvironment,
+    RuntimeOperation,
+    RuntimeRelease,
     Tool,
     ToolVersion,
 )
@@ -78,3 +84,102 @@ class DatasetAdmin(admin.ModelAdmin):
     list_filter = ("enabled",)
     search_fields = ("name", "slug", "description")
     filter_horizontal = ("modules", "users", "groups")
+
+
+@admin.register(RuntimeEnvironment)
+class RuntimeEnvironmentAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "orchestrator", "enabled", "revision", "updated_at")
+    list_filter = ("enabled", "orchestrator")
+    search_fields = ("name", "slug", "description")
+
+
+@admin.register(ModuleRuntimeProfile)
+class ModuleRuntimeProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        "module",
+        "schema_version",
+        "enabled",
+        "verified_at",
+        "revision",
+        "updated_at",
+    )
+    list_filter = ("enabled", "schema_version")
+    search_fields = ("module__name", "module__slug", "spec_digest")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(RuntimeRelease)
+class RuntimeReleaseAdmin(admin.ModelAdmin):
+    list_display = ("application_version", "manifest_digest", "created_at")
+    search_fields = (
+        "application_version__application__name",
+        "application_version__application__slug",
+        "application_version__version",
+        "manifest_digest",
+    )
+    readonly_fields = ("application_version", "manifest", "manifest_digest", "created_at")
+
+
+class RuntimeComponentInline(admin.TabularInline):
+    model = RuntimeComponent
+    extra = 0
+    readonly_fields = (
+        "module",
+        "image_digest",
+        "desired_replicas",
+        "ready_replicas",
+        "available_replicas",
+        "state",
+        "health",
+        "restart_count",
+        "last_error",
+        "updated_at",
+    )
+    can_delete = False
+
+
+@admin.register(RuntimeDeployment)
+class RuntimeDeploymentAdmin(admin.ModelAdmin):
+    list_display = (
+        "application",
+        "environment",
+        "version",
+        "desired_state",
+        "observed_state",
+        "generation",
+        "revision",
+        "updated_at",
+    )
+    list_filter = ("environment", "desired_state", "observed_state")
+    search_fields = ("application__name", "application__slug", "controller_id")
+    readonly_fields = (
+        "id",
+        "release",
+        "controller_id",
+        "observed_state",
+        "observed_generation",
+        "last_error",
+        "last_reconciled_at",
+        "created_by",
+        "created_by_label",
+        "deleted_at",
+        "created_at",
+        "updated_at",
+    )
+    inlines = [RuntimeComponentInline]
+
+
+@admin.register(RuntimeOperation)
+class RuntimeOperationAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "deployment",
+        "operation_type",
+        "status",
+        "attempts",
+        "requested_at",
+        "finished_at",
+    )
+    list_filter = ("operation_type", "status")
+    search_fields = ("id", "deployment__application__slug", "actor_label")
+    readonly_fields = [field.name for field in RuntimeOperation._meta.fields]

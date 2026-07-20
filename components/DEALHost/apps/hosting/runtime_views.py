@@ -627,7 +627,7 @@ def _actor(request: Request):
 
 
 def _runtime_unavailable() -> Response | None:
-    if settings.RUNTIME_CONTROLLER.configured:
+    if settings.RUNTIME_ENABLED:
         return None
     return _problem(
         "Runtime operations require an isolated controller configuration.",

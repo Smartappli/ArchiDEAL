@@ -348,7 +348,7 @@ class RuntimeEnvironmentSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_enabled(self, environment: RuntimeEnvironment) -> bool:
-        return bool(environment.enabled and settings.RUNTIME_CONTROLLER.configured)
+        return bool(environment.enabled and settings.RUNTIME_ENABLED)
 
 
 class RuntimeComponentSerializer(serializers.ModelSerializer):
