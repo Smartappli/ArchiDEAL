@@ -58,6 +58,16 @@ class RuntimeEnvironmentViewSet(
     pagination_class = RuntimePagination
     lookup_field = "slug"
 
+    def list(self, request: Request, *args, **kwargs) -> Response:
+        response = super().list(request, *args, **kwargs)
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+    def retrieve(self, request: Request, *args, **kwargs) -> Response:
+        response = super().retrieve(request, *args, **kwargs)
+        response["Cache-Control"] = "private, no-store"
+        return response
+
 
 class RuntimeOperationViewSet(
     mixins.RetrieveModelMixin,
@@ -99,7 +109,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
     def list(self, request: Request) -> Response:
         page = self.paginate_queryset(self.get_queryset())
         serializer = RuntimeDeploymentSerializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+        response = self.get_paginated_response(serializer.data)
+        response["Cache-Control"] = "private, no-store"
+        return response
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         deployment = self.get_object()

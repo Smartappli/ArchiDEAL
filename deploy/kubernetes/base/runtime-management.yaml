@@ -75,13 +75,17 @@ spec:
             - --no-ws
             - dealhost.runtime_controller_service.asgi:application
           env:
-            - name: DEALHOST_RUNTIME_CONTROLLER_TOKEN
+            - name: RUNTIME_CONTROLLER_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: archideal-runtime-secrets-${RELEASE_ID}
                   key: dealhost-runtime-controller-token
-            - name: DEALHOST_RUNTIME_CONTROLLER_NAMESPACE
+            - name: RUNTIME_CONTROLLER_NAMESPACE
               value: archideal-runtime-apps
+            - name: RUNTIME_CONTROLLER_WORKLOAD_SERVICE_ACCOUNT
+              value: dealhost-runtime-application
+            - name: RUNTIME_CONTROLLER_IMAGE_PULL_SECRET
+              value: archideal-registry-credentials
           ports:
             - name: tls
               containerPort: 8081
