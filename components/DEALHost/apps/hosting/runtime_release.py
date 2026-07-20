@@ -157,6 +157,7 @@ def runtime_release_for(
         application_version=application_version
     ).first()
     if existing is not None:
+        _validate_release_still_matches_application(existing, application)
         _validate_environment_policy(existing.manifest, environment)
         return existing
 
@@ -219,6 +220,84 @@ def runtime_release_for(
                 "The immutable runtime release conflicts with the current module catalog."
             )
         return release
+
+
+def _validate_release_still_matches_application(
+    release: RuntimeRelease,
+    application: HostedApplication,
+) -> None:
+    manifest = release.manifest
+    if (
+        not isinstance(manifest, dict)
+        or sha256_json(manifest) != release.manifest_digest
+        or manifest.get("schema_version") != 1
+    ):
+        raise RuntimeReleaseNotDeployable(
+            "The immutable runtime release failed its integrity check."
+        )
+
+    application_snapshot = manifest.get("application")
+    if (
+        not isinstance(application_snapshot, dict)
+        or application_snapshot.get("id") != application.id
+        or application_snapshot.get("slug") != application.slug
+        or manifest.get("version") != release.application_version.version
+    ):
+        raise RuntimeReleaseNotDeployable(
+            "The immutable runtime release no longer matches its application version."
+        )
+
+    raw_modules = manifest.get("modules")
+    if not isinstance(raw_modules, list) or not raw_modules:
+        raise RuntimeReleaseNotDeployable(
+            "The immutable runtime release has an invalid module catalog."
+        )
+    snapshots: dict[int, dict[str, Any]] = {}
+    for raw_module in raw_modules:
+        if not isinstance(raw_module, dict):
+            raise RuntimeReleaseNotDeployable(
+                "The immutable runtime release has an invalid module catalog."
+            )
+        module_id = raw_module.get("module_id")
+        if (
+            not isinstance(module_id, int)
+            or isinstance(module_id, bool)
+            or module_id in snapshots
+        ):
+            raise RuntimeReleaseNotDeployable(
+                "The immutable runtime release has an invalid module catalog."
+            )
+        snapshots[module_id] = raw_module
+
+    modules = list(application.modules.select_related("runtime_profile"))
+    if {module.id for module in modules} != set(snapshots):
+        raise RuntimeReleaseNotDeployable(
+            "The application module set changed after this version was published; "
+            "publish a new version before deploying it."
+        )
+    for module in modules:
+        snapshot = snapshots[module.id]
+        try:
+            profile = module.runtime_profile
+        except ModuleRuntimeProfile.DoesNotExist as exc:
+            raise RuntimeReleaseNotDeployable(
+                f"Runtime profile for {module.slug} changed after publication; "
+                "publish a new version before deploying it."
+            ) from exc
+        spec = validate_runtime_profile(profile)
+        if (
+            not module.enabled
+            or module.deployment_target != module.DeploymentTarget.KUBERNETES
+            or snapshot.get("slug") != module.slug
+            or snapshot.get("image") != module.image
+            or snapshot.get("profile_schema_version") != profile.schema_version
+            or snapshot.get("profile_digest") != profile.spec_digest
+            or snapshot.get("spec") != spec
+        ):
+            raise RuntimeReleaseNotDeployable(
+                f"Module {module.slug} changed after this version was published; "
+                "publish a new version before deploying it."
+            )
 
 
 def _validate_environment_policy(
