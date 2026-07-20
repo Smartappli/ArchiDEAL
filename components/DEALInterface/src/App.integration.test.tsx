@@ -985,7 +985,7 @@ describe("App live module integrations", () => {
       revision: 1,
       configuration: {},
       secret_refs: {},
-      scaling: {},
+      scaling: { api: { mode: "fixed", replicas: 1 } },
       components: [{
         module_id: 9,
         slug: "api",
@@ -1075,7 +1075,7 @@ describe("App live module integrations", () => {
       application_id: 4,
       environment: "production",
       version: "1.5.0",
-      scaling: { api: { mode: "fixed", replicas: 1 } },
+      scaling: {},
       configuration: {},
       secret_refs: {},
     });
