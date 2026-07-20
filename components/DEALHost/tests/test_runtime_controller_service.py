@@ -90,9 +90,7 @@ class FakeKubernetes:
         tail_lines: int,
         since_seconds: int,
     ) -> str:
-        self.calls.append(
-            ("logs", pod_name, container, tail_lines, since_seconds)
-        )
+        self.calls.append(("logs", pod_name, container, tail_lines, since_seconds))
         return self.log_content
 
     async def ready(self) -> None:
@@ -209,7 +207,9 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             allow_absent=allow_absent,
         )
 
-    async def test_fixed_deployment_reconciles_hardened_stateless_resources(self) -> None:
+    async def test_fixed_deployment_reconciles_hardened_stateless_resources(
+        self,
+    ) -> None:
         desired = self.desired()
 
         result = await self.reconciler.deploy(desired, request_id="request-0001")
@@ -240,9 +240,9 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             "readyReplicas": 2,
             "availableReplicas": 2,
         }
-        self.kubernetes.resources[
-            (self.settings.namespace, "Deployment", name)
-        ] = deployment
+        self.kubernetes.resources[(self.settings.namespace, "Deployment", name)] = (
+            deployment
+        )
         observed = await self.reconciler.observe(DEPLOYMENT_ID)
         self.assertEqual(observed.state, "running")
         self.assertEqual(observed.components[0]["health"], "healthy")
@@ -287,13 +287,15 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             self.kubernetes.resources,
         )
         self.assertEqual(
-            self.kubernetes.resources[
-                (self.settings.namespace, "Deployment", name)
-            ]["spec"]["replicas"],
+            self.kubernetes.resources[(self.settings.namespace, "Deployment", name)][
+                "spec"
+            ]["replicas"],
             0,
         )
 
-    async def test_secret_refs_require_operator_catalog_without_reading_secrets(self) -> None:
+    async def test_secret_refs_require_operator_catalog_without_reading_secrets(
+        self,
+    ) -> None:
         desired = self.desired(with_secret=True)
         with self.assertRaisesRegex(ContractError, "not provisioned"):
             await self.reconciler.deploy(desired, request_id="request-0004")
@@ -335,7 +337,9 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             secret_entry["valueFrom"]["secretKeyRef"],
             {"name": "dealapp-shared-api", "key": "API_TOKEN"},
         )
-        self.assertFalse(any(len(call) > 2 and call[2] == "Secret" for call in self.kubernetes.calls))
+        self.assertFalse(
+            any(len(call) > 2 and call[2] == "Secret" for call in self.kubernetes.calls)
+        )
 
     async def test_foreign_resource_blocks_all_mutation(self) -> None:
         desired = self.desired()
@@ -355,7 +359,9 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(any(call[0] == "apply" for call in self.kubernetes.calls))
 
-    async def test_generation_replay_is_idempotent_but_conflicting_reuse_fails(self) -> None:
+    async def test_generation_replay_is_idempotent_but_conflicting_reuse_fails(
+        self,
+    ) -> None:
         desired = self.desired()
         first = await self.reconciler.deploy(desired, request_id="request-0011")
         replay = await self.reconciler.deploy(desired, request_id="request-0012")
@@ -391,7 +397,9 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             (self.settings.namespace, "ConfigMap", state_name(DEPLOYMENT_ID))
         ]
         self.assertEqual(state["data"]["phase"], "deleted")
-        self.assertEqual(json.loads(state["data"]["desired.json"])["desired_state"], "absent")
+        self.assertEqual(
+            json.loads(state["data"]["desired.json"])["desired_state"], "absent"
+        )
 
     async def test_logs_are_scoped_to_component_and_window(self) -> None:
         await self.reconciler.deploy(self.desired(), request_id="request-0009")
@@ -453,9 +461,9 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_network_egress_is_explicitly_rejected(self) -> None:
         payload = runtime_payload()
-        payload["release"]["manifest"]["modules"][0]["spec"][
-            "network_egress"
-        ] = ["database.example.com"]
+        payload["release"]["manifest"]["modules"][0]["spec"]["network_egress"] = [
+            "database.example.com"
+        ]
         refresh_digests(payload)
 
         with self.assertRaisesRegex(ContractError, "not enforced") as raised:

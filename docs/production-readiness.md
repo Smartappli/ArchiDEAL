@@ -97,7 +97,7 @@ permitted. Database changes use expand/contract migrations through release-named
 Jobs; application pods never migrate on startup. Rollback restores the previous manifest without a
 destructive schema downgrade. If compatibility cannot be maintained, stop and restore according to
 the backup runbook instead of forcing the rollout. The promotion fence must prove the active
-Ingress, all eleven controller templates and all Ready serving Pods share one release before any
+Ingress, all thirteen controller templates and all Ready serving Pods share one release before any
 mutation. Any later failure must leave the Ingress absent and Namespace state `failed`; only
 `production-rollback` with the recorded previous signed manifest, Sigstore bundle and evidence may
 restore traffic. A GO record requires matching `succeeded`, active-release and promotion-release

@@ -55,9 +55,11 @@ class ControllerSettings:
         host = os.getenv("KUBERNETES_SERVICE_HOST", "").strip()
         port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS", "443").strip()
         default_url = f"https://{host}:{port}" if host else ""
-        kubernetes_url = os.getenv(
-            "RUNTIME_CONTROLLER_KUBERNETES_URL", default_url
-        ).strip().rstrip("/")
+        kubernetes_url = (
+            os.getenv("RUNTIME_CONTROLLER_KUBERNETES_URL", default_url)
+            .strip()
+            .rstrip("/")
+        )
 
         prefixes = tuple(
             item.strip()
@@ -124,9 +126,16 @@ class ControllerSettings:
         return settings
 
     def validate(self, *, require_files: bool = True) -> None:
-        if self.auth_token in _PLACEHOLDERS or len(self.auth_token) < 32:
+        if (
+            self.auth_token in _PLACEHOLDERS
+            or not 32 <= len(self.auth_token) <= 256
+            or any(
+                ord(character) <= 0x20 or ord(character) >= 0x7F
+                for character in self.auth_token
+            )
+        ):
             raise ControllerConfigurationError(
-                "RUNTIME_CONTROLLER_AUTH_TOKEN must contain at least 32 non-placeholder characters."
+                "RUNTIME_CONTROLLER_AUTH_TOKEN must contain 32-256 visible ASCII characters."
             )
         for label, value in (
             ("environment", self.environment),

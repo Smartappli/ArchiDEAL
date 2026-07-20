@@ -71,7 +71,10 @@ class ProvisionRuntimeEnvironmentCommandTests(TestCase):
             orchestrator="kubernetes",
             enabled=False,
             capabilities={"domains": True, "network_egress": True},
-            policy={"requires_image_digest": False},
+            policy={
+                "requires_image_digest": False,
+                "allowed_secret_refs": ["shared-api"],
+            },
             revision=7,
         )
 
@@ -83,6 +86,7 @@ class ProvisionRuntimeEnvironmentCommandTests(TestCase):
         self.assertFalse(environment.capabilities["domains"])
         self.assertFalse(environment.capabilities["network_egress"])
         self.assertTrue(environment.policy["requires_image_digest"])
+        self.assertEqual(environment.policy["allowed_secret_refs"], ["shared-api"])
         self.assertEqual(environment.revision, 8)
         self.assertIn("'production' updated at revision 8", output)
 
@@ -94,35 +98,55 @@ class ProvisionRuntimeEnvironmentCommandTests(TestCase):
     def test_provisions_an_explicit_canonical_secret_allowlist(self) -> None:
         self.run_command(
             "--allowed-secret-ref",
-            "dealapp-api",
+            "shared-api",
             "--allowed-secret-ref",
-            "dealapp-database",
+            "database",
         )
 
         environment = RuntimeEnvironment.objects.get(pk="production")
         self.assertEqual(
             environment.policy["allowed_secret_refs"],
-            ["dealapp-api", "dealapp-database"],
+            ["database", "shared-api"],
         )
 
         output = self.run_command(
             "--allowed-secret-ref",
-            "dealapp-database",
+            "database",
             "--allowed-secret-ref",
-            "dealapp-api",
+            "shared-api",
         )
         environment.refresh_from_db()
         self.assertEqual(environment.revision, 1)
         self.assertIn("'production' unchanged at revision 1", output)
+
+    def test_explicit_clear_removes_existing_secret_allowlist(self) -> None:
+        self.run_command("--allowed-secret-ref", "shared-api")
+
+        output = self.run_command("--clear-allowed-secret-refs")
+
+        environment = RuntimeEnvironment.objects.get(pk="production")
+        self.assertEqual(environment.policy["allowed_secret_refs"], [])
+        self.assertEqual(environment.revision, 2)
+        self.assertIn("'production' updated at revision 2", output)
+
+    def test_secret_allowlist_options_are_mutually_exclusive(self) -> None:
+        with self.assertRaises(CommandError):
+            self.run_command(
+                "--allowed-secret-ref",
+                "shared-api",
+                "--clear-allowed-secret-refs",
+            )
+
+        self.assertFalse(RuntimeEnvironment.objects.exists())
 
     def test_rejects_invalid_or_duplicate_secret_references(self) -> None:
         invalid_values = (
             ("--allowed-secret-ref", "other/secret"),
             (
                 "--allowed-secret-ref",
-                "dealapp-database",
+                "database",
                 "--allowed-secret-ref",
-                "dealapp-database",
+                "database",
             ),
         )
         for arguments in invalid_values:

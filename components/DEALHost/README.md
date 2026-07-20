@@ -362,6 +362,21 @@ autorisées, sans contenir de valeur secrète. Le catalogue vide et toute entré
 ou incohérente échouent fermé. Kubernetes signale ensuite un Secret réel absent ou
 une clé manquante dans l'état du rollout, sans que DEALHost lise ou retourne sa valeur.
 
+L'opérateur maintient le catalogue et l'allowlist de l'environnement avec exactement
+les mêmes noms logiques. Après avoir provisionné les Secrets réels et remplacé le
+catalogue immuable selon la procédure de production, il synchronise l'allowlist par :
+
+```bash
+python manage.py provision_runtime_environment \
+  --allowed-secret-ref database \
+  --allowed-secret-ref shared-api
+```
+
+Sans option, la commande crée une allowlist vide lors du premier provisioning mais
+conserve celle d'un environnement existant lors des releases suivantes. Les options
+`--allowed-secret-ref` la remplacent entièrement; `--clear-allowed-secret-refs` est la
+seule suppression explicite. Une référence ne doit jamais inclure le préfixe `dealapp-`.
+
 Le runtime-controller rejette les domaines et tout `network_egress` FQDN tant qu'un
 mécanisme d'application réseau ne les garantit pas. Il ne les ignore jamais
 silencieusement.

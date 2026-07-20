@@ -95,7 +95,9 @@ class KubernetesClient:
         )
         payload = self._json(response)
         items = payload.get("items")
-        if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict) for item in items
+        ):
             raise KubernetesApiError("Kubernetes returned an invalid resource list.")
         if payload.get("metadata", {}).get("continue"):
             raise KubernetesApiError(
@@ -150,7 +152,9 @@ class KubernetesClient:
             expected={200},
         )
         if not isinstance(payload.get("items"), list):
-            raise KubernetesApiError("Kubernetes returned an invalid readiness response.")
+            raise KubernetesApiError(
+                "Kubernetes returned an invalid readiness response."
+            )
 
     def _endpoint(self, kind: str) -> tuple[str, str]:
         try:
@@ -236,7 +240,9 @@ class KubernetesClient:
                     content=content,
                 )
         except httpx.HTTPError as exc:
-            raise KubernetesApiError("The Kubernetes API could not be reached.") from exc
+            raise KubernetesApiError(
+                "The Kubernetes API could not be reached."
+            ) from exc
         if len(response.content) > MAX_KUBERNETES_RESPONSE_BYTES:
             raise KubernetesApiError("The Kubernetes API response is too large.")
         if response.status_code not in expected:

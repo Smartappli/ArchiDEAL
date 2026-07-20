@@ -59,7 +59,9 @@ class RuntimeControllerApplication:
         try:
             headers = _headers(scope)
             self._authenticate(headers)
-            request_id = validate_request_id(_required_header(headers, "idempotency-key"))
+            request_id = validate_request_id(
+                _required_header(headers, "idempotency-key")
+            )
             result, status_code = await self._dispatch(
                 method,
                 path,
@@ -277,9 +279,13 @@ def _headers(scope) -> dict[str, str]:
             name = raw_name.decode("ascii").lower()
             value = raw_value.decode("latin-1").strip()
         except UnicodeDecodeError as exc:
-            raise ContractError("Request headers are invalid.", status_code=400) from exc
+            raise ContractError(
+                "Request headers are invalid.", status_code=400
+            ) from exc
         if name in headers:
-            raise ContractError("Duplicate request headers are not accepted.", status_code=400)
+            raise ContractError(
+                "Duplicate request headers are not accepted.", status_code=400
+            )
         headers[name] = value
     return headers
 
@@ -337,12 +343,16 @@ async def _json_body(
     try:
         return json.loads(content.decode("utf-8"), object_pairs_hook=_unique_object)
     except (UnicodeDecodeError, json.JSONDecodeError, DuplicateJsonKey) as exc:
-        raise ContractError("The JSON request body is malformed.", status_code=400) from exc
+        raise ContractError(
+            "The JSON request body is malformed.", status_code=400
+        ) from exc
 
 
 async def _reject_body(receive) -> None:
     if await _body(receive):
-        raise ContractError("This endpoint does not accept a request body.", status_code=400)
+        raise ContractError(
+            "This endpoint does not accept a request body.", status_code=400
+        )
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -365,7 +375,9 @@ def _query(value: bytes) -> dict[str, list[str]]:
             separator="&",
         )
     except (UnicodeDecodeError, ValueError) as exc:
-        raise ContractError("The request query string is invalid.", status_code=400) from exc
+        raise ContractError(
+            "The request query string is invalid.", status_code=400
+        ) from exc
 
 
 def _one_query(query: dict[str, list[str]], name: str) -> str:

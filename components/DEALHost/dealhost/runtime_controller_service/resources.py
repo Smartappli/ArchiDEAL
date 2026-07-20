@@ -97,7 +97,9 @@ def component_config_map(
         "apiVersion": "v1",
         "kind": "ConfigMap",
         "metadata": {
-            "name": component_name(desired.deployment_id, component.slug, suffix="-cfg"),
+            "name": component_name(
+                desired.deployment_id, component.slug, suffix="-cfg"
+            ),
             "namespace": settings.namespace,
             "labels": common_labels(desired, component),
         },
@@ -140,9 +142,7 @@ def deployment_resource(
         env.append(
             {
                 "name": key,
-                "valueFrom": {
-                    "configMapKeyRef": {"name": config_name, "key": key}
-                },
+                "valueFrom": {"configMapKeyRef": {"name": config_name, "key": key}},
             }
         )
     for key, secret_name in sorted(component.secret_refs.items()):
@@ -171,9 +171,7 @@ def deployment_resource(
                 "name": "main",
                 "image": component.image,
                 "imagePullPolicy": "IfNotPresent",
-                "ports": [
-                    {"name": "http", "containerPort": component.container_port}
-                ],
+                "ports": [{"name": "http", "containerPort": component.container_port}],
                 "env": env,
                 "resources": component.resources,
                 "readinessProbe": {
@@ -295,9 +293,7 @@ def hpa_resource(
                         "name": "cpu",
                         "target": {
                             "type": "Utilization",
-                            "averageUtilization": scaling[
-                                "target_cpu_utilization"
-                            ],
+                            "averageUtilization": scaling["target_cpu_utilization"],
                         },
                     },
                 }

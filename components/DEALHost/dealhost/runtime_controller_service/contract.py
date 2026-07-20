@@ -13,9 +13,7 @@ from .config import ControllerSettings
 _COMPONENT_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _SECRET_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-_IMAGE = re.compile(
-    r"^[a-z0-9](?:[a-z0-9._/-]*[a-z0-9])?@sha256:[0-9a-f]{64}$"
-)
+_IMAGE = re.compile(r"^[a-z0-9](?:[a-z0-9._/-]*[a-z0-9])?@sha256:[0-9a-f]{64}$")
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _CPU = re.compile(r"^(?:[1-9][0-9]*|[1-9][0-9]*m)$")
 _MEMORY = re.compile(r"^[1-9][0-9]*(?:Ki|Mi|Gi)$")
@@ -146,9 +144,7 @@ def parse_desired_deployment(
     _exact_fields(release, {"digest", "manifest"}, "Release")
     release_digest = release.get("digest")
     manifest = _object(release.get("manifest"), "Release manifest")
-    if not isinstance(release_digest, str) or not _HEX_DIGEST.fullmatch(
-        release_digest
-    ):
+    if not isinstance(release_digest, str) or not _HEX_DIGEST.fullmatch(release_digest):
         raise ContractError("The release digest is invalid.")
     if payload_digest(manifest) != release_digest:
         raise ContractError(
@@ -286,11 +282,15 @@ def _parse_manifest(
             or slug in parsed
             or module_id in module_ids
         ):
-            raise ContractError("Release component identities must be unique and canonical.")
+            raise ContractError(
+                "Release component identities must be unique and canonical."
+            )
         if (
             not isinstance(image, str)
             or not _IMAGE.fullmatch(image)
-            or not any(image.startswith(prefix) for prefix in settings.allowed_image_prefixes)
+            or not any(
+                image.startswith(prefix) for prefix in settings.allowed_image_prefixes
+            )
         ):
             raise ContractError(
                 f"Image for {slug} is not an allowed immutable digest.",
@@ -344,7 +344,9 @@ def _parse_profile(
     ):
         raise ContractError(f"Healthcheck path for {slug} is invalid.")
     resources = _resources(spec.get("resources"), slug)
-    configuration = _object(spec.get("configuration", {}), f"Configuration schema for {slug}")
+    configuration = _object(
+        spec.get("configuration", {}), f"Configuration schema for {slug}"
+    )
     _exact_fields(
         configuration,
         {"plain", "secret"},
@@ -403,7 +405,9 @@ def _key_set(value: object, slug: str) -> frozenset[str]:
     if (
         not isinstance(value, list)
         or len(value) > 50
-        or any(not isinstance(item, str) or not _ENV_KEY.fullmatch(item) for item in value)
+        or any(
+            not isinstance(item, str) or not _ENV_KEY.fullmatch(item) for item in value
+        )
         or len(set(value)) != len(value)
     ):
         raise ContractError(f"Configuration schema keys for {slug} are invalid.")
@@ -433,7 +437,11 @@ def _validate_values(
     normalized: dict[str, str] = {}
     total = 0
     for key, value in values.items():
-        if not isinstance(key, str) or not _ENV_KEY.fullmatch(key) or key not in allowed:
+        if (
+            not isinstance(key, str)
+            or not _ENV_KEY.fullmatch(key)
+            or key not in allowed
+        ):
             raise ContractError(f"Configuration key {key!s} is not allowed for {slug}.")
         if not isinstance(value, str) or len(value) > 2048 or "\x00" in value:
             raise ContractError(f"Configuration value for {key} is invalid.")

@@ -291,10 +291,14 @@ def runtime_controller_config(
         raise RuntimeError(
             "DEALHOST_RUNTIME_CONTROLLER_CA_FILE is required for the production controller."
         )
-    if _is_placeholder(token):
+    if (
+        _is_placeholder(token)
+        or not 32 <= len(token) <= 256
+        or any(ord(character) <= 0x20 or ord(character) >= 0x7F for character in token)
+    ):
         raise RuntimeError(
-            "DEALHOST_RUNTIME_CONTROLLER_TOKEN must be configured when the runtime "
-            "controller URL is set."
+            "DEALHOST_RUNTIME_CONTROLLER_TOKEN must contain 32-256 visible ASCII "
+            "characters when the runtime controller URL is set."
         )
     return RuntimeControllerConfig(
         base_url=base_url,

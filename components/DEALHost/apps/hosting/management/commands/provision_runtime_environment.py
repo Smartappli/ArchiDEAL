@@ -10,9 +10,7 @@ from apps.hosting.models import RuntimeEnvironment
 
 
 PRODUCTION_SLUG = "production"
-SECRET_REFERENCE_PATTERN = re.compile(
-    r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
-)
+LOGICAL_SECRET_REFERENCE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 PRODUCTION_FIELDS: dict[str, object] = {
     "name": "Production",
     "description": "Isolated Kubernetes production environment managed by DEALHost.",
@@ -49,46 +47,62 @@ class Command(BaseCommand):
     )
 
     def add_arguments(self, parser: CommandParser) -> None:
-        parser.add_argument(
+        secret_group = parser.add_mutually_exclusive_group()
+        secret_group.add_argument(
             "--allowed-secret-ref",
             action="append",
-            default=[],
+            default=None,
             dest="allowed_secret_refs",
             metavar="NAME",
             help=(
-                "Allow a canonical Kubernetes Secret name. Repeat this option for "
-                "each explicitly provisioned application secret."
+                "Replace the allowlist with canonical logical runtime Secret "
+                "references. The isolated controller resolves Kubernetes names; "
+                "repeat this option for every operator-catalogued reference."
             ),
+        )
+        secret_group.add_argument(
+            "--clear-allowed-secret-refs",
+            action="store_true",
+            help="Explicitly replace the logical runtime Secret allowlist with empty.",
         )
 
     def handle(self, *args, **options) -> None:
-        desired_fields = deepcopy(PRODUCTION_FIELDS)
-        secret_refs = options["allowed_secret_refs"]
-        if (
-            len(secret_refs) > 100
-            or any(
-                not isinstance(item, str)
-                or not SECRET_REFERENCE_PATTERN.fullmatch(item)
-                for item in secret_refs
-            )
-            or len(set(secret_refs)) != len(secret_refs)
-        ):
+        requested_refs = options["allowed_secret_refs"]
+        if requested_refs is not None and not _valid_secret_refs(requested_refs):
             raise CommandError(
                 "--allowed-secret-ref must contain at most 100 unique canonical "
-                "Kubernetes Secret names."
+                "logical Secret references."
             )
-        policy = desired_fields["policy"]
-        assert isinstance(policy, dict)
-        policy["allowed_secret_refs"] = sorted(secret_refs)
+        if requested_refs is not None:
+            requested_refs = sorted(requested_refs)
+        elif options["clear_allowed_secret_refs"]:
+            requested_refs = []
+
         with transaction.atomic():
+            creation_fields = _desired_fields(requested_refs or [])
             environment, created = (
                 RuntimeEnvironment.objects.select_for_update().get_or_create(
                     slug=PRODUCTION_SLUG,
-                    defaults={**desired_fields, "revision": 1},
+                    defaults={**creation_fields, "revision": 1},
                 )
             )
             changed_fields: list[str] = []
             if not created:
+                if requested_refs is None:
+                    policy = environment.policy
+                    existing_refs = (
+                        policy.get("allowed_secret_refs")
+                        if isinstance(policy, dict)
+                        else None
+                    )
+                    effective_refs = (
+                        sorted(existing_refs)
+                        if _valid_secret_refs(existing_refs)
+                        else []
+                    )
+                else:
+                    effective_refs = requested_refs
+                desired_fields = _desired_fields(effective_refs)
                 for field_name, desired_value in desired_fields.items():
                     if getattr(environment, field_name) != desired_value:
                         setattr(environment, field_name, desired_value)
@@ -111,3 +125,24 @@ class Command(BaseCommand):
                 f"at revision {environment.revision}."
             )
         )
+
+
+def _valid_secret_refs(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) <= 100
+        and all(
+            isinstance(item, str)
+            and bool(LOGICAL_SECRET_REFERENCE_PATTERN.fullmatch(item))
+            for item in value
+        )
+        and len(set(value)) == len(value)
+    )
+
+
+def _desired_fields(allowed_secret_refs: list[str]) -> dict[str, object]:
+    desired_fields = deepcopy(PRODUCTION_FIELDS)
+    policy = desired_fields["policy"]
+    assert isinstance(policy, dict)
+    policy["allowed_secret_refs"] = allowed_secret_refs
+    return desired_fields

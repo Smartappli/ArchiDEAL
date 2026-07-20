@@ -158,7 +158,7 @@ Never deploy the production bundle with one monolithic `kubectl apply`: Jobs and
 would no longer be ordered. When an ArchiDEAL Ingress already exists, the deployer also requires
 `APPROVE_LIVE_UPGRADE=1`; set it only after confirming that all migrations follow the
 expand/contract pattern and remain compatible with the active release. Before its first mutation,
-the deployer also requires all eleven controller templates and every Ready serving Pod to carry one
+the deployer also requires all thirteen controller templates and every Ready serving Pod to carry one
 unanimous `archideal.io/release`, matching the active Ingress. Mixed, unavailable or partially
 observed releases fail before the cluster is changed.
 
@@ -168,7 +168,7 @@ public smoke, and records `failed`, the attempted release and the validated prev
 `archideal` Namespace. It prints the exact `make production-rollback` shape to use with archived
 artifacts. It never silently re-exposes the previous Pods: public traffic resumes only after the
 previous signed release has passed the complete ordered deploy and fresh smoke gates. A successful
-promotion revalidates all eleven serving controllers, then records a coherent `succeeded` state on
+promotion revalidates all thirteen serving controllers, then records a coherent `succeeded` state on
 both the Namespace and Ingress.
 
 The renderer fails on mutable images, unapproved image repositories, example endpoints, incomplete

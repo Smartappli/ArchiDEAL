@@ -108,11 +108,9 @@ class RuntimeReconciler:
                 raise RuntimeConflict("A deleted runtime identifier cannot be reused.")
             if desired.generation < current_desired.generation:
                 raise RuntimeConflict("The requested runtime generation is stale.")
-            if (
-                desired.generation == current_desired.generation
-                and payload_digest(desired.normalized_payload)
-                != payload_digest(current_desired.normalized_payload)
-            ):
+            if desired.generation == current_desired.generation and payload_digest(
+                desired.normalized_payload
+            ) != payload_digest(current_desired.normalized_payload):
                 raise RuntimeConflict(
                     "The runtime generation was already used for another desired state."
                 )
@@ -129,7 +127,10 @@ class RuntimeReconciler:
         )
         for component in desired.components:
             name = component_name(desired.deployment_id, component.slug)
-            if desired.desired_state == "stopped" or component.scaling["mode"] == "fixed":
+            if (
+                desired.desired_state == "stopped"
+                or component.scaling["mode"] == "fixed"
+            ):
                 await self.kubernetes.delete("HorizontalPodAutoscaler", name)
             await self.kubernetes.apply(
                 component_config_map(desired, component, self.settings)
@@ -182,9 +183,7 @@ class RuntimeReconciler:
             desired,
             request_id=request_id,
             require_existing=True,
-            restart_request=(
-                request_id if action in {"restart", "redeploy"} else ""
-            ),
+            restart_request=(request_id if action in {"restart", "redeploy"} else ""),
         )
 
     async def undeploy(
@@ -214,7 +213,9 @@ class RuntimeReconciler:
         current_desired = self._desired_from_state(current)
         if desired is not None:
             if desired.deployment_id != deployment_id:
-                raise ContractError("DELETE payload identifier does not match its path.")
+                raise ContractError(
+                    "DELETE payload identifier does not match its path."
+                )
             if desired.generation < current_desired.generation:
                 raise RuntimeConflict("The requested runtime generation is stale.")
             if desired.release_digest != current_desired.release_digest:
@@ -283,7 +284,10 @@ class RuntimeReconciler:
                     "deleting",
                     "Runtime resources are terminating.",
                     desired.generation,
-                    tuple(self._deleting_component(component) for component in desired.components),
+                    tuple(
+                        self._deleting_component(component)
+                        for component in desired.components
+                    ),
                 )
             await self.kubernetes.apply(
                 state_config_map(
@@ -295,13 +299,13 @@ class RuntimeReconciler:
             )
             return self._deleted_result(desired)
 
-        pods = await self.kubernetes.list(
-            "Pod", label_selector=selector(deployment_id)
-        )
+        pods = await self.kubernetes.list("Pod", label_selector=selector(deployment_id))
         pods_by_component: dict[str, list[dict[str, Any]]] = {}
         for pod in pods:
             labels = pod.get("metadata", {}).get("labels", {})
-            component = labels.get(COMPONENT_LABEL) if isinstance(labels, dict) else None
+            component = (
+                labels.get(COMPONENT_LABEL) if isinstance(labels, dict) else None
+            )
             if isinstance(component, str):
                 pods_by_component.setdefault(component, []).append(pod)
 
@@ -366,7 +370,9 @@ class RuntimeReconciler:
             "Pod",
             label_selector=selector(deployment_id, component_slug),
         )
-        candidates = [pod for pod in pods if self._pod_phase(pod) in {"Running", "Succeeded"}]
+        candidates = [
+            pod for pod in pods if self._pod_phase(pod) in {"Running", "Succeeded"}
+        ]
         if not candidates:
             raise ContractError(
                 "No runtime pod is available for logs.",
@@ -469,6 +475,7 @@ class RuntimeReconciler:
                     for key in keys
                 )
                 or len(keys) != len(set(keys))
+                or keys != sorted(keys)
                 or not requested_keys.issubset(keys)
             ):
                 raise ContractError(
@@ -583,7 +590,11 @@ class RuntimeReconciler:
     @staticmethod
     def _last_request_id(state: dict[str, Any]) -> str:
         annotations = state.get("metadata", {}).get("annotations", {})
-        value = annotations.get("archideal.io/last-request-id") if isinstance(annotations, dict) else ""
+        value = (
+            annotations.get("archideal.io/last-request-id")
+            if isinstance(annotations, dict)
+            else ""
+        )
         return value if isinstance(value, str) and value else "controller-reconcile"
 
     @staticmethod
@@ -603,12 +614,21 @@ class RuntimeReconciler:
         restart_count = 0
         for pod in pods:
             status = pod.get("status")
-            container_statuses = status.get("containerStatuses", []) if isinstance(status, dict) else []
+            container_statuses = (
+                status.get("containerStatuses", []) if isinstance(status, dict) else []
+            )
             if isinstance(container_statuses, list):
                 for container_status in container_statuses:
-                    if isinstance(container_status, dict) and container_status.get("name") == "main":
+                    if (
+                        isinstance(container_status, dict)
+                        and container_status.get("name") == "main"
+                    ):
                         value = container_status.get("restartCount", 0)
-                        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                        if (
+                            isinstance(value, int)
+                            and not isinstance(value, bool)
+                            and value >= 0
+                        ):
                             restart_count += value
         if deployment is None:
             return cls._component_result(
@@ -706,7 +726,11 @@ class RuntimeReconciler:
 
     @staticmethod
     def _count(value: object) -> int:
-        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+        return (
+            value
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            else 0
+        )
 
     @staticmethod
     def _component_result(

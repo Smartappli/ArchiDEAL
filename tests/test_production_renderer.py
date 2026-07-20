@@ -244,6 +244,9 @@ class ProductionRendererTests(unittest.TestCase):
                 "valkey-url",
             )
             runtime_secret_name = f"archideal-runtime-secrets-{release_id}"
+            runtime_controller_tls_secret_name = (
+                f"dealhost-runtime-controller-tls-{release_id}"
+            )
             self.assertEqual(
                 valkey_validator["env"][0]["valueFrom"]["secretKeyRef"]["name"],
                 runtime_secret_name,
@@ -279,6 +282,25 @@ class ProductionRendererTests(unittest.TestCase):
                     "labels"
                 ]["archideal.io/release"],
                 release_id,
+            )
+            runtime_controller_tls_external_secret = by_kind_name[
+                ("ExternalSecret", runtime_controller_tls_secret_name)
+            ]
+            self.assertEqual(
+                runtime_controller_tls_external_secret["metadata"]["labels"][
+                    "archideal.io/release"
+                ],
+                release_id,
+            )
+            self.assertEqual(
+                runtime_controller_tls_external_secret["spec"]["target"]["name"],
+                runtime_controller_tls_secret_name,
+            )
+            self.assertEqual(
+                runtime_controller_tls_external_secret["spec"]["target"]["template"][
+                    "type"
+                ],
+                "kubernetes.io/tls",
             )
             registry_external_secret = by_kind_name[
                 ("ExternalSecret", "archideal-registry-credentials")
@@ -541,12 +563,27 @@ class ProductionRendererTests(unittest.TestCase):
                             )
                 for volume in pod_spec.get("volumes", []):
                     secret_name = volume.get("secret", {}).get("secretName")
-                    if secret_name:
-                        self.assertEqual(
-                            secret_name,
-                            runtime_secret_name,
-                            f"{workload['metadata']['name']}/{volume['name']}",
-                        )
+                    if not secret_name or secret_name == runtime_secret_name:
+                        continue
+                    owner_name = workload["metadata"]["name"]
+                    self.assertEqual(
+                        secret_name,
+                        runtime_controller_tls_secret_name,
+                        f"{owner_name}/{volume['name']}",
+                    )
+                    self.assertIn(
+                        owner_name,
+                        {"dealhost-runtime-controller", "dealhost-runtime-worker"},
+                    )
+                    item_keys = {
+                        item["key"] for item in volume["secret"].get("items", [])
+                    }
+                    expected_keys = (
+                        {"tls.crt", "tls.key", "ca.crt"}
+                        if owner_name == "dealhost-runtime-controller"
+                        else {"ca.crt"}
+                    )
+                    self.assertEqual(item_keys, expected_keys)
 
             hpa_targets = {
                 document["spec"]["scaleTargetRef"]["name"]: document
