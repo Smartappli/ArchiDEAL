@@ -341,13 +341,6 @@ class RuntimeOperationProcessor:
                 pk=locked.deployment_id
             )
             deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
-            deployment.last_error = "The runtime worker failed unexpectedly."
-            deployment.revision += 1
-            deployment.save()
-            deployment = RuntimeDeployment.objects.select_for_update().get(
-                pk=locked.deployment_id
-            )
-            deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
             deployment.last_error = str(exc)[:500]
             deployment.revision += 1
             deployment.save()
@@ -373,6 +366,13 @@ class RuntimeOperationProcessor:
             locked.lease_token = None
             locked.lease_expires_at = None
             locked.save()
+            deployment = RuntimeDeployment.objects.select_for_update().get(
+                pk=locked.deployment_id
+            )
+            deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
+            deployment.last_error = "The runtime worker failed unexpectedly."
+            deployment.revision += 1
+            deployment.save()
 
 
 def _controller_payload(deployment: RuntimeDeployment) -> dict[str, Any]:
