@@ -119,6 +119,23 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  name: dealhost-runtime-worker
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dealhost-runtime-worker
+  ports:
+    - name: metrics
+      port: 9102
+      targetPort: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
   name: dealdata-core
   labels:
     app.kubernetes.io/name: dealdata-core

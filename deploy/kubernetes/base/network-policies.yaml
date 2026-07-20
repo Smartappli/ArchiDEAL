@@ -299,6 +299,16 @@ spec:
       ports:
         - protocol: TCP
           port: 8081
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "${MONITORING_NAMESPACE}"
+          podSelector:
+            matchLabels:
+              monitoring.archideal.io/scraper: "true"
+      ports:
+        - protocol: TCP
+          port: 8081
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -348,6 +358,30 @@ spec:
       ports:
         - protocol: TCP
           port: 6380
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealhost-runtime-worker-ingress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "${MONITORING_NAMESPACE}"
+          podSelector:
+            matchLabels:
+              monitoring.archideal.io/scraper: "true"
+      ports:
+        - protocol: TCP
+          port: 9102
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

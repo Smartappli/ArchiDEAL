@@ -112,13 +112,11 @@ function parseScaling(value: string): RuntimeScaling {
   return parsed as RuntimeScaling;
 }
 
-function defaultScaling(application: HostedApplication | undefined): RuntimeScaling {
-  return Object.fromEntries(
-    (application?.modules ?? []).map((module) => [
-      module.slug,
-      { mode: "fixed" as const, replicas: 1 },
-    ]),
-  );
+function defaultScaling(): RuntimeScaling {
+  // DEALHost expands an empty policy against the selected immutable release.
+  // The mutable application catalog may no longer contain the same module slugs
+  // when an operator rolls back to an older published version.
+  return {};
 }
 
 function isRuntimeLogSnapshot(value: RuntimeOperation["result"]): value is RuntimeLogSnapshot {
@@ -412,7 +410,7 @@ export function RuntimeDeploymentPanel({
     setDeployVersion(preferred ?? "");
     setDeployConfigurationText("{}");
     setDeploySecretRefsText("{}");
-    setDeployScalingText(prettyScaling(defaultScaling(selectedApplication)));
+    setDeployScalingText(prettyScaling(defaultScaling()));
   }, [selectedApplication?.id]);
 
   useEffect(() => {

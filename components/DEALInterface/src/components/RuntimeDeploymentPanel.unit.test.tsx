@@ -165,13 +165,91 @@ it("creates an environment-specific deployment pinned to an immutable version", 
     {
       environment: "production",
       version: "1.5.0",
-      scaling: { api: { mode: "fixed", replicas: 1 } },
+      scaling: {},
       configuration: { api: { FEATURE_FLAG: "true" } },
       secret_refs: {},
     },
     "runtime-command-001",
   ));
   expect(screen.getByText("The runtime operation completed successfully.")).toBeInTheDocument();
+});
+
+it("lets DEALHost resolve rollback scaling from the immutable release instead of current module slugs", async () => {
+  const rollbackApplication: HostedApplication = {
+    ...application,
+    modules: [{ id: 10, name: "Current API", slug: "current-api" }],
+    versions: [
+      ...(application.versions ?? []),
+      {
+        id: 11,
+        version: "1.4.0",
+        notes: "Release containing legacy-api",
+        source: "ci",
+        created_at: "2026-07-19T08:00:00Z",
+      },
+    ],
+  };
+  api.listManagementResources.mockResolvedValue([rollbackApplication]);
+  api.createRuntimeDeployment.mockResolvedValue({
+    deployment: { ...deployment, version: "1.4.0", observed_state: "pending" as const },
+    operation: operation("deploy"),
+  });
+  renderPanel();
+
+  const deployHeading = await screen.findByRole("heading", { name: "Deploy this application" });
+  const form = within(deployHeading.closest("form") as HTMLFormElement);
+  await userEvent.selectOptions(form.getByLabelText("Immutable version"), "1.4.0");
+  await userEvent.click(form.getByRole("button", { name: "Deploy runtime" }));
+
+  await waitFor(() => expect(api.createRuntimeDeployment).toHaveBeenCalledWith(
+    rollbackApplication,
+    expect.objectContaining({
+      version: "1.4.0",
+      scaling: {},
+    }),
+    "runtime-command-001",
+  ));
+  expect(api.createRuntimeDeployment.mock.calls[0]?.[1].scaling).not.toHaveProperty("current-api");
+});
+
+it("preserves serialized release scaling when editing a deployment whose slugs left the catalog", async () => {
+  const legacyDeployment: RuntimeDeployment = {
+    ...deployment,
+    configuration: { "legacy-api": { FEATURE_FLAG: "true" } },
+    secret_refs: { "legacy-api": { DATABASE_URL: "database-url" } },
+    scaling: { "legacy-api": { mode: "fixed", replicas: 4 } },
+    components: [{
+      ...deployment.components[0],
+      module_id: 8,
+      slug: "legacy-api",
+      desired_replicas: 4,
+      ready_replicas: 4,
+      available_replicas: 4,
+    }],
+  };
+  api.listRuntimeDeployments.mockResolvedValue(page([legacyDeployment]));
+  api.updateRuntimeDeploymentConfiguration.mockResolvedValue({
+    deployment: legacyDeployment,
+    operation: operation("configure"),
+  });
+  renderPanel();
+
+  const configurationHeading = await screen.findByRole("heading", { name: "Runtime configuration and scaling" });
+  const form = within(configurationHeading.closest("form") as HTMLFormElement);
+  fireEvent.change(form.getByLabelText("Non-secret environment variables by component (JSON)"), {
+    target: { value: JSON.stringify({ "legacy-api": { FEATURE_FLAG: "false" } }) },
+  });
+  await userEvent.click(form.getByRole("button", { name: "Apply configuration and scaling" }));
+
+  await waitFor(() => expect(api.updateRuntimeDeploymentConfiguration).toHaveBeenCalledWith(
+    legacyDeployment,
+    {
+      configuration: { "legacy-api": { FEATURE_FLAG: "false" } },
+      secret_refs: legacyDeployment.secret_refs,
+      scaling: legacyDeployment.scaling,
+    },
+    "runtime-command-001",
+  ));
 });
 
 it("reuses the same idempotency key when a timed-out deployment is retried", async () => {

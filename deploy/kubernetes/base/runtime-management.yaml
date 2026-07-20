@@ -278,6 +278,36 @@ spec:
                 secretKeyRef:
                   name: archideal-runtime-secrets-${RELEASE_ID}
                   key: dealhost-runtime-controller-token
+            - name: DEALHOST_RUNTIME_WORKER_METRICS_BIND
+              value: 0.0.0.0
+            - name: DEALHOST_RUNTIME_WORKER_METRICS_PORT
+              value: "9102"
+            - name: DEALHOST_RUNTIME_WORKER_HEARTBEAT_TIMEOUT_SECONDS
+              value: "90"
+          ports:
+            - name: metrics
+              containerPort: 9102
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: metrics
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: metrics
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 2
           resources:
             requests:
               cpu: 100m

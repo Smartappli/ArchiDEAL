@@ -621,6 +621,8 @@ class ProductionRendererTests(unittest.TestCase):
                 ("ServiceMonitor", "archideal-dealdata-api"),
                 ("PodMonitor", "archideal-mqtt-kafka-bridge"),
                 ("PodMonitor", "archideal-dealdata-consumers"),
+                ("ServiceMonitor", "archideal-runtime-controller"),
+                ("ServiceMonitor", "archideal-runtime-worker"),
                 ("PrometheusRule", "archideal-production-slo"),
             ):
                 monitor = by_kind_name[(monitor_kind, monitor_name)]
@@ -659,10 +661,42 @@ class ProductionRendererTests(unittest.TestCase):
                     {"path": "/healthz", "port": "metrics"},
                 )
 
+            runtime_worker = by_kind_name[("Deployment", "dealhost-runtime-worker")][
+                "spec"
+            ]["template"]["spec"]["containers"][0]
+            self.assertIn(
+                {"name": "metrics", "containerPort": 9102},
+                runtime_worker["ports"],
+            )
+            self.assertEqual(
+                runtime_worker["readinessProbe"]["httpGet"],
+                {"path": "/health/ready", "port": "metrics"},
+            )
+            self.assertEqual(
+                runtime_worker["livenessProbe"]["httpGet"],
+                {"path": "/health/live", "port": "metrics"},
+            )
+            controller_monitor = by_kind_name[
+                ("ServiceMonitor", "archideal-runtime-controller")
+            ]["spec"]["endpoints"][0]
+            self.assertEqual(controller_monitor["scheme"], "https")
+            self.assertEqual(
+                controller_monitor["tlsConfig"]["serverName"],
+                "dealhost-runtime-controller.archideal.svc.cluster.local",
+            )
+            self.assertEqual(
+                controller_monitor["tlsConfig"]["ca"]["secret"],
+                {
+                    "name": runtime_controller_tls_secret_name,
+                    "key": "ca.crt",
+                },
+            )
+
             expected_monitoring_ports = {
                 "monitoring-identity-ingress": {44180},
                 "monitoring-dealdata-ingress": {9101},
                 "monitoring-ingestion-ingress": {8080, 9100},
+                "dealhost-runtime-worker-ingress": {9102},
             }
             for policy_name, expected_ports in expected_monitoring_ports.items():
                 policy = by_kind_name[("NetworkPolicy", policy_name)]
@@ -759,6 +793,16 @@ class ProductionRendererTests(unittest.TestCase):
             self.assertIn(
                 "ArchiDEALConsumerNoAssignedCapacity",
                 {alert["alert"] for alert in alerts},
+            )
+            self.assertTrue(
+                {
+                    "ArchiDEALRuntimeControllerUnavailable",
+                    "ArchiDEALRuntimeKubernetesBackendUnavailable",
+                    "ArchiDEALRuntimeWorkerUnavailable",
+                    "ArchiDEALRuntimeOperationBacklogOld",
+                    "ArchiDEALRuntimeOperationBacklogHigh",
+                    "ArchiDEALRuntimeOperationStuck",
+                }.issubset({alert["alert"] for alert in alerts})
             )
             for alert in alerts:
                 self.assertIn("severity", alert["labels"])
