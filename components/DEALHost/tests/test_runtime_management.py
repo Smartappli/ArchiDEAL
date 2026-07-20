@@ -331,6 +331,124 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(removed.data["deployment"]["desired_state"], "absent")
         self.assertEqual(removed.data["deployment"]["observed_state"], "deleting")
 
+    def test_operation_history_prioritizes_active_work_ahead_of_newer_history(
+        self,
+    ) -> None:
+        created = self.queue_deployment(key="runtime-priority-deploy")
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+        active = deployment.operations.get()
+        active.status = RuntimeOperation.Status.RUNNING
+        active.save(update_fields=["status"])
+        for index in range(25):
+            RuntimeOperation.objects.create(
+                deployment=deployment,
+                operation_type=RuntimeOperation.OperationType.CONFIGURE,
+                status=RuntimeOperation.Status.SUCCEEDED,
+                idempotency_key=f"runtime-priority-history-{index:02d}",
+                request_hash=f"{index:064x}",
+                target_generation=deployment.generation,
+                finished_at=timezone.now(),
+            )
+
+        response = self.client.get(
+            reverse("deployments-operations", args=[deployment.id]),
+            {"page": 1, "page_size": 20},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 26)
+        self.assertEqual(response.data["results"][0]["id"], str(active.id))
+        self.assertEqual(response.data["results"][0]["status"], "running")
+
+    def test_only_one_log_snapshot_is_active_and_logs_do_not_block_mutations(
+        self,
+    ) -> None:
+        created = self.queue_deployment(key="runtime-log-concurrency-deploy")
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+        deploy_operation = deployment.operations.get()
+        deploy_operation.status = RuntimeOperation.Status.SUCCEEDED
+        deploy_operation.finished_at = timezone.now()
+        deploy_operation.save(update_fields=["status", "finished_at"])
+        deployment.observed_state = RuntimeDeployment.ObservedState.RUNNING
+        deployment.controller_id = "controller-runtime-log-concurrency"
+        deployment.save(update_fields=["observed_state", "controller_id", "updated_at"])
+
+        first = self.client.post(
+            reverse("deployments-log-requests", args=[deployment.id]),
+            {"component": "runtime-api", "tail_lines": 100, "since_seconds": 60},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-log-concurrency-first",
+        )
+        second = self.client.post(
+            reverse("deployments-log-requests", args=[deployment.id]),
+            {"component": "runtime-api", "tail_lines": 50, "since_seconds": 60},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-log-concurrency-second",
+        )
+        stopped = self.client.post(
+            reverse("deployments-actions", args=[deployment.id]),
+            {"action": "stop"},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-log-concurrency-stop",
+        )
+
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.data["code"], "log_snapshot_in_progress")
+        self.assertEqual(stopped.status_code, 202)
+        self.assertEqual(stopped.data["operation"]["type"], "stop")
+
+    def test_disabled_environment_blocks_operations_but_still_allows_cleanup(
+        self,
+    ) -> None:
+        created = self.queue_deployment(key="runtime-disabled-environment-deploy")
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+        deploy_operation = deployment.operations.get()
+        deploy_operation.status = RuntimeOperation.Status.SUCCEEDED
+        deploy_operation.finished_at = timezone.now()
+        deploy_operation.save(update_fields=["status", "finished_at"])
+        deployment.observed_state = RuntimeDeployment.ObservedState.RUNNING
+        deployment.controller_id = "controller-runtime-disabled-environment"
+        deployment.save(update_fields=["observed_state", "controller_id", "updated_at"])
+        self.environment.enabled = False
+        self.environment.save(update_fields=["enabled", "updated_at"])
+
+        action = self.client.post(
+            reverse("deployments-actions", args=[deployment.id]),
+            {"action": "stop"},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-disabled-environment-stop",
+        )
+        logs = self.client.post(
+            reverse("deployments-log-requests", args=[deployment.id]),
+            {"component": "runtime-api", "tail_lines": 50, "since_seconds": 60},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-disabled-environment-logs",
+        )
+        configured = self.client.patch(
+            reverse("deployments-detail", args=[deployment.id]),
+            {"configuration": {"runtime-api": {"FEATURE_FLAG": "disabled"}}},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-disabled-environment-configure",
+        )
+        removed = self.client.delete(
+            reverse("deployments-detail", args=[deployment.id]),
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-disabled-environment-delete",
+        )
+
+        for response in (action, logs, configured):
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.data["code"], "runtime_environment_disabled")
+        self.assertEqual(removed.status_code, 202)
+        self.assertEqual(removed.data["deployment"]["desired_state"], "absent")
+
     def test_runtime_endpoints_are_staff_only(self) -> None:
         reader = get_user_model().objects.create_user(
             username="runtime-reader",

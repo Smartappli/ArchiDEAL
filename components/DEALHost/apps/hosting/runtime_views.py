@@ -8,6 +8,7 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
+from django.db.models import Case, IntegerField, Value, When
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, ValidationError
@@ -328,6 +329,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
+            environment_unavailable = _environment_unavailable(locked)
+            if environment_unavailable is not None:
+                return environment_unavailable
             busy = _busy_response(locked)
             if busy is not None:
                 return busy
@@ -376,6 +380,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
+            environment_unavailable = _environment_unavailable(locked)
+            if environment_unavailable is not None:
+                return environment_unavailable
             busy = _busy_response(locked)
             if busy is not None:
                 return busy
@@ -444,7 +451,19 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["get"], url_path="operations")
     def operations(self, request: Request, pk: str | None = None) -> Response:
         deployment = self.get_object()
-        queryset = deployment.operations.all().order_by("-requested_at")
+        queryset = deployment.operations.annotate(
+            active_rank=Case(
+                When(
+                    status__in=[
+                        RuntimeOperation.Status.QUEUED,
+                        RuntimeOperation.Status.RUNNING,
+                    ],
+                    then=Value(0),
+                ),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        ).order_by("active_rank", "-requested_at", "-id")
         page = self.paginate_queryset(queryset)
         serializer = RuntimeOperationSerializer(page, many=True)
         response = self.get_paginated_response(serializer.data)
@@ -472,6 +491,21 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
+            environment_unavailable = _environment_unavailable(locked)
+            if environment_unavailable is not None:
+                return environment_unavailable
+            if locked.operations.filter(
+                operation_type=RuntimeOperation.OperationType.LOG_SNAPSHOT,
+                status__in=[
+                    RuntimeOperation.Status.QUEUED,
+                    RuntimeOperation.Status.RUNNING,
+                ],
+            ).exists():
+                return _problem(
+                    "Another log snapshot is already in progress for this deployment.",
+                    code="log_snapshot_in_progress",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
             if not locked.controller_id:
                 return _problem(
                     "Logs are unavailable until the deployment has a runtime identity.",
@@ -734,6 +768,8 @@ def _revision_precondition(
 def _busy_response(deployment: RuntimeDeployment) -> Response | None:
     if deployment.operations.filter(
         status__in=[RuntimeOperation.Status.QUEUED, RuntimeOperation.Status.RUNNING]
+    ).exclude(
+        operation_type=RuntimeOperation.OperationType.LOG_SNAPSHOT
     ).exists():
         return _problem(
             "Another runtime operation is already in progress.",
@@ -741,6 +777,16 @@ def _busy_response(deployment: RuntimeDeployment) -> Response | None:
             status_code=status.HTTP_409_CONFLICT,
         )
     return None
+
+
+def _environment_unavailable(deployment: RuntimeDeployment) -> Response | None:
+    if deployment.environment.enabled:
+        return None
+    return _problem(
+        "The runtime environment is disabled for operational requests.",
+        code="runtime_environment_disabled",
+        status_code=status.HTTP_409_CONFLICT,
+    )
 
 
 def _validate_transition(

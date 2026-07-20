@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from urllib.error import HTTPError
 from urllib.request import urlopen
 from unittest.mock import Mock, patch
 
@@ -87,7 +88,14 @@ class RuntimeWorkerObservabilityTests(RuntimeFixtureMixin, APITestCase):
 
         metrics = render_runtime_worker_metrics(health, snapshot).decode()
         self.assertIn("dealhost_runtime_worker_ready 0", metrics)
+        self.assertIn("dealhost_runtime_worker_live 1", metrics)
         self.assertIn("dealhost_runtime_worker_loop_heartbeat_age_seconds 6", metrics)
+
+        monotonic[0] = 111.0
+        self.assertIn(
+            "dealhost_runtime_worker_live 0",
+            render_runtime_worker_metrics(health, snapshot).decode(),
+        )
 
     def test_processor_updates_heartbeat_around_each_iteration(self) -> None:
         processor = RuntimeOperationProcessor(worker_id="observability-worker")
@@ -98,7 +106,11 @@ class RuntimeWorkerObservabilityTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(heartbeat.call_count, 2)
 
     def test_monitor_serves_live_ready_and_metrics_endpoints(self) -> None:
-        health = RuntimeWorkerHealth(heartbeat_timeout_seconds=90)
+        monotonic = [100.0]
+        health = RuntimeWorkerHealth(
+            heartbeat_timeout_seconds=90,
+            clock=lambda: monotonic[0],
+        )
         snapshot = collect_runtime_worker_snapshot()
         monitor = RuntimeWorkerMonitor(bind="127.0.0.1", port=0, health=health)
         with patch(
@@ -118,5 +130,9 @@ class RuntimeWorkerObservabilityTests(RuntimeFixtureMixin, APITestCase):
                         b"dealhost_runtime_worker_ready 1",
                         response.read(),
                     )
+                monotonic[0] = 281.0
+                with self.assertRaises(HTTPError) as raised:
+                    urlopen(f"{base_url}/health/live", timeout=2)
+                self.assertEqual(raised.exception.code, 503)
             finally:
                 monitor.stop()

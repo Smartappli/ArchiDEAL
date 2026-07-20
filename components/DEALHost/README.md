@@ -319,7 +319,9 @@ python manage.py process_runtime_operations --once
 
 Le worker expose, sur une interface dédiée, `/health/live`, `/health/ready` et `/metrics`.
 La readiness exige une boucle de traitement récente et un accès à la base qui porte la file
-durable. Les métriques publient uniquement des agrégats à cardinalité bornée : profondeur et âge
+durable. Après deux fois le délai de heartbeat, la liveness échoue aussi afin que Kubernetes
+redémarre une boucle réellement figée sans réagir à un seul appel contrôleur lent mais borné.
+Les métriques publient uniquement des agrégats à cardinalité bornée : profondeur et âge
 de file par statut, types d'opération, leases expirés et échecs contrôleur actifs. Aucun identifiant
 d'application, de déploiement ou d'idempotence n'est utilisé comme label. Le contrôleur expose
 également `/metrics` sur son listener TLS ; ce endpoint vérifie l'accès Kubernetes et reste limité

@@ -401,6 +401,16 @@ class RuntimeOperation(models.Model):
 
     class Meta:
         ordering = ("-requested_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("deployment",),
+                condition=models.Q(
+                    operation_type="log_snapshot",
+                    status__in=["queued", "running"],
+                ),
+                name="hosting_runtime_unique_active_log",
+            )
+        ]
         indexes = [
             models.Index(
                 fields=("deployment", "-requested_at"),

@@ -664,6 +664,11 @@ class ProductionRendererTests(unittest.TestCase):
             runtime_worker = by_kind_name[("Deployment", "dealhost-runtime-worker")][
                 "spec"
             ]["template"]["spec"]["containers"][0]
+            self.assertTrue(
+                by_kind_name[("Service", "dealhost-runtime-worker")]["spec"][
+                    "publishNotReadyAddresses"
+                ]
+            )
             self.assertIn(
                 {"name": "metrics", "containerPort": 9102},
                 runtime_worker["ports"],

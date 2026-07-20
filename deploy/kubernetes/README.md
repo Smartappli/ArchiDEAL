@@ -172,9 +172,12 @@ and CA path live in the worker-only `dealhost-runtime-worker` ConfigMap. The rel
 runs the idempotent `python manage.py provision_runtime_environment` command after schema migration
 so the `production` RuntimeEnvironment always exists before rollout.
 
-The worker exposes process liveness, database/loop readiness and bounded queue metrics on port
-9102. The controller exposes request and Kubernetes-backend readiness metrics on its existing TLS
-listener. Dedicated `ServiceMonitor` objects assign the stable jobs
+The worker exposes loop liveness, database/loop readiness and bounded queue metrics on port 9102.
+Readiness fails after a 90-second heartbeat gap; liveness fails only after 180 seconds so one
+bounded controller call does not cause a restart, while a genuinely wedged loop self-heals. Its
+metrics-only Service publishes NotReady addresses so Prometheus retains the diagnostic gauges
+during the outage. The controller exposes request and Kubernetes-backend readiness metrics on its
+existing TLS listener. Dedicated `ServiceMonitor` objects assign the stable jobs
 `archideal-runtime-worker` and `archideal-runtime-controller`; only labelled Prometheus pods in
 `MONITORING_NAMESPACE` can reach them. Production alerts cover missing controller/worker targets,
 controller loss of Kubernetes access, a queued item older than five minutes, a sustained queue of

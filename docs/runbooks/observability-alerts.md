@@ -92,7 +92,10 @@ uses HTTPS with the private controller CA; a failed scrape can therefore mean an
 mismatched certificate as well as a stopped process. The controller readiness and
 `dealhost_runtime_controller_kubernetes_ready` additionally prove a bounded authenticated query to
 the Kubernetes API. Worker readiness requires both a recent processing-loop heartbeat and a query
-of the durable PostgreSQL operation store.
+of the durable PostgreSQL operation store. Readiness fails after one heartbeat deadline; liveness
+uses twice that deadline so Kubernetes restarts a persistently wedged loop without turning a
+single bounded controller request into a restart. The metrics-only Service publishes NotReady
+addresses deliberately, so its diagnostic scrape remains reachable while readiness is false.
 
 ```bash
 kubectl --context "$KUBE_CONTEXT" -n archideal get pods,services,endpoints \

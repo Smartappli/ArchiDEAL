@@ -59,6 +59,9 @@ class RuntimeWorkerHealth:
     def is_fresh(self) -> bool:
         return self.heartbeat_age_seconds() <= self.heartbeat_timeout_seconds
 
+    def is_live(self) -> bool:
+        return self.heartbeat_age_seconds() <= self.heartbeat_timeout_seconds * 2
+
 
 def collect_runtime_worker_snapshot(
     *, now: datetime | None = None
@@ -152,6 +155,7 @@ def render_runtime_worker_metrics(
     database_ready = snapshot is not None
     heartbeat_age = health.heartbeat_age_seconds()
     worker_ready = database_ready and health.is_fresh()
+    worker_live = health.is_live()
     lines = [
         "# HELP dealhost_runtime_worker_process_start_time_seconds Unix time when the worker process started.",
         "# TYPE dealhost_runtime_worker_process_start_time_seconds gauge",
@@ -167,6 +171,9 @@ def render_runtime_worker_metrics(
         "# HELP dealhost_runtime_worker_ready Whether the database and worker loop are ready.",
         "# TYPE dealhost_runtime_worker_ready gauge",
         _sample("dealhost_runtime_worker_ready", 1 if worker_ready else 0),
+        "# HELP dealhost_runtime_worker_live Whether the operation loop heartbeat remains within its liveness deadline.",
+        "# TYPE dealhost_runtime_worker_live gauge",
+        _sample("dealhost_runtime_worker_live", 1 if worker_live else 0),
     ]
     if snapshot is not None:
         lines.extend(
@@ -292,7 +299,14 @@ def _handler_for(health: RuntimeWorkerHealth) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
             if self.path == "/health/live":
-                self._send(HTTPStatus.OK, b'{"status":"ok"}\n', "application/json")
+                live = health.is_live()
+                status = HTTPStatus.OK if live else HTTPStatus.SERVICE_UNAVAILABLE
+                payload = (
+                    b'{"status":"ok"}\n'
+                    if live
+                    else b'{"status":"unavailable"}\n'
+                )
+                self._send(status, payload, "application/json")
                 return
             if self.path not in {"/health/ready", "/metrics"}:
                 self._send(
