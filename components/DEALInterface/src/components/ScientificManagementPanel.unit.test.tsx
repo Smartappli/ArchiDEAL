@@ -84,6 +84,7 @@ describe("ScientificManagementPanel", () => {
     expect(await screen.findByText("Experiment 11111111")).toBeInTheDocument();
     const editor = screen.getByRole("heading", { name: "Scientific metadata" }).closest("form")!;
     const projectInput = within(editor).getByLabelText("Project UUID");
+    await waitFor(() => expect(projectInput).toHaveValue(first.project));
     fireEvent.change(projectInput, { target: { value: second.project } });
     await user.click(within(editor).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(api.updateExperiment).toHaveBeenCalledWith(first.id, {
