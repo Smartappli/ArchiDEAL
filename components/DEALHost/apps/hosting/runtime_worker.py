@@ -190,7 +190,9 @@ class RuntimeOperationProcessor:
                     detail = "Runtime reconciliation timed out."
                     deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
                     deployment.last_error = detail
-                    deployment.save(update_fields=["observed_state", "last_error", "updated_at"])
+                    deployment.save(
+                        update_fields=["observed_state", "last_error", "updated_at"]
+                    )
                     locked_operation.status = RuntimeOperation.Status.FAILED
                     locked_operation.error = {
                         "code": "runtime_reconciliation_timeout",
@@ -223,10 +225,14 @@ class RuntimeOperationProcessor:
                 return
 
             terminal_error = _terminal_state_error(operation, deployment, snapshot)
-            if snapshot.state in {
-                RuntimeDeployment.ObservedState.FAILED,
-                RuntimeDeployment.ObservedState.UNKNOWN,
-            } or terminal_error:
+            if (
+                snapshot.state
+                in {
+                    RuntimeDeployment.ObservedState.FAILED,
+                    RuntimeDeployment.ObservedState.UNKNOWN,
+                }
+                or terminal_error
+            ):
                 locked_operation.status = RuntimeOperation.Status.FAILED
                 locked_operation.error = {
                     "code": "runtime_reconciliation_failed",
