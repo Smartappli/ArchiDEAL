@@ -2367,9 +2367,13 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     controller_cluster_bindings = [
         document
         for document in documents
-        if document.get("kind") in {"ClusterRole", "ClusterRoleBinding"}
-        and document.get("metadata", {}).get("name")
-        == "dealhost-runtime-controller"
+        if document.get("kind") == "ClusterRoleBinding"
+        and any(
+            subject.get("kind") == "ServiceAccount"
+            and subject.get("name") == "dealhost-runtime-controller"
+            and subject.get("namespace") == "archideal"
+            for subject in document.get("subjects", [])
+        )
     ]
     if (
         runtime_role.get("metadata", {}).get("namespace")
@@ -2445,6 +2449,25 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "The runtime controller may only get the named operator Secret catalog "
             "from its platform namespace."
         )
+    controller_namespaced_bindings = {
+        (
+            document.get("metadata", {}).get("name"),
+            document.get("metadata", {}).get("namespace"),
+        )
+        for document in documents
+        if document.get("kind") == "RoleBinding"
+        and any(
+            subject.get("kind") == "ServiceAccount"
+            and subject.get("name") == "dealhost-runtime-controller"
+            and subject.get("namespace") == "archideal"
+            for subject in document.get("subjects", [])
+        )
+    }
+    if controller_namespaced_bindings != {
+        ("dealhost-runtime-controller", "archideal-runtime-apps"),
+        ("dealhost-runtime-secret-catalog-reader", "archideal"),
+    }:
+        fail("The runtime controller must not receive any additional RoleBinding.")
 
     runtime_secret_catalog = next(
         (
@@ -2476,7 +2499,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "The operator-owned immutable runtime Secret catalog must contain only "
             "metadata references in the platform namespace."
         )
-    environment_key = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+    environment_key = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
     for logical_ref, raw_entry in catalog_data.items():
         try:
             entry = json.loads(raw_entry)

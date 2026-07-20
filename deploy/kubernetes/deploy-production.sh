@@ -662,7 +662,7 @@ if labels.get("archideal.io/runtime-secret-catalog") != "true":
 if catalog.get("immutable") is not True or catalog.get("binaryData"):
     raise SystemExit("Runtime Secret catalog must be immutable and contain no binary data")
 logical_pattern = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
-key_pattern = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+key_pattern = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 for logical_ref, raw_entry in catalog.get("data", {}).items():
     try:
         entry = json.loads(raw_entry)
@@ -709,8 +709,8 @@ try:
     token = base64.b64decode(encoded, validate=True)
 except Exception as exc:
     raise SystemExit("Runtime-controller token is not valid base64") from exc
-if len(token) < 32 or any(byte <= 0x20 or byte >= 0x7f for byte in token):
-    raise SystemExit("Runtime-controller token must be at least 32 visible ASCII bytes")
+if not 32 <= len(token) <= 256 or any(byte <= 0x20 or byte >= 0x7f for byte in token):
+    raise SystemExit("Runtime-controller token must be 32-256 visible ASCII bytes")
 '
 runtime_controller_tls_dir="$work_dir/runtime-controller-tls"
 mkdir -m 0700 "$runtime_controller_tls_dir"

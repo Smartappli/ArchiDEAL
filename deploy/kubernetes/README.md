@@ -104,22 +104,26 @@ topics) before the corresponding DEALIoT capabilities are enabled.
 On an upgrade where `ingress/archideal` already exists, the deployer also requires
 `--approve-live-upgrade`. Supply it only after verifying that database changes use the
 expand/contract pattern and remain compatible with the release still receiving traffic. Before any
-mutation it proves that all eleven controllers are fully observed and available, and that their
+mutation it proves that all thirteen controllers are fully observed and available, and that their
 templates plus every Ready serving Pod use the same release as the Ingress.
 
 After the first mutation, every non-zero exit activates the promotion fence: the deployer deletes
 and waits for `ingress/archideal`, annotates the Namespace with the failed target and validated
 previous release when available, preserves its original exit code, and prints an explicit
 `production-rollback` command. A release is marked `succeeded` on the Namespace and Ingress only
-after the public smoke and a second eleven-controller coherence proof. Rollback is never an Ingress
+after the public smoke and a second thirteen-controller coherence proof. Rollback is never an Ingress
 reapply; `rollback-production.sh` accepts only the recorded previous release and reruns signed
 verification, the full ordered promotion and fresh one-shot Jobs without reversing database
 migrations. Run that wrapper from a clean worktree at the previous manifest's signed revision; the
 supply-chain gate rejects the failed release's checkout or any dirty source tree.
 
 For an offline render used by CI or change review, call `render.py` directly and run
-`kubectl kustomize` against the rendered production overlay. A directory can be replaced with
-`--force` only when it contains the renderer's ownership marker.
+`kubectl kustomize` against both the rendered production overlay and the separate rendered
+`runtime-apps` tree. The latter owns the isolated `archideal-runtime-apps` namespace and must not
+be nested below the platform namespace transformer. A directory can be replaced with `--force`
+only when it contains the renderer's ownership marker. Production promotion must still use the
+ordered deployer, which applies both trees and bootstraps the operator-owned runtime Secret catalog
+when it is absent.
 
 The renderer rejects missing or unknown values, mutable or non-allowlisted image references,
 all-zero image digests, `.invalid` endpoints, wildcard hosts, non-RFC1918 dependency ranges,
@@ -156,6 +160,54 @@ application rollouts, the ordered deployer validates the Secret in a non-logging
 scheme check, and an init container applies the same fail-closed check before oauth2-proxy starts.
 The development Compose profile may continue to use plaintext `redis://` only on its private local
 network.
+
+## Managed DEALHost application runtime
+
+Runtime mutations are durable database operations. The DEALHost web Deployment records them but
+has no controller token, controller CA mount or NetworkPolicy path to the controller. The isolated
+`dealhost-runtime-worker` uses `dealhost.settings.runtime_worker`, leases queued operations through
+PostgreSQL/Valkey, and is the only client admitted to
+`https://dealhost-runtime-controller.archideal.svc.cluster.local:8443`. Its controller URL, timeout
+and CA path live in the worker-only `dealhost-runtime-worker` ConfigMap. The release migration Job
+runs the idempotent `python manage.py provision_runtime_environment` command after schema migration
+so the `production` RuntimeEnvironment always exists before rollout.
+
+The internal controller is a separate HA Deployment and the only platform Pod with an automounted
+Kubernetes token. A RoleBinding grants its ServiceAccount an exact namespaced Role in
+`archideal-runtime-apps`; it can reconcile Deployments, Services, application ConfigMaps and HPAs
+and read Pod status/logs, but it has no Secret, NetworkPolicy or cluster-wide permission. Managed
+Pods use the static tokenless `dealhost-runtime-application` ServiceAccount and the independently
+reconciled registry pull Secret. The namespace enforces the restricted Pod Security Standard,
+default-deny ingress/egress with DNS as its only baseline, an aggregate ceiling of 100 Pods, 20/40
+requested/limited CPU, 40/80 GiB requested/limited memory, 50 Services, 100 ConfigMaps and 100
+Secrets, plus reviewed per-container defaults and maxima. Application egress remains unsupported
+until an explicit policy contract is implemented; a requested egress profile fails closed.
+
+Runtime Secret values are provisioned out of band under deterministic names prefixed `dealapp-`.
+The controller has no permission to read them. It can only `get` the immutable, operator-owned
+`dealhost-runtime-secret-catalog` ConfigMap in `archideal`; that separate namespace prevents its
+runtime-app ConfigMap CRUD permission from modifying the catalog. The deployer creates an empty
+catalog only when none exists, validates it before rollout and never overwrites an existing one.
+An empty catalog rejects every Secret reference. Each operator-provisioned data entry must use the
+logical reference as its key and canonical metadata-only JSON as its value, for example
+`database: {"secret_name":"dealapp-database","keys":["DATABASE_URL"]}`. Keys must be sorted,
+unique environment-variable names. Because the catalog is immutable, stage its complete reviewed
+replacement through the operator procedure; never put a Secret value in it. Actual missing Secret
+objects are detected by the managed Pod rollout and remain unavailable without expanding controller
+RBAC.
+
+The controller listener uses a release-scoped `kubernetes.io/tls` Secret populated from
+`pki/dealhost-runtime-controller-tls.crt`,
+`pki/dealhost-runtime-controller-tls.pkcs8.key` and
+`pki/dealhost-runtime-controller-ca.crt` below `SECRET_PREFIX`; its bearer token comes from
+`dealhost/runtime-controller-token`. The leaf certificate must have exactly the DNS SAN
+`dealhost-runtime-controller.archideal.svc.cluster.local`, chain to the supplied CA, match the
+unencrypted PKCS#8 key and remain valid through the promotion timeout. Before migrations or
+rollouts, the deployer verifies the certificate/key pair, trust chain, expiry and exact SAN without
+logging key material. Startup, readiness and liveness probes then perform real HTTPS GET requests,
+validate the same CA and SAN, and require HTTP 200. Set `KUBERNETES_API_EGRESS_CIDR` to the exact
+private `/32` API endpoint admitted from the controller; it must not overlap the Pod or other
+dependency CIDRs.
 
 DEALData uses a separate confidential OIDC introspection client in every Core, GPS, and Sensor
 workload. Store it at `dealdata/oidc-client-id` and `dealdata/oidc-client-secret` below
