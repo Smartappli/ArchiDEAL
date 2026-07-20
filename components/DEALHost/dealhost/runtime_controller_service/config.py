@@ -31,6 +31,8 @@ class ControllerSettings:
     secret_catalog_namespace: str
     max_replicas: int = 10
     request_timeout_seconds: float = 15.0
+    lease_duration_seconds: int = 30
+    lease_acquire_timeout_seconds: float = 10.0
 
     @classmethod
     def from_env(cls) -> ControllerSettings:
@@ -73,6 +75,15 @@ class ControllerSettings:
             maximum = int(os.getenv("RUNTIME_CONTROLLER_MAX_REPLICAS", "10"))
             timeout = float(
                 os.getenv("RUNTIME_CONTROLLER_KUBERNETES_TIMEOUT_SECONDS", "15")
+            )
+            lease_duration = int(
+                os.getenv("RUNTIME_CONTROLLER_LEASE_DURATION_SECONDS", "30")
+            )
+            lease_acquire_timeout = float(
+                os.getenv(
+                    "RUNTIME_CONTROLLER_LEASE_ACQUIRE_TIMEOUT_SECONDS",
+                    "10",
+                )
             )
         except ValueError as exc:
             raise ControllerConfigurationError(
@@ -121,6 +132,8 @@ class ControllerSettings:
             ).strip(),
             max_replicas=maximum,
             request_timeout_seconds=timeout,
+            lease_duration_seconds=lease_duration,
+            lease_acquire_timeout_seconds=lease_acquire_timeout,
         )
         settings.validate()
         return settings
@@ -195,6 +208,17 @@ class ControllerSettings:
         if not 1 <= self.request_timeout_seconds <= 60:
             raise ControllerConfigurationError(
                 "RUNTIME_CONTROLLER_KUBERNETES_TIMEOUT_SECONDS must be between 1 and 60."
+            )
+        if (
+            not 10 <= self.lease_duration_seconds <= 300
+            or self.lease_duration_seconds < 2 * self.request_timeout_seconds
+        ):
+            raise ControllerConfigurationError(
+                "RUNTIME_CONTROLLER_LEASE_DURATION_SECONDS must be between 10 and 300 and at least twice the Kubernetes timeout."
+            )
+        if not 0.1 <= self.lease_acquire_timeout_seconds <= 30:
+            raise ControllerConfigurationError(
+                "RUNTIME_CONTROLLER_LEASE_ACQUIRE_TIMEOUT_SECONDS must be between 0.1 and 30."
             )
         if require_files:
             for label, path in (

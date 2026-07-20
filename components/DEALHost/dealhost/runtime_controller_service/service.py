@@ -13,6 +13,7 @@ from .contract import (
     payload_digest,
 )
 from .kubernetes import KubernetesClient
+from .lease import DeploymentLeaseManager
 from .resources import (
     COMPONENT_LABEL,
     DEPLOYMENT_LABEL,
@@ -89,8 +90,25 @@ class RuntimeReconciler:
     ) -> None:
         self.settings = settings
         self.kubernetes = kubernetes
+        self.leases = DeploymentLeaseManager(settings, kubernetes)
 
     async def deploy(
+        self,
+        desired: DesiredDeployment,
+        *,
+        request_id: str,
+        require_existing: bool = False,
+        restart_request: str = "",
+    ) -> RuntimeResult:
+        async with self.leases.hold(desired.deployment_id):
+            return await self._deploy_unlocked(
+                desired,
+                request_id=request_id,
+                require_existing=require_existing,
+                restart_request=restart_request,
+            )
+
+    async def _deploy_unlocked(
         self,
         desired: DesiredDeployment,
         *,
@@ -184,14 +202,31 @@ class RuntimeReconciler:
             raise ContractError(f"{action.title()} requires running desired state.")
         if action not in {"start", "stop", "restart", "redeploy"}:
             raise ContractError("The runtime action is unsupported.", status_code=404)
-        return await self.deploy(
-            desired,
-            request_id=request_id,
-            require_existing=True,
-            restart_request=(request_id if action in {"restart", "redeploy"} else ""),
-        )
+        async with self.leases.hold(desired.deployment_id):
+            return await self._deploy_unlocked(
+                desired,
+                request_id=request_id,
+                require_existing=True,
+                restart_request=(
+                    request_id if action in {"restart", "redeploy"} else ""
+                ),
+            )
 
     async def undeploy(
+        self,
+        deployment_id: str,
+        *,
+        request_id: str,
+        desired: DesiredDeployment | None,
+    ) -> RuntimeResult:
+        async with self.leases.hold(deployment_id):
+            return await self._undeploy_unlocked(
+                deployment_id,
+                request_id=request_id,
+                desired=desired,
+            )
+
+    async def _undeploy_unlocked(
         self,
         deployment_id: str,
         *,

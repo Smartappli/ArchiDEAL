@@ -45,6 +45,7 @@ RUNTIME_EXPOSURE_KINDS = frozenset(
         "HTTPRoute",
         "Ingress",
         "ReferenceGrant",
+        "Route",
         "ServiceExport",
         "TCPRoute",
         "TLSRoute",
@@ -234,6 +235,57 @@ def _network_policy_pod_names(peer: dict) -> set[str]:
                 if isinstance(value, str)
             )
     return names
+
+
+def _label_selector_matches(selector: object, labels: dict[str, str]) -> bool:
+    """Conservatively determine whether a NetworkPolicy can select given labels."""
+
+    if not isinstance(selector, dict):
+        return True
+    match_labels = selector.get("matchLabels", {})
+    expressions = selector.get("matchExpressions", [])
+    if not isinstance(match_labels, dict) or not isinstance(expressions, list):
+        return True
+    if any(labels.get(key) != value for key, value in match_labels.items()):
+        return False
+    for expression in expressions:
+        if not isinstance(expression, dict):
+            return True
+        key = expression.get("key")
+        operator = expression.get("operator")
+        values = expression.get("values", [])
+        if not isinstance(key, str) or not isinstance(values, list):
+            return True
+        if operator == "In" and labels.get(key) not in values:
+            return False
+        if operator == "NotIn" and key in labels and labels[key] in values:
+            return False
+        if operator == "Exists" and key not in labels:
+            return False
+        if operator == "DoesNotExist" and key in labels:
+            return False
+        if operator not in {"In", "NotIn", "Exists", "DoesNotExist"}:
+            return True
+    return True
+
+
+def _network_policy_types(spec: object) -> set[str]:
+    """Return every direction a policy may govern, including Kubernetes defaults."""
+
+    if not isinstance(spec, dict):
+        return {"Ingress", "Egress"}
+    declared = spec.get("policyTypes")
+    if not isinstance(declared, list):
+        policy_types = {"Ingress"}
+        if "egress" in spec:
+            policy_types.add("Egress")
+    else:
+        policy_types = {item for item in declared if item in {"Ingress", "Egress"}}
+    if "ingress" in spec:
+        policy_types.add("Ingress")
+    if "egress" in spec:
+        policy_types.add("Egress")
+    return policy_types
 
 
 def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) -> None:
@@ -761,6 +813,15 @@ def validate_runtime_apps_fail_closed(
             "baseline resources; patches, generators, components and remote or "
             "additional resources are forbidden."
         )
+    if any(
+        document.get("kind") == "Kustomization"
+        and document.get("namespace") == RUNTIME_APPS_NAMESPACE
+        for document in all_documents
+    ):
+        fail(
+            "Only the reviewed runtime-apps tree may target the managed-application "
+            "namespace; namespace transforms in other kustomizations are forbidden."
+        )
 
     expected_namespace = {
         "apiVersion": "v1",
@@ -854,6 +915,27 @@ def validate_runtime_apps_fail_closed(
                 "Runtime-apps NetworkPolicies must be exactly the default-deny "
                 "and DNS-only baseline; additional policies are forbidden."
             )
+
+    runtime_scoped_in_tree = [
+        document
+        for document in runtime_documents
+        if document.get("metadata", {}).get("namespace") == RUNTIME_APPS_NAMESPACE
+    ]
+    unmatched_runtime_scoped = list(explicitly_runtime_scoped)
+    for reviewed_document in runtime_scoped_in_tree:
+        try:
+            index = unmatched_runtime_scoped.index(reviewed_document)
+        except ValueError:
+            fail(
+                "Rendered runtime-apps resources must remain within the reviewed "
+                "runtime-apps tree."
+            )
+        unmatched_runtime_scoped.pop(index)
+    if unmatched_runtime_scoped:
+        fail(
+            "Resources explicitly scoped to archideal-runtime-apps must live only "
+            "in the reviewed runtime-apps tree."
+        )
 
     policies_by_name = {policy["metadata"]["name"]: policy for policy in tree_policies}
     expected_default_deny = {
@@ -1934,6 +2016,121 @@ def validate_runtime_contracts(documents: list[dict], values: dict[str, str]) ->
         for document in documents
         if document.get("kind") == "NetworkPolicy"
     }
+    platform_network_policies = [
+        document
+        for document in documents
+        if document.get("kind") == "NetworkPolicy"
+        and document.get("metadata", {}).get("namespace") in {None, "archideal"}
+    ]
+    expected_shared_policy_specs = {
+        "default-deny": {
+            "podSelector": {},
+            "policyTypes": ["Ingress", "Egress"],
+        },
+        "allow-dns-egress": {
+            "podSelector": {},
+            "policyTypes": ["Egress"],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {
+                                    "kubernetes.io/metadata.name": "kube-system"
+                                }
+                            },
+                            "podSelector": {
+                                "matchExpressions": [
+                                    {
+                                        "key": "k8s-app",
+                                        "operator": "In",
+                                        "values": ["kube-dns", "coredns"],
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                    "ports": [
+                        {"protocol": "UDP", "port": 53},
+                        {"protocol": "TCP", "port": 53},
+                    ],
+                }
+            ],
+        },
+    }
+    sensitive_policy_names = {
+        "default-deny",
+        "allow-dns-egress",
+        "apisix-egress",
+        "dealhost-runtime-controller-ingress",
+        "dealhost-runtime-controller-clients-egress",
+        "dealhost-runtime-worker-egress",
+        "dealhost-runtime-worker-ingress",
+        "dealhost-runtime-controller-egress",
+    }
+    for policy_name in sensitive_policy_names:
+        matches = [
+            policy
+            for policy in platform_network_policies
+            if policy.get("metadata", {}).get("name") == policy_name
+        ]
+        if len(matches) != 1:
+            fail(f"{policy_name} must exist exactly once in the platform namespace.")
+    for policy_name, expected_spec in expected_shared_policy_specs.items():
+        if network_policies.get(policy_name, {}).get("spec") != expected_spec:
+            fail(
+                f"{policy_name} must retain its exact reviewed cluster-wide "
+                "isolation contract."
+            )
+
+    sensitive_policy_allowlist = {
+        ("apisix", "Egress"): {
+            "default-deny",
+            "allow-dns-egress",
+            "apisix-egress",
+        },
+        ("dealhost-runtime-controller", "Ingress"): {
+            "default-deny",
+            "dealhost-runtime-controller-ingress",
+        },
+        ("dealhost-runtime-controller", "Egress"): {
+            "default-deny",
+            "allow-dns-egress",
+            "dealhost-runtime-controller-egress",
+        },
+        ("dealhost-runtime-worker", "Ingress"): {
+            "default-deny",
+            "dealhost-runtime-worker-ingress",
+        },
+        ("dealhost-runtime-worker", "Egress"): {
+            "default-deny",
+            "allow-dns-egress",
+            "dealhost-runtime-controller-clients-egress",
+            "dealhost-runtime-worker-egress",
+        },
+    }
+    for policy in platform_network_policies:
+        policy_name = policy.get("metadata", {}).get("name", "<unnamed>")
+        spec = policy.get("spec", {})
+        policy_types = _network_policy_types(spec)
+        selector = spec.get("podSelector") if isinstance(spec, dict) else None
+        for (
+            workload_name,
+            direction,
+        ), allowed_names in sensitive_policy_allowlist.items():
+            if (
+                direction in policy_types
+                and _label_selector_matches(
+                    selector,
+                    {"app.kubernetes.io/name": workload_name},
+                )
+                and policy_name not in allowed_names
+            ):
+                fail(
+                    f"Unreviewed NetworkPolicy {policy_name} may select "
+                    f"{workload_name} for {direction}; additive policies are "
+                    "forbidden on runtime control-plane and APISIX traffic."
+                )
     expected_egress_ports = {
         "dealhost-external-egress": {443, 5432, 6380},
         "dealhost-runtime-worker-egress": {5432, 6380},
@@ -2749,6 +2946,11 @@ def validate_runtime_contracts(documents: list[dict], values: dict[str, str]) ->
             frozenset({"autoscaling"}),
             frozenset({"horizontalpodautoscalers"}),
             lifecycle_verbs,
+        ),
+        (
+            frozenset({"coordination.k8s.io"}),
+            frozenset({"leases"}),
+            frozenset({"get", "create", "update", "delete"}),
         ),
         (
             frozenset({""}),

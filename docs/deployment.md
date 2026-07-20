@@ -36,6 +36,12 @@ docker compose logs --timestamps mqtt-kafka-bridge dealdata-gps-consumer dealdat
 docker compose down --remove-orphans
 ```
 
+For a single-node integration or demonstration VPS, the root Compose stack can be fast-forwarded,
+rebuilt, health-checked and rolled back automatically with the guarded cron wrapper documented in
+[`deploy/vps/README.md`](../deploy/vps/README.md). That wrapper refuses local changes and divergent
+Git history, retains commit-specific application images and never deletes volumes. It does not
+change the support boundary below: Compose is not the production deployment target.
+
 The compact root Compose profile explicitly requires VerneMQ, `mqtt-kafka-bridge` and Kafka.
 DEALIoT `/api/health` summarizes those required dependencies; full-platform services such as
 Airflow, Flink, Apicurio and Prometheus are excluded unless an operator explicitly adds them to the

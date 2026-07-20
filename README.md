@@ -107,6 +107,9 @@ processes. The production overlay includes Prometheus Operator discovery and ale
 measured indicators and deliberate coverage gaps are tracked in [docs/slo.md](docs/slo.md), with
 actions in [the observability runbook](docs/runbooks/observability-alerts.md).
 
+A guarded [cron update wrapper](deploy/vps/README.md) is available for the development/integration
+Compose stack on a single-node VPS. It does not replace the signed Kubernetes production flow.
+
 ## Licensing
 
 The root repository and all four imported components are licensed under AGPL-3.0. Component license

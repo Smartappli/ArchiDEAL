@@ -17,6 +17,10 @@ def state_name(deployment_id: str) -> str:
     return f"dealrt-{hashlib.sha256(deployment_id.encode()).hexdigest()[:24]}-state"
 
 
+def lease_name(deployment_id: str) -> str:
+    return f"dealrt-{hashlib.sha256(deployment_id.encode()).hexdigest()[:24]}-lock"
+
+
 def component_name(deployment_id: str, slug: str, *, suffix: str = "") -> str:
     identity = hashlib.sha256(deployment_id.encode()).hexdigest()[:20]
     slug_hash = hashlib.sha256(slug.encode()).hexdigest()[:8]

@@ -1212,6 +1212,79 @@ class ProductionRendererTests(unittest.TestCase):
             result.stderr,
         )
 
+        def broaden_shared_dns_policy(documents) -> None:
+            policy = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "allow-dns-egress"
+            )
+            policy["spec"]["egress"][0]["to"] = [{}]
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "shared-dns-empty-peer",
+                "base/network-policies.yaml",
+                broaden_shared_dns_policy,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("exact reviewed cluster-wide isolation", result.stderr)
+
+        for workload_name, direction, port in (
+            ("apisix", "Egress", 443),
+            ("dealhost-runtime-controller", "Ingress", 8081),
+            ("dealhost-runtime-controller", "Egress", 443),
+            ("dealhost-runtime-worker", "Ingress", 9102),
+            ("dealhost-runtime-worker", "Egress", 443),
+        ):
+            with (
+                self.subTest(
+                    additive_policy_workload=workload_name,
+                    additive_policy_direction=direction,
+                ),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+
+                def add_unreviewed_sensitive_policy(
+                    documents,
+                    workload_name=workload_name,
+                    direction=direction,
+                    port=port,
+                ) -> None:
+                    peer_key = "from" if direction == "Ingress" else "to"
+                    rule_key = direction.casefold()
+                    documents.append(
+                        {
+                            "apiVersion": "networking.k8s.io/v1",
+                            "kind": "NetworkPolicy",
+                            "metadata": {
+                                "name": (f"unreviewed-{workload_name}-{rule_key}")
+                            },
+                            "spec": {
+                                "podSelector": {
+                                    "matchLabels": {
+                                        "app.kubernetes.io/name": workload_name
+                                    }
+                                },
+                                "policyTypes": [direction],
+                                rule_key: [
+                                    {
+                                        peer_key: [{}],
+                                        "ports": [{"protocol": "TCP", "port": port}],
+                                    }
+                                ],
+                            },
+                        }
+                    )
+
+                result = self.render_with_kubernetes_mutation(
+                    Path(directory) / f"additive-{workload_name}-{direction}",
+                    "base/network-policies.yaml",
+                    add_unreviewed_sensitive_policy,
+                )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("Unreviewed NetworkPolicy", result.stderr)
+            self.assertIn("additive policies are forbidden", result.stderr)
+
     def test_dependency_ports_must_match_network_policies(self) -> None:
         invalid_values = {
             "KAFKA_BOOTSTRAP_SERVERS": (
@@ -1362,7 +1435,7 @@ class ProductionRendererTests(unittest.TestCase):
 
             return mutate
 
-        for service_type in ("NodePort", "LoadBalancer"):
+        for service_type in ("NodePort", "LoadBalancer", "ExternalName"):
             with (
                 self.subTest(runtime_service_type=service_type),
                 tempfile.TemporaryDirectory() as directory,
@@ -1375,15 +1448,39 @@ class ProductionRendererTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn("must declare type ClusterIP", result.stderr)
 
+        def add_cluster_ip_with_external_address(documents) -> None:
+            documents.append(
+                {
+                    "apiVersion": "v1",
+                    "kind": "Service",
+                    "metadata": {"name": "runtime-external-ip-test"},
+                    "spec": {
+                        "type": "ClusterIP",
+                        "externalIPs": ["192.0.2.10"],
+                        "selector": {"app": "runtime-test"},
+                        "ports": [{"port": 80, "targetPort": 8080}],
+                    },
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "cluster-ip-with-external-address",
+                "runtime-apps/serviceaccount.yaml",
+                add_cluster_ip_with_external_address,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must not declare any external or node port", result.stderr)
+
         def add_exposure_kind(kind: str):
             def mutate(documents) -> None:
                 documents.append(
                     {
-                        "apiVersion": (
-                            "networking.k8s.io/v1"
-                            if kind == "Ingress"
-                            else "gateway.networking.k8s.io/v1"
-                        ),
+                        "apiVersion": {
+                            "Ingress": "networking.k8s.io/v1",
+                            "Gateway": "gateway.networking.k8s.io/v1",
+                            "Route": "route.openshift.io/v1",
+                        }[kind],
                         "kind": kind,
                         "metadata": {"name": "runtime-exposure-test"},
                         "spec": {},
@@ -1392,7 +1489,7 @@ class ProductionRendererTests(unittest.TestCase):
 
             return mutate
 
-        for kind in ("Ingress", "Gateway"):
+        for kind in ("Ingress", "Gateway", "Route"):
             with (
                 self.subTest(runtime_exposure_kind=kind),
                 tempfile.TemporaryDirectory() as directory,
@@ -1427,6 +1524,45 @@ class ProductionRendererTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("must not contain Ingress", result.stderr)
 
+        def add_explicitly_runtime_scoped_configmap(documents) -> None:
+            documents.append(
+                {
+                    "apiVersion": "v1",
+                    "kind": "ConfigMap",
+                    "metadata": {
+                        "name": "runtime-config-outside-tree",
+                        "namespace": "archideal-runtime-apps",
+                    },
+                    "data": {"unexpected": "true"},
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-config-outside-tree",
+                "base/services.yaml",
+                add_explicitly_runtime_scoped_configmap,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must live only in the reviewed runtime-apps tree", result.stderr)
+
+        def redirect_platform_kustomization_to_runtime_apps(documents) -> None:
+            kustomization = next(
+                document
+                for document in documents
+                if document.get("kind") == "Kustomization"
+            )
+            kustomization["namespace"] = "archideal-runtime-apps"
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "platform-kustomization-runtime-namespace",
+                "base/kustomization.yaml",
+                redirect_platform_kustomization_to_runtime_apps,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("namespace transforms in other kustomizations", result.stderr)
+
         def add_unreviewed_runtime_namespace_label(documents) -> None:
             namespace = next(
                 document
@@ -1460,6 +1596,44 @@ class ProductionRendererTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("exactly the reviewed local baseline resources", result.stderr)
+
+        for forbidden_field, forbidden_value in (
+            (
+                "patches",
+                [{"path": "unreviewed-runtime-patch.yaml"}],
+            ),
+            (
+                "configMapGenerator",
+                [{"name": "unreviewed-runtime-config", "literals": ["key=value"]}],
+            ),
+        ):
+            with (
+                self.subTest(runtime_kustomization_field=forbidden_field),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+
+                def add_forbidden_runtime_kustomization_field(
+                    documents,
+                    forbidden_field=forbidden_field,
+                    forbidden_value=forbidden_value,
+                ) -> None:
+                    kustomization = next(
+                        document
+                        for document in documents
+                        if document.get("kind") == "Kustomization"
+                    )
+                    kustomization[forbidden_field] = forbidden_value
+
+                result = self.render_with_kubernetes_mutation(
+                    Path(directory) / f"runtime-{forbidden_field}",
+                    "runtime-apps/kustomization.yaml",
+                    add_forbidden_runtime_kustomization_field,
+                )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(
+                "exactly the reviewed local baseline resources",
+                result.stderr,
+            )
 
         def add_runtime_network_policy(documents) -> None:
             documents.append(
