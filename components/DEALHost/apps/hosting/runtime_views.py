@@ -271,6 +271,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
+            environment_unavailable = _environment_unavailable(locked)
+            if environment_unavailable is not None:
+                return environment_unavailable
             busy = _busy_response(locked)
             if busy is not None:
                 return busy
@@ -329,9 +332,6 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
-            environment_unavailable = _environment_unavailable(locked)
-            if environment_unavailable is not None:
-                return environment_unavailable
             busy = _busy_response(locked)
             if busy is not None:
                 return busy
