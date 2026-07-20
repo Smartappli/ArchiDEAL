@@ -20,7 +20,12 @@ IMAGE_DIGEST_PATTERN = re.compile(
     r"^(?P<repository>[a-z0-9][a-z0-9._/-]*[a-z0-9])@sha256:[0-9a-f]{64}$"
 )
 RUNTIME_COMPONENT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-RESOURCE_VALUE_PATTERN = re.compile(r"^[0-9]+(?:m|Ki|Mi|Gi)?$")
+CPU_VALUE_PATTERN = re.compile(r"^(?:[1-9][0-9]*|[1-9][0-9]*m)$")
+MEMORY_VALUE_PATTERN = re.compile(r"^[1-9][0-9]*(?:Ki|Mi|Gi)$")
+REGISTRY_PREFIX_PATTERN = re.compile(
+    r"^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]{1,5})?"
+    r"(?:/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)*/$"
+)
 
 
 class RuntimeReleaseNotDeployable(ValueError):
@@ -185,7 +190,7 @@ def _manifest_from_snapshot(
         or not isinstance(application_snapshot.get("slug"), str)
         or not isinstance(raw_modules, list)
         or not raw_modules
-        or len(raw_modules) > 100
+        or len(raw_modules) > 20
     ):
         raise RuntimeReleaseNotDeployable(
             "The published runtime snapshot has an invalid module catalog."
@@ -256,8 +261,10 @@ def _validate_profile_snapshot(
     module_slug: str,
     profile: dict[str, Any],
 ) -> dict[str, Any]:
-    if profile.get("enabled") is not True or not isinstance(
-        profile.get("verified_at"), str
+    if (
+        profile.get("enabled") is not True
+        or not isinstance(profile.get("verified_at"), str)
+        or not profile["verified_at"]
     ):
         raise RuntimeReleaseNotDeployable(
             f"Runtime profile for {module_slug} is not enabled and verified."
@@ -322,13 +329,25 @@ def _validate_profile_snapshot(
             raise RuntimeReleaseNotDeployable(
                 f"Runtime profile for {module_slug} has incomplete resources."
             )
-        if any(
-            not isinstance(value, str) or not RESOURCE_VALUE_PATTERN.fullmatch(value)
-            for value in resource_values.values()
+        cpu = resource_values["cpu"]
+        memory = resource_values["memory"]
+        if (
+            not isinstance(cpu, str)
+            or not CPU_VALUE_PATTERN.fullmatch(cpu)
+            or not isinstance(memory, str)
+            or not MEMORY_VALUE_PATTERN.fullmatch(memory)
         ):
             raise RuntimeReleaseNotDeployable(
                 f"Runtime profile for {module_slug} has invalid resource values."
             )
+    if _cpu_millis(resources["requests"]["cpu"]) > _cpu_millis(
+        resources["limits"]["cpu"]
+    ) or _memory_kib(resources["requests"]["memory"]) > _memory_kib(
+        resources["limits"]["memory"]
+    ):
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} has requests above its limits."
+        )
     configuration = spec.get("configuration", {})
     if not isinstance(configuration, dict) or set(configuration) - {"plain", "secret"}:
         raise RuntimeReleaseNotDeployable(
@@ -339,12 +358,12 @@ def _validate_profile_snapshot(
         if (
             not isinstance(keys, list)
             or len(keys) > 50
-            or len(set(keys)) != len(keys)
             or any(
                 not isinstance(key, str)
                 or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", key)
                 for key in keys
             )
+            or len(set(keys)) != len(keys)
         ):
             raise RuntimeReleaseNotDeployable(
                 f"Runtime profile for {module_slug} has invalid configuration keys."
@@ -413,12 +432,31 @@ def _validate_environment_policy(
         raise RuntimeReleaseNotDeployable("The runtime environment policy is invalid.")
     allowed_registries = policy.get("allowed_registries", [])
     if not isinstance(allowed_registries, list) or any(
-        not isinstance(prefix, str) or not prefix for prefix in allowed_registries
+        not isinstance(prefix, str) or not REGISTRY_PREFIX_PATTERN.fullmatch(prefix)
+        for prefix in allowed_registries
     ):
         raise RuntimeReleaseNotDeployable("The runtime registry policy is invalid.")
     if policy.get("requires_image_digest") is not True:
         raise RuntimeReleaseNotDeployable(
             "The runtime environment must require immutable image digests."
+        )
+    if policy.get("stateless_only") is not True:
+        raise RuntimeReleaseNotDeployable(
+            "The runtime environment must enforce stateless workloads."
+        )
+    allowed_secret_refs = policy.get("allowed_secret_refs")
+    if (
+        not isinstance(allowed_secret_refs, list)
+        or len(allowed_secret_refs) > 100
+        or any(
+            not isinstance(item, str)
+            or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", item)
+            for item in allowed_secret_refs
+        )
+        or len(set(allowed_secret_refs)) != len(allowed_secret_refs)
+    ):
+        raise RuntimeReleaseNotDeployable(
+            "The runtime environment secret-reference policy is invalid."
         )
     modules = manifest.get("modules")
     if not isinstance(modules, list):
@@ -447,3 +485,12 @@ def _validate_environment_policy(
             raise RuntimeReleaseNotDeployable(
                 f"Network egress requested by {slug} is not supported in this environment."
             )
+
+
+def _cpu_millis(value: str) -> int:
+    return int(value[:-1]) if value.endswith("m") else int(value) * 1000
+
+
+def _memory_kib(value: str) -> int:
+    number = int(value[:-2])
+    return number * {"Ki": 1, "Mi": 1024, "Gi": 1024 * 1024}[value[-2:]]

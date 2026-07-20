@@ -76,9 +76,6 @@ data:
   DEALHOST_OIDC_ADMIN_GROUPS: "${OIDC_ADMIN_GROUP}"
   DEALHOST_OIDC_TIMEOUT_SECONDS: "3"
   DEALHOST_RUNTIME_ENABLED: "true"
-  DEALHOST_RUNTIME_CONTROLLER_URL: "https://dealhost-runtime-controller.archideal.svc.cluster.local:8443"
-  DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS: "15"
-  DEALHOST_RUNTIME_CONTROLLER_CA_FILE: /var/run/runtime-controller-ca/ca.crt
   DEALDATA_OIDC_INTROSPECTION_URL: "${OIDC_INTROSPECTION_URL}"
   DEALDATA_OIDC_ISSUER: "${OIDC_ISSUER_URL}"
   DEALDATA_OIDC_AUDIENCE: "${OIDC_AUDIENCE}"
@@ -108,6 +105,18 @@ data:
   GITHUB_ALLOWED_REPOSITORIES: Smartappli/ArchiDEAL
   NATS_ENABLED: "false"
   SENTRY_ENVIRONMENT: production
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dealhost-runtime-worker
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-worker
+    app.kubernetes.io/part-of: archideal
+data:
+  DEALHOST_RUNTIME_CONTROLLER_URL: "https://dealhost-runtime-controller.archideal.svc.cluster.local:8443"
+  DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS: "15"
+  DEALHOST_RUNTIME_CONTROLLER_CA_FILE: /var/run/runtime-controller-ca/ca.crt
 ---
 apiVersion: v1
 kind: ConfigMap

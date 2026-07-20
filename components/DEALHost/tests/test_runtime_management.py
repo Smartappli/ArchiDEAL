@@ -70,6 +70,7 @@ class RuntimeFixtureMixin:
             policy={
                 "requires_image_digest": True,
                 "allowed_registries": ["ghcr.io/smartappli/"],
+                "allowed_secret_refs": ["runtime-database"],
                 "stateless_only": True,
             },
         )

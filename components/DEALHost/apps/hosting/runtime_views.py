@@ -193,6 +193,7 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                         serializer.validated_data["secret_refs"],
                         application=locked_application,
                         manifest=release.manifest,
+                        environment=environment,
                     )
                 except ValidationError as exc:
                     return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)

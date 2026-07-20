@@ -146,6 +146,7 @@ def default_runtime_policy() -> dict[str, object]:
     return {
         "requires_image_digest": True,
         "allowed_registries": ["ghcr.io/smartappli/"],
+        "allowed_secret_refs": [],
         "stateless_only": True,
     }
 

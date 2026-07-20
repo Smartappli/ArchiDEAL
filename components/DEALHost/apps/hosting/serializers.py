@@ -309,13 +309,47 @@ def validate_runtime_secret_references(
     *,
     application: HostedApplication,
     manifest: dict[str, object] | None = None,
+    environment: RuntimeEnvironment | None = None,
 ) -> dict[str, dict[str, str]]:
-    return _validate_component_values(
+    normalized = _validate_component_values(
         value,
         application=application,
         secret=True,
         manifest=manifest,
     )
+    if environment is not None:
+        policy = environment.policy
+        raw_allowed = (
+            policy.get("allowed_secret_refs") if isinstance(policy, dict) else None
+        )
+        if (
+            not isinstance(raw_allowed, list)
+            or len(raw_allowed) > 100
+            or any(
+                not isinstance(item, str)
+                or not RUNTIME_SECRET_REFERENCE_PATTERN.fullmatch(item)
+                for item in raw_allowed
+            )
+            or len(set(raw_allowed)) != len(raw_allowed)
+        ):
+            raise serializers.ValidationError(
+                "The runtime environment has an invalid secret-reference policy."
+            )
+        allowed = set(raw_allowed)
+        unknown = sorted(
+            {
+                reference
+                for component in normalized.values()
+                for reference in component.values()
+                if reference not in allowed
+            }
+        )
+        if unknown:
+            raise serializers.ValidationError(
+                "Secret references are not allowed in this environment: "
+                + ", ".join(unknown)
+            )
+    return normalized
 
 
 def validate_runtime_scaling(
@@ -641,6 +675,7 @@ class RuntimeDeploymentUpdateSerializer(serializers.Serializer):
             value,
             application=deployment.application,
             manifest=deployment.release.manifest,
+            environment=deployment.environment,
         )
 
 
