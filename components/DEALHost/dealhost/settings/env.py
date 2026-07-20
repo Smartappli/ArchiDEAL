@@ -13,6 +13,7 @@ PLACEHOLDER_VALUES = {
     "<django_secret_key>",
     "<github_personal_access_token>",
     "<github_webhook_secret>",
+    "<runtime_controller_token>",
     "<service_api_token>",
 }
 
@@ -50,6 +51,17 @@ class NatsConfig:
     stream: str
     subject_prefix: str
     enabled: bool
+
+
+@dataclass(frozen=True)
+class RuntimeControllerConfig:
+    base_url: str
+    token: str
+    timeout_seconds: float
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.base_url and self.token and not _is_placeholder(self.token))
 
 
 def get_env(name: str, default: str | None = None) -> str:
@@ -202,6 +214,75 @@ def nats_config() -> NatsConfig:
         stream=get_env("NATS_STREAM", "dealhost"),
         subject_prefix=get_env("NATS_SUBJECT_PREFIX", "dealhost"),
         enabled=get_env("NATS_ENABLED", "false").lower() == "true",
+    )
+
+
+def runtime_controller_config(
+    *,
+    require_tls: bool = False,
+) -> RuntimeControllerConfig:
+    """Return the isolated runtime-controller connection configuration.
+
+    The controller is optional. A URL never enables it without a non-placeholder
+    bearer token, and production may only use an HTTPS endpoint.
+    """
+
+    base_url = get_env("DEALHOST_RUNTIME_CONTROLLER_URL", "").strip().rstrip("/")
+    token = get_secret_env(
+        "DEALHOST_RUNTIME_CONTROLLER_TOKEN",
+        "",
+        allow_placeholder=True,
+    )
+    try:
+        timeout_seconds = float(
+            get_env("DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS", "15")
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            "DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS must be a number."
+        ) from exc
+    if not 1 <= timeout_seconds <= 60:
+        raise RuntimeError(
+            "DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS must be between 1 and 60."
+        )
+
+    if not base_url:
+        return RuntimeControllerConfig(
+            base_url="",
+            token="",
+            timeout_seconds=timeout_seconds,
+        )
+
+    try:
+        parsed = urlsplit(base_url)
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError("DEALHOST_RUNTIME_CONTROLLER_URL is not a valid URL.") from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or any(character.isspace() for character in base_url)
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise RuntimeError(
+            "DEALHOST_RUNTIME_CONTROLLER_URL must be an HTTP(S) URL without "
+            "credentials, query or fragment."
+        )
+    if require_tls and parsed.scheme.lower() != "https":
+        raise RuntimeError("DEALHOST_RUNTIME_CONTROLLER_URL must use HTTPS in production.")
+    if _is_placeholder(token):
+        raise RuntimeError(
+            "DEALHOST_RUNTIME_CONTROLLER_TOKEN must be configured when the runtime "
+            "controller URL is set."
+        )
+    return RuntimeControllerConfig(
+        base_url=base_url,
+        token=token,
+        timeout_seconds=timeout_seconds,
     )
 
 

@@ -409,7 +409,10 @@ a {
 .management-detail-form button,
 .management-route-detail button,
 .oidc-provisioning button,
-.management-notice a {
+.management-notice a,
+.management-notice button,
+.runtime-actions button,
+.runtime-logs button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -426,7 +429,9 @@ a {
 .management-detail-form button:disabled,
 .management-pagination button:disabled,
 .management-route-detail button:disabled,
-.oidc-provisioning button:disabled {
+.oidc-provisioning button:disabled,
+.runtime-actions button:disabled,
+.runtime-logs button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -500,7 +505,8 @@ a {
   line-height: 1.5;
 }
 
-.management-notice a {
+.management-notice a,
+.management-notice button {
   margin-top: 0.8rem;
 }
 
@@ -909,6 +915,250 @@ a {
 .route-result--skipped {
   background: rgba(245, 159, 0, 0.08);
   border-color: rgba(190, 113, 0, 0.3);
+}
+
+.runtime-stack,
+.runtime-detail {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.runtime-detail {
+  padding: 1rem;
+  background: rgba(0, 155, 142, 0.04);
+  border: 1px solid rgba(0, 155, 142, 0.2);
+  border-radius: 1rem;
+}
+
+.runtime-detail__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.runtime-detail__heading h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1.08rem;
+}
+
+.runtime-detail__heading code,
+.runtime-components code {
+  color: var(--muted);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.runtime-status {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  color: #4d574c;
+  font-size: 0.72rem;
+  font-weight: 850;
+  background: rgba(23, 32, 25, 0.08);
+  border-radius: 999px;
+}
+
+.runtime-status::before {
+  width: 0.48rem;
+  height: 0.48rem;
+  content: "";
+  background: #8b948a;
+  border-radius: 999px;
+}
+
+.runtime-status--running::before { background: #00a892; }
+.runtime-status--degraded::before,
+.runtime-status--reconciling::before,
+.runtime-status--pending::before { background: #dc9400; }
+.runtime-status--failed::before,
+.runtime-status--deleting::before { background: #c54b46; }
+.runtime-status--stopped::before,
+.runtime-status--deleted::before { background: #777f77; }
+
+.runtime-detail__selector,
+.runtime-scale label,
+.runtime-logs label {
+  display: grid;
+  gap: 0.35rem;
+  color: #4d574c;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.runtime-detail__selector select,
+.runtime-scale input,
+.runtime-logs input,
+.runtime-logs select {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.75rem;
+  color: var(--ink);
+  font: inherit;
+  background: #fffdf5;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+}
+
+.runtime-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.runtime-summary div {
+  min-width: 0;
+  padding: 0.7rem;
+  background: rgba(255, 253, 245, 0.76);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+}
+
+.runtime-summary dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.runtime-summary dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-operation {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) minmax(6rem, 1fr);
+  gap: 0.35rem 0.7rem;
+  align-items: center;
+  padding: 0.8rem 0.9rem;
+  background: rgba(47, 111, 159, 0.07);
+  border: 1px solid rgba(47, 111, 159, 0.22);
+  border-radius: 0.8rem;
+}
+
+.runtime-operation progress,
+.runtime-operation small {
+  grid-column: 1 / -1;
+}
+
+.runtime-operation progress {
+  width: 100%;
+  accent-color: var(--teal);
+}
+
+.runtime-operation small {
+  color: var(--muted);
+}
+
+.runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.runtime-components,
+.runtime-logs {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: rgba(255, 253, 245, 0.75);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.runtime-components h4,
+.runtime-logs h3,
+.runtime-logs p {
+  margin: 0;
+}
+
+.runtime-components > p,
+.runtime-logs > div > p {
+  color: var(--muted);
+}
+
+.runtime-components ul {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.runtime-components li {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1.5fr) repeat(3, minmax(5rem, auto));
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.runtime-components li:last-child {
+  border-bottom: 0;
+}
+
+.runtime-components li > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.runtime-components li > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.runtime-components li > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #a63f3b;
+}
+
+.runtime-configuration,
+.runtime-create {
+  background: rgba(47, 111, 159, 0.045);
+  border-color: rgba(47, 111, 159, 0.2);
+}
+
+.runtime-logs form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 0.7rem;
+  align-items: end;
+}
+
+.runtime-logs__snapshot {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.runtime-logs__snapshot strong {
+  color: #a35e00;
+}
+
+.runtime-logs__snapshot pre {
+  max-height: 30rem;
+  padding: 0.9rem;
+  margin: 0;
+  overflow: auto;
+  color: #edf8f5;
+  font: 0.78rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #17231f;
+  border-radius: 0.75rem;
+}
+
+.runtime-history {
+  min-width: 0;
 }
 
 .access-form {
@@ -2201,8 +2451,19 @@ h2 {
   .management-detail-form,
   .management-route-detail,
   .management-search,
-  .oidc-provisioning form {
+  .oidc-provisioning form,
+  .runtime-summary,
+  .runtime-logs form,
+  .runtime-components li {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-detail__heading {
+    flex-direction: column;
+  }
+
+  .runtime-components li > p {
+    grid-column: 1;
   }
 
   .management-pagination {
@@ -2643,7 +2904,10 @@ h2 {
   .management-detail-form button,
   .management-route-detail button,
   .oidc-provisioning button,
-  .management-notice a {
+  .management-notice a,
+  .management-notice button,
+  .runtime-actions button,
+  .runtime-logs button {
     min-height: 2.75rem;
   }
 

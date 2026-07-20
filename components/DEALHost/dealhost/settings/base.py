@@ -12,6 +12,7 @@ from .env import (
     get_env,
     github_config,
     nats_config,
+    runtime_controller_config,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -166,3 +167,5 @@ NATS = {
     "SUBJECT_PREFIX": nats_config().subject_prefix,
     "ENABLED": nats_config().enabled,
 }
+
+RUNTIME_CONTROLLER = runtime_controller_config()

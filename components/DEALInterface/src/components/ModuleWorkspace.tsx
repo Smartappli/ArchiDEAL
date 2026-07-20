@@ -7,6 +7,7 @@ import { DatasetManagementPanel } from "./DatasetManagementPanel";
 import { DeviceManagementPanel } from "./DeviceManagementPanel";
 import { ManagementAreaPanel } from "./ManagementAreaPanel";
 import { RoutePublicationPanel } from "./RoutePublicationPanel";
+import { RuntimeDeploymentPanel } from "./RuntimeDeploymentPanel";
 import { ScientificManagementPanel } from "./ScientificManagementPanel";
 import { StatusPill } from "./StatusPill";
 import { UserManagementPanel } from "./UserManagementPanel";
@@ -53,6 +54,11 @@ const workspaceCopy: Record<ModuleKey, WorkspaceCopy> = {
         id: "deployments",
         title: "workspace.dealhost.deployments.title",
         description: "workspace.dealhost.deployments.description",
+      },
+      {
+        id: "runtime",
+        title: "workspace.dealhost.runtime.title",
+        description: "workspace.dealhost.runtime.description",
       },
       {
         id: "apps",
@@ -151,6 +157,9 @@ export function ModuleWorkspace({
     }
     if (module.key === "dealhost" && activeArea.id === "deployments") {
       return <ApplicationManagementPanel {...sharedProps} mode="releases" />;
+    }
+    if (module.key === "dealhost" && activeArea.id === "runtime") {
+      return <RuntimeDeploymentPanel {...sharedProps} />;
     }
     if (module.key === "dealhost" && activeArea.id === "domains") {
       return <RoutePublicationPanel {...sharedProps} />;

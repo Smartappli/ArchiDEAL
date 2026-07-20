@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { Device, HostedApplication } from "./lib/managementApi";
+import type {
+  Device,
+  HostedApplication,
+  RuntimeDeployment,
+  RuntimeEnvironment,
+  RuntimeOperation,
+} from "./lib/managementApi";
 
 const healthyPayloads: Record<string, unknown> = {
   "/dealhost/api/gateway/health/": {
@@ -924,6 +930,163 @@ describe("App live module integrations", () => {
     await user.click(screen.getByRole("button", { name: /Internal worker/ }));
     expect(screen.getByText("Publication blocked for a disabled module")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview APISIX route" })).toBeDisabled();
+  });
+
+  it("deploys and stops a versioned runtime from the dedicated DEALHost area", async () => {
+    const user = userEvent.setup();
+    const application: HostedApplication = {
+      id: 4,
+      name: "Field portal",
+      slug: "field-portal",
+      description: "Portal",
+      current_version: "1.5.0",
+      released_at: "2026-07-20T08:00:00Z",
+      enabled: true,
+      revision: 3,
+      modules: [{ id: 9, name: "API", slug: "api" }],
+      versions: [{
+        id: 12,
+        version: "1.5.0",
+        notes: "Runtime release",
+        source: "ci",
+        created_at: "2026-07-20T08:00:00Z",
+      }],
+    };
+    const environment: RuntimeEnvironment = {
+      slug: "production",
+      name: "Production",
+      description: "Production Kubernetes cluster",
+      orchestrator: "kubernetes",
+      enabled: true,
+      capabilities: {
+        start_stop: true,
+        restart: true,
+        scaling: {
+          fixed: { min_replicas: 1, max_replicas: 20 },
+          autoscaling: { enabled: true, min_replicas: 2, max_replicas: 20 },
+        },
+        logs: { max_lines: 1000, max_bytes: 262144 },
+        domains: false,
+      },
+      policy: {
+        requires_image_digest: true,
+        allowed_registries: ["ghcr.io/smartappli"],
+        stateless_only: true,
+      },
+    };
+    let runtime: RuntimeDeployment = {
+      id: "3a8c6658-2976-45c1-b666-f72e79c23fc4",
+      application: { id: 4, name: "Field portal", slug: "field-portal" },
+      environment: "production",
+      version: "1.5.0",
+      desired_state: "running",
+      observed_state: "running",
+      revision: 1,
+      configuration: {},
+      secret_refs: {},
+      scaling: { api: { mode: "fixed", replicas: 1 } },
+      components: [{
+        module_id: 9,
+        slug: "api",
+        image_digest: "ghcr.io/smartappli/api@sha256:abc",
+        desired_replicas: 1,
+        ready_replicas: 1,
+        available_replicas: 1,
+        state: "running",
+        health: "healthy",
+        restart_count: 0,
+        last_error: null,
+      }],
+      last_error: null,
+      last_reconciled_at: "2026-07-20T08:03:00Z",
+      created_at: "2026-07-20T08:01:00Z",
+      updated_at: "2026-07-20T08:03:00Z",
+    };
+    const completedOperation = (type: RuntimeOperation["type"]): RuntimeOperation => ({
+      id: `operation-${type}`,
+      deployment_id: runtime.id,
+      type,
+      status: "succeeded",
+      requested_at: "2026-07-20T08:01:00Z",
+      started_at: "2026-07-20T08:01:01Z",
+      finished_at: "2026-07-20T08:01:02Z",
+      progress: { stage: "complete", percent: 100 },
+      result: {},
+      error: null,
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === "/dealhost/api/hosting/applications/" && method === "GET") {
+        return jsonResponse([application]);
+      }
+      if (url === "/dealhost/api/hosting/runtime-environments/?page=1&page_size=100") {
+        return jsonResponse({ count: 1, next: null, previous: null, results: [environment] });
+      }
+      if (url === "/dealhost/api/hosting/deployments/?application_id=4&page=1&page_size=100") {
+        return jsonResponse({ count: 0, next: null, previous: null, results: [] });
+      }
+      if (url === "/dealhost/api/hosting/deployments/" && method === "POST") {
+        return jsonResponse({ deployment: runtime, operation: completedOperation("deploy") }, 202);
+      }
+      if (url === `/dealhost/api/hosting/deployments/${runtime.id}/operations/?page=1&page_size=20`) {
+        return jsonResponse({ count: 0, next: null, previous: null, results: [] });
+      }
+      if (url === `/dealhost/api/hosting/deployments/${runtime.id}/actions/` && method === "POST") {
+        runtime = {
+          ...runtime,
+          desired_state: "stopped",
+          observed_state: "stopped",
+          revision: 2,
+          components: runtime.components.map((component) => ({
+            ...component,
+            ready_replicas: 0,
+            available_replicas: 0,
+            state: "stopped",
+          })),
+        };
+        return jsonResponse({ deployment: runtime, operation: completedOperation("stop") }, 202);
+      }
+      return jsonResponse(healthyPayloads[url] ?? { status: "ok" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    await user.click(within(screen.getByLabelText("Module navigation")).getByRole("button", { name: "DEALHost" }));
+    await screen.findByText("Field portal");
+    await user.click(screen.getByRole("button", { name: "Runtime deployments" }));
+
+    expect(window.location.hash).toBe("#/modules/dealhost/runtime");
+    expect(await screen.findByText("No active runtime deployment")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Deploy runtime" }));
+    expect(await screen.findByRole("heading", { name: "Runtime deployment" })).toBeInTheDocument();
+    expect(screen.getAllByText("Running").length).toBeGreaterThanOrEqual(1);
+
+    const deployCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === "/dealhost/api/hosting/deployments/" && init?.method === "POST",
+    );
+    expect(deployCall).toBeDefined();
+    expect(new Headers(deployCall?.[1]?.headers).get("If-Match")).toBe('"3"');
+    expect(new Headers(deployCall?.[1]?.headers).get("Idempotency-Key")).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(new Headers(deployCall?.[1]?.headers).has("Authorization")).toBe(false);
+    expect(JSON.parse(String(deployCall?.[1]?.body))).toEqual({
+      application_id: 4,
+      environment: "production",
+      version: "1.5.0",
+      scaling: { api: { mode: "fixed", replicas: 1 } },
+      configuration: {},
+      secret_refs: {},
+    });
+
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    expect((await screen.findAllByText("Stopped")).length).toBeGreaterThanOrEqual(1);
+    const stopCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/actions/") && init?.method === "POST",
+    );
+    expect(JSON.parse(String(stopCall?.[1]?.body))).toEqual({ action: "stop" });
+    expect(new Headers(stopCall?.[1]?.headers).get("If-Match")).toBe('"1"');
+    expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
   });
 
   it("preserves a stale application edit until the operator reloads the current revision", async () => {

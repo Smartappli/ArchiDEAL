@@ -9,11 +9,23 @@ from .views import (
     ModuleViewSet,
     ToolViewSet,
 )
+from .runtime_views import (
+    RuntimeDeploymentViewSet,
+    RuntimeEnvironmentViewSet,
+    RuntimeOperationViewSet,
+)
 
 router = DefaultRouter()
 router.register("modules", ModuleViewSet, basename="modules")
 router.register("tools", ToolViewSet, basename="tools")
 router.register("applications", HostedApplicationViewSet, basename="applications")
+router.register("deployments", RuntimeDeploymentViewSet, basename="deployments")
+router.register(
+    "runtime-environments",
+    RuntimeEnvironmentViewSet,
+    basename="runtime-environments",
+)
+router.register("operations", RuntimeOperationViewSet, basename="operations")
 router.register("datasets", DatasetViewSet, basename="datasets")
 
 urlpatterns = [

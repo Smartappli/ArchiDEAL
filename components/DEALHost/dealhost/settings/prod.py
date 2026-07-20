@@ -9,6 +9,7 @@ from .env import (
     get_secret_csv_env,
     get_secret_env,
     github_config,
+    runtime_controller_config,
 )
 
 DEBUG = False
@@ -28,6 +29,7 @@ if not FORCE_SCRIPT_NAME.startswith("/") or FORCE_SCRIPT_NAME.endswith("/"):
 STATIC_URL = f"{FORCE_SCRIPT_NAME}/static/"
 GITHUB = github_config(require_secrets=True)
 APISIX = apisix_config(require_secrets=True)
+RUNTIME_CONTROLLER = runtime_controller_config(require_tls=True)
 PRODUCTION_CACHE = cache_config(require_tls=True)
 CACHES["default"]["LOCATION"] = PRODUCTION_CACHE.valkey_url  # noqa: F405
 DEALHOST_API_TOKENS = get_secret_csv_env(

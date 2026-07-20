@@ -2,24 +2,35 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDatasetResource,
   createIamUser,
+  createRuntimeDeployment,
   deleteDatasetResource,
   deleteIamUser,
   type Dataset,
   type Device,
   getDatasetPrincipals,
+  getRuntimeOperation,
   listAllDatasetResources,
   ManagementApiError,
   listManagementResources,
+  listRuntimeDeployments,
+  listRuntimeEnvironments,
+  listRuntimeOperations,
   managementRequest,
   publishGatewayRoute,
   publishHostedApplicationVersion,
   provisionOidcIdentity,
+  requestRuntimeDeploymentAction,
+  requestRuntimeLogSnapshot,
   retireDeviceResource,
   setIamUserPassword,
+  type RuntimeDeployment,
+  type RuntimeOperation,
+  undeployRuntimeDeployment,
   updateDatasetResource,
   updateDeviceResource,
   updateHostedApplicationResource,
   updateIamUser,
+  updateRuntimeDeploymentConfiguration,
 } from "./managementApi";
 
 function jsonResponse(payload: unknown, status = 200, headers: Record<string, string> = {}) {
@@ -320,6 +331,185 @@ describe("managementRequest", () => {
       module_slug: "field-portal",
       dry_run: true,
     });
+  });
+
+  it("binds every runtime mutation to a strong revision ETag and idempotency key", async () => {
+    const application = {
+      id: 4,
+      name: "Field portal",
+      slug: "field-portal",
+      description: "Portal",
+      current_version: "1.5.0",
+      released_at: "2026-07-20T08:00:00Z",
+      enabled: true,
+      revision: 3,
+    };
+    const deployment: RuntimeDeployment = {
+      id: "3a8c6658-2976-45c1-b666-f72e79c23fc4",
+      application: { id: 4, name: "Field portal", slug: "field-portal" },
+      environment: "production",
+      version: "1.5.0",
+      desired_state: "running",
+      observed_state: "running",
+      revision: 5,
+      configuration: { api: { FEATURE_FLAG: "true" } },
+      secret_refs: { api: { DATABASE_URL: "database-url" } },
+      scaling: { api: { mode: "fixed", replicas: 2 } },
+      components: [{
+        module_id: 9,
+        slug: "api",
+        image_digest: "ghcr.io/smartappli/api@sha256:abc",
+        desired_replicas: 2,
+        ready_replicas: 2,
+        available_replicas: 2,
+        state: "running",
+        health: "healthy",
+        restart_count: 0,
+        last_error: null,
+      }],
+      last_error: null,
+      last_reconciled_at: "2026-07-20T08:03:00Z",
+      created_at: "2026-07-20T08:01:00Z",
+      updated_at: "2026-07-20T08:03:00Z",
+    };
+    const operation: RuntimeOperation = {
+      id: "9456cb83-6cc3-49c8-89de-50ae7ec84003",
+      deployment_id: deployment.id,
+      type: "deploy",
+      status: "queued",
+      requested_at: "2026-07-20T08:01:00Z",
+      started_at: null,
+      finished_at: null,
+      progress: { stage: "queued", percent: null },
+      result: null,
+      error: null,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (input) => (
+      String(input).endsWith("/log-requests/")
+        ? jsonResponse({ ...operation, type: "log_snapshot" }, 202)
+        : jsonResponse({ deployment, operation }, 202)
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const idempotencyKey = "runtime-command-001";
+
+    await createRuntimeDeployment(application, {
+      environment: "production",
+      version: "1.5.0",
+      scaling: { api: { mode: "fixed", replicas: 2 } },
+      configuration: { api: { FEATURE_FLAG: "true" } },
+      secret_refs: { api: { DATABASE_URL: "database-url" } },
+    }, idempotencyKey);
+    await updateRuntimeDeploymentConfiguration(deployment, {
+      configuration: { api: { FEATURE_FLAG: "false" } },
+      secret_refs: deployment.secret_refs,
+      scaling: { api: { mode: "fixed", replicas: 3 } },
+    }, idempotencyKey);
+    await requestRuntimeDeploymentAction(
+      deployment,
+      { action: "scale", component: "api", replicas: 3 },
+      idempotencyKey,
+    );
+    await undeployRuntimeDeployment(deployment, idempotencyKey);
+    await requestRuntimeLogSnapshot(deployment, {
+      component: "api",
+      tail_lines: 200,
+      since_seconds: 3600,
+    }, idempotencyKey);
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [String(url), init?.method])).toEqual([
+      ["/dealhost/api/hosting/deployments/", "POST"],
+      [`/dealhost/api/hosting/deployments/${deployment.id}/`, "PATCH"],
+      [`/dealhost/api/hosting/deployments/${deployment.id}/actions/`, "POST"],
+      [`/dealhost/api/hosting/deployments/${deployment.id}/`, "DELETE"],
+      [`/dealhost/api/hosting/deployments/${deployment.id}/log-requests/`, "POST"],
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("Idempotency-Key")).toBe(idempotencyKey);
+    }
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("If-Match")).toBe('"3"');
+    for (const index of [1, 2, 3, 4]) {
+      expect(new Headers(fetchMock.mock.calls[index][1]?.headers).get("If-Match")).toBe('"5"');
+    }
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      application_id: 4,
+      environment: "production",
+      version: "1.5.0",
+      scaling: { api: { mode: "fixed", replicas: 2 } },
+      configuration: { api: { FEATURE_FLAG: "true" } },
+      secret_refs: { api: { DATABASE_URL: "database-url" } },
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      action: "scale",
+      component: "api",
+      replicas: 3,
+    });
+  });
+
+  it("loads paginated runtime environments, deployments and operation state", async () => {
+    const emptyPage = { count: 0, next: null, previous: null, results: [] };
+    const operation = {
+      id: "operation-1",
+      deployment_id: "deployment-1",
+      type: "start",
+      status: "succeeded",
+      requested_at: "2026-07-20T08:00:00Z",
+      started_at: "2026-07-20T08:00:01Z",
+      finished_at: "2026-07-20T08:00:02Z",
+      progress: { stage: "complete", percent: 100 },
+      result: {},
+      error: null,
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(emptyPage))
+      .mockResolvedValueOnce(jsonResponse(emptyPage))
+      .mockResolvedValueOnce(jsonResponse(emptyPage))
+      .mockResolvedValueOnce(jsonResponse(operation));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listRuntimeEnvironments();
+    await listRuntimeDeployments(4);
+    await listRuntimeOperations("deployment-1");
+    await expect(getRuntimeOperation("operation-1")).resolves.toEqual(operation);
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "/dealhost/api/hosting/runtime-environments/?page=1&page_size=100",
+      "/dealhost/api/hosting/deployments/?application_id=4&page=1&page_size=100",
+      "/dealhost/api/hosting/deployments/deployment-1/operations/?page=1&page_size=20",
+      "/dealhost/api/hosting/operations/operation-1/",
+    ]);
+  });
+
+  it("rejects runtime writes without valid revisions or idempotency keys before fetch", () => {
+    const application = {
+      id: 4,
+      name: "Field portal",
+      slug: "field-portal",
+      description: "Portal",
+      current_version: "1.5.0",
+      released_at: null,
+      enabled: true,
+      revision: 0,
+    };
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(() => createRuntimeDeployment(application, {
+      environment: "production",
+      version: "1.5.0",
+      scaling: {},
+      configuration: {},
+      secret_refs: {},
+    }, "runtime-command-001")).toThrow(ManagementApiError);
+    expect(() => createRuntimeDeployment({ ...application, revision: 1 }, {
+      environment: "production",
+      version: "1.5.0",
+      scaling: {},
+      configuration: {},
+      secret_refs: {},
+    }, "")).toThrow(ManagementApiError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("binds APISIX publication to the exact strong ETag returned by preview", async () => {

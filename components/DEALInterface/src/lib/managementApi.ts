@@ -521,6 +521,171 @@ export function updateDatasetResource(
   );
 }
 
+export type RuntimeDesiredState = "running" | "stopped" | "absent";
+
+export type RuntimeObservedState =
+  | "pending"
+  | "reconciling"
+  | "running"
+  | "degraded"
+  | "stopped"
+  | "deleting"
+  | "deleted"
+  | "failed"
+  | "unknown";
+
+export type RuntimeOperationType =
+  | "deploy"
+  | "configure"
+  | "start"
+  | "stop"
+  | "restart"
+  | "scale"
+  | "undeploy"
+  | "log_snapshot"
+  | "domain_attach"
+  | "domain_detach";
+
+export type RuntimeOperationStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type RuntimeComponentConfiguration = Record<string, Record<string, string>>;
+
+export type RuntimeComponentScaling =
+  | { mode: "fixed"; replicas: number }
+  | {
+    mode: "autoscale";
+    min_replicas: number;
+    max_replicas: number;
+    target_cpu_utilization: number;
+  };
+
+export type RuntimeScaling = Record<string, RuntimeComponentScaling>;
+
+export interface RuntimeComponent {
+  module_id: number;
+  slug: string;
+  image_digest: string;
+  desired_replicas: number;
+  ready_replicas: number;
+  available_replicas: number;
+  state: string;
+  health: string;
+  restart_count: number;
+  last_error: string | null;
+}
+
+export interface RuntimeDeployment {
+  id: string;
+  application: Pick<HostedApplication, "id" | "name" | "slug">;
+  environment: string;
+  version: string;
+  desired_state: RuntimeDesiredState;
+  observed_state: RuntimeObservedState;
+  revision: number;
+  configuration: RuntimeComponentConfiguration;
+  secret_refs: RuntimeComponentConfiguration;
+  scaling: RuntimeScaling;
+  components: RuntimeComponent[];
+  last_error: string | null;
+  last_reconciled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RuntimeLogSnapshot {
+  component: string;
+  container: string;
+  content: string;
+  truncated: boolean;
+  line_count: number;
+  captured_at: string;
+  expires_at: string;
+}
+
+export interface RuntimeOperation {
+  id: string;
+  deployment_id: string;
+  type: RuntimeOperationType;
+  status: RuntimeOperationStatus;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  progress: {
+    stage: string;
+    percent: number | null;
+  };
+  result: RuntimeLogSnapshot | Record<string, unknown> | null;
+  error: {
+    code: string;
+    detail: string;
+    retryable: boolean;
+  } | null;
+}
+
+export interface RuntimeMutationResult {
+  deployment: RuntimeDeployment;
+  operation: RuntimeOperation;
+}
+
+export interface RuntimeEnvironment {
+  slug: string;
+  name: string;
+  description: string;
+  orchestrator: "kubernetes";
+  enabled: boolean;
+  capabilities: {
+    start_stop: boolean;
+    restart: boolean;
+    scaling: {
+      fixed: {
+        min_replicas: number;
+        max_replicas: number;
+      };
+      autoscaling: {
+        enabled: boolean;
+        min_replicas: number;
+        max_replicas: number;
+      };
+    };
+    logs: {
+      max_lines: number;
+      max_bytes: number;
+    };
+    domains: boolean;
+  };
+  policy: {
+    requires_image_digest: boolean;
+    allowed_registries: string[];
+    stateless_only: boolean;
+  };
+}
+
+export interface RuntimePage<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+export interface CreateRuntimeDeploymentPayload {
+  application_id: number;
+  environment: string;
+  version: string;
+  scaling: RuntimeScaling;
+  configuration: RuntimeComponentConfiguration;
+  secret_refs: RuntimeComponentConfiguration;
+}
+
+export type RuntimeActionPayload =
+  | { action: "start" | "stop" | "restart" }
+  | { action: "scale"; component: string; replicas: number };
+
+export interface RuntimeLogRequestPayload {
+  component: string;
+  tail_lines: number;
+  since_seconds: number;
+}
+
 export function deleteDatasetResource(dataset: Dataset, signal?: AbortSignal) {
   return deleteManagementResource(
     `/dealhost/api/hosting/datasets/${dataset.id}/`,
@@ -602,6 +767,189 @@ export function publishHostedApplicationVersion(
     payload,
     signal,
     { "If-Match": strongRevisionEtag(application.revision) },
+  );
+}
+
+function runtimeResourcePath(resource: "deployments" | "operations", id: string) {
+  const normalizedId = id.trim();
+  if (!normalizedId) {
+    throw new ManagementApiError({
+      kind: "validation",
+      message: `A runtime ${resource.slice(0, -1)} identifier is required.`,
+      retryable: false,
+    });
+  }
+  return `/dealhost/api/hosting/${resource}/${encodeURIComponent(normalizedId)}/`;
+}
+
+function runtimeMutationHeaders(revision: number, idempotencyKey: string) {
+  const normalizedKey = idempotencyKey.trim();
+  if (!normalizedKey || normalizedKey.length > 128 || /[\u0000-\u001f\u007f]/.test(normalizedKey)) {
+    throw new ManagementApiError({
+      kind: "validation",
+      message: "A valid idempotency key is required for a runtime mutation.",
+      retryable: false,
+    });
+  }
+  return {
+    "If-Match": strongRevisionEtag(revision),
+    "Idempotency-Key": normalizedKey,
+  };
+}
+
+export function createRuntimeIdempotencyKey() {
+  if (!globalThis.crypto?.randomUUID) {
+    throw new ManagementApiError({
+      kind: "server",
+      message: "This browser cannot create a secure runtime operation identifier.",
+      retryable: false,
+    });
+  }
+  return globalThis.crypto.randomUUID();
+}
+
+function runtimePage<T>(payload: RuntimePage<T>): RuntimePage<T> {
+  if (
+    !isRecord(payload)
+    || !Number.isSafeInteger(payload.count)
+    || payload.count < 0
+    || !Array.isArray(payload.results)
+    || !(typeof payload.next === "string" || payload.next === null)
+    || !(typeof payload.previous === "string" || payload.previous === null)
+  ) {
+    throw new ManagementApiError({
+      kind: "server",
+      message: "The runtime management API returned an invalid collection contract.",
+      retryable: true,
+    });
+  }
+  return payload;
+}
+
+export async function listRuntimeEnvironments(signal?: AbortSignal) {
+  const payload = await managementRequest<RuntimePage<RuntimeEnvironment>>(
+    "/dealhost/api/hosting/runtime-environments/?page=1&page_size=100",
+    { signal },
+  );
+  return runtimePage(payload);
+}
+
+export async function listRuntimeDeployments(
+  applicationId: number,
+  signal?: AbortSignal,
+) {
+  if (!Number.isSafeInteger(applicationId) || applicationId < 1) {
+    throw new ManagementApiError({
+      kind: "validation",
+      message: "A valid application identifier is required to list runtime deployments.",
+      retryable: false,
+    });
+  }
+  const query = new URLSearchParams({
+    application_id: String(applicationId),
+    page: "1",
+    page_size: "100",
+  });
+  const payload = await managementRequest<RuntimePage<RuntimeDeployment>>(
+    `/dealhost/api/hosting/deployments/?${query.toString()}`,
+    { signal },
+  );
+  return runtimePage(payload);
+}
+
+export function getRuntimeDeployment(deploymentId: string, signal?: AbortSignal) {
+  return managementRequest<RuntimeDeployment>(
+    runtimeResourcePath("deployments", deploymentId),
+    { signal },
+  );
+}
+
+export function createRuntimeDeployment(
+  application: HostedApplication,
+  payload: Omit<CreateRuntimeDeploymentPayload, "application_id">,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+) {
+  return createManagementResource<RuntimeMutationResult>(
+    "/dealhost/api/hosting/deployments/",
+    { ...payload, application_id: application.id },
+    signal,
+    runtimeMutationHeaders(application.revision, idempotencyKey),
+  );
+}
+
+export function updateRuntimeDeploymentConfiguration(
+  deployment: RuntimeDeployment,
+  payload: Pick<RuntimeDeployment, "configuration" | "secret_refs" | "scaling">,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+) {
+  return updateManagementResource<RuntimeMutationResult>(
+    runtimeResourcePath("deployments", deployment.id),
+    payload,
+    signal,
+    runtimeMutationHeaders(deployment.revision, idempotencyKey),
+  );
+}
+
+export function requestRuntimeDeploymentAction(
+  deployment: RuntimeDeployment,
+  payload: RuntimeActionPayload,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+) {
+  return createManagementResource<RuntimeMutationResult>(
+    `${runtimeResourcePath("deployments", deployment.id)}actions/`,
+    payload,
+    signal,
+    runtimeMutationHeaders(deployment.revision, idempotencyKey),
+  );
+}
+
+export function undeployRuntimeDeployment(
+  deployment: RuntimeDeployment,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+) {
+  return managementRequest<RuntimeMutationResult>(
+    runtimeResourcePath("deployments", deployment.id),
+    {
+      method: "DELETE",
+      headers: runtimeMutationHeaders(deployment.revision, idempotencyKey),
+      signal,
+    },
+  );
+}
+
+export async function listRuntimeOperations(
+  deploymentId: string,
+  signal?: AbortSignal,
+) {
+  const payload = await managementRequest<RuntimePage<RuntimeOperation>>(
+    `${runtimeResourcePath("deployments", deploymentId)}operations/?page=1&page_size=20`,
+    { signal },
+  );
+  return runtimePage(payload);
+}
+
+export function getRuntimeOperation(operationId: string, signal?: AbortSignal) {
+  return managementRequest<RuntimeOperation>(
+    runtimeResourcePath("operations", operationId),
+    { signal },
+  );
+}
+
+export function requestRuntimeLogSnapshot(
+  deployment: RuntimeDeployment,
+  payload: RuntimeLogRequestPayload,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+) {
+  return createManagementResource<RuntimeOperation>(
+    `${runtimeResourcePath("deployments", deployment.id)}log-requests/`,
+    payload,
+    signal,
+    runtimeMutationHeaders(deployment.revision, idempotencyKey),
   );
 }
 

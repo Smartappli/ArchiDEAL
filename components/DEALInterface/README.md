@@ -4,14 +4,15 @@ DEALInterface is the unified management console for the DEAL suite.
 
 It is designed as a modular control plane:
 
-- `DEALHost` owns the application catalog, immutable version metadata, APISIX route publication and health probes.
+- `DEALHost` owns the application catalog, immutable version metadata, asynchronous Kubernetes runtime reconciliation, APISIX route publication and health probes.
 - `DEALIoT` keeps device, telemetry and edge operations isolated.
 - `DEALData` keeps ingestion, catalog and lineage operations isolated.
 - `DEALInterface` provides unified navigation for the management API contracts that are actually exposed.
 
-DEALHost does not currently build, schedule or deploy application runtimes, manage domains, expose
-runtime logs or enforce tenant quotas. Those capabilities remain explicit future contracts rather
-than simulated controls in the console.
+DEALHost exposes explicit, asynchronous runtime deployment contracts, bounded log snapshots and
+component-scoped non-secret configuration, logical secret references and scaling policies. Custom
+domain lifecycle and tenant quotas remain unavailable until their security and ownership contracts
+are resolved.
 
 ## Stack
 
@@ -125,6 +126,14 @@ The current development build provides:
   displayed strong revision ETag. Version metadata is never presented as a completed runtime
   deployment; a concurrent `412` keeps every entered release field visible until the operator
   explicitly reloads and reviews the authoritative application revision;
+- asynchronous DEALHost runtime deployment by application version and configured runtime
+  environment, with desired and observed state kept separate. Deploy, configure, scale, start,
+  stop, restart and undeploy requests use strong revision ETags and unique idempotency keys; queued
+  operations are polled until success or failure instead of being shown as completed immediately;
+- component-level runtime status and scaling summaries, bounded point-in-time log snapshots (never
+  unbounded streaming), non-secret component environment variables and logical server-side secret
+  references. The browser never collects a secret value, secret-manager path, Kubernetes Secret
+  name or bearer token;
 - read-only module route metadata, an APISIX `dry_run` preview and a separate confirmed route
   publication action bound to the preview's strong ETag through `If-Match`; changed or cross-module
   previews cannot authorize publication, and disabled modules cannot be previewed or published from
@@ -146,12 +155,13 @@ The current development build provides:
   console;
 - explicit loading, empty, read-only, expired-session and API-error states.
 
-The production UI does not claim that release metadata is a completed application deployment.
-Deployment orchestration, domain lifecycle, map views, bulk scientific-data import/acquisition,
-retention or routing-rule configuration, lineage, audit evidence, billing and support remain
-unavailable until their owning services expose stable management API contracts. The optional demo
-mode still contains synthetic metrics and operator workflow data; live connectivity, device,
-application, route, dataset, experiment, sensor, GPS and access-right state comes from module APIs.
+The production UI keeps immutable release metadata separate from runtime deployment state and never
+claims that an accepted asynchronous operation has completed before reconciliation confirms it.
+Custom domain lifecycle, map views, bulk scientific-data import/acquisition, retention or
+routing-rule configuration, lineage, audit evidence, billing and support remain unavailable until
+their owning services expose stable management API contracts. The optional demo mode still contains
+synthetic metrics and operator workflow data; live connectivity, device, application, runtime,
+route, dataset, experiment, sensor, GPS and access-right state comes from module APIs.
 
 Dataset user/group lists control visibility of DEALHost catalogue entries only. They do not grant or
 deny access to DEALData GPS or Sensor events. Event summaries are protected separately by DEALData's
