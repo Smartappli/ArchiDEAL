@@ -157,20 +157,7 @@ class RuntimeDeploymentAdmin(admin.ModelAdmin):
     )
     list_filter = ("environment", "desired_state", "observed_state")
     search_fields = ("application__name", "application__slug", "controller_id")
-    readonly_fields = (
-        "id",
-        "release",
-        "controller_id",
-        "observed_state",
-        "observed_generation",
-        "last_error",
-        "last_reconciled_at",
-        "created_by",
-        "created_by_label",
-        "deleted_at",
-        "created_at",
-        "updated_at",
-    )
+    readonly_fields = [field.name for field in RuntimeDeployment._meta.fields]
     inlines = [RuntimeComponentInline]
 
 
