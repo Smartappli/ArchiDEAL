@@ -130,8 +130,8 @@ if ((EUID != 0)); then
   fail "run this installer as root (for example with sudo)."
 fi
 
-for executable in awk cmp crontab docker flock getent git id install mktemp \
-  readlink runuser stat; do
+for executable in awk chmod chown cmp cp crontab docker env flock getent git id \
+  install mktemp readlink rm rmdir runuser stat; do
   command -v "$executable" >/dev/null 2>&1 || \
     fail "missing required executable: $executable"
 done
@@ -161,8 +161,10 @@ repo_dir="$(readlink -f -- "$repo_input")" || fail "cannot resolve --repo."
   fail "--remote is invalid."
 git check-ref-format --branch "$branch" >/dev/null 2>&1 || \
   fail "--branch is invalid."
-[[ "$interval_minutes" =~ ^[1-9][0-9]?$ ]] && \
-  ((10#$interval_minutes <= 59)) || fail "--interval-minutes must be between 1 and 59."
+if [[ ! "$interval_minutes" =~ ^[1-9][0-9]?$ ]] || \
+   ((10#$interval_minutes > 59)); then
+  fail "--interval-minutes must be between 1 and 59."
+fi
 [[ "$health_timeout" =~ ^[1-9][0-9]*(s|m|h)$ ]] || \
   fail "--health-timeout must look like 30s, 5m or 1h."
 [[ "$health_url" =~ ^https?://[^/@[:space:]]+(:[0-9]+)?(/[^[:space:]]*)?$ ]] || \
@@ -233,13 +235,29 @@ if [[ "$replace_compose_env" == "true" && -z "$compose_env_source" ]]; then
   fail "--replace-compose-env also requires --compose-env."
 fi
 
+for managed_path in "$install_dir" "$config_dir" "$log_dir" "$state_dir" \
+  "$installed_updater" "$config_file" "$compose_env_file"; do
+  [[ ! -L "$managed_path" ]] || fail "managed path must not be a symlink: $managed_path"
+done
 install -d -m 0755 -o root -g root "$install_dir"
 install -d -m 0750 -o "$target_user" -g "$target_group" \
   "$config_dir" "$log_dir" "$state_dir"
 
-exec 8>"$installer_lock"
+if [[ ! -e /run/lock ]]; then
+  install -d -m 0755 -o root -g root /run/lock
+fi
+[[ -d /run/lock && ! -L /run/lock ]] || fail "/run/lock is unavailable or unsafe."
+[[ ! -L "$installer_lock" ]] || fail "the installer lock must not be a symlink."
+if [[ ! -e "$installer_lock" ]]; then
+  install -m 0600 -o root -g root /dev/null "$installer_lock"
+fi
+[[ -f "$installer_lock" && "$(stat -c '%u' -- "$installer_lock")" == "0" ]] || \
+  fail "the installer lock is not a root-owned regular file."
+chmod 0600 "$installer_lock"
+exec 8<>"$installer_lock"
 flock -n 8 || fail "another installer is already running."
 
+[[ ! -L "$updater_lock" ]] || fail "the updater lock must not be a symlink."
 if [[ ! -e "$updater_lock" ]]; then
   install -m 0600 -o "$target_user" -g "$target_group" /dev/null "$updater_lock"
 fi
@@ -273,19 +291,19 @@ write_candidate_config() {
 
   {
     printf '%s\n' '# Managed by deploy/vps/install-auto-update.sh.'
-    printf 'ARCHIDEAL_REPO_DIR=%s\n' "$repo_dir"
-    printf 'ARCHIDEAL_REMOTE=%s\n' "$remote"
-    printf 'ARCHIDEAL_BRANCH=%s\n' "$branch"
-    printf 'ARCHIDEAL_ENV_FILE=%s\n' "$compose_env_file"
+    printf 'ARCHIDEAL_REPO_DIR=%q\n' "$repo_dir"
+    printf 'ARCHIDEAL_REMOTE=%q\n' "$remote"
+    printf 'ARCHIDEAL_BRANCH=%q\n' "$branch"
+    printf 'ARCHIDEAL_ENV_FILE=%q\n' "$compose_env_file"
     printf 'ARCHIDEAL_COMPOSE_PROJECT=archideal\n'
-    printf 'ARCHIDEAL_HEALTH_URL=%s\n' "$health_url"
-    printf 'ARCHIDEAL_HEALTH_TIMEOUT=%s\n' "$health_timeout"
+    printf 'ARCHIDEAL_HEALTH_URL=%q\n' "$health_url"
+    printf 'ARCHIDEAL_HEALTH_TIMEOUT=%q\n' "$health_timeout"
     printf 'ARCHIDEAL_BUILD_PULL=%s\n' "$build_pull"
     printf 'ARCHIDEAL_FORCE_REDEPLOY=0\n'
-    printf 'ARCHIDEAL_PYTHON=%s\n' "$python_command"
-    printf 'ARCHIDEAL_LOG_FILE=%s\n' "$log_file"
-    printf 'ARCHIDEAL_LOCK_FILE=%s\n' "$lock_path"
-    printf 'ARCHIDEAL_UPDATE_PATH=%s\n' "$PATH"
+    printf 'ARCHIDEAL_PYTHON=%q\n' "$python_command"
+    printf 'ARCHIDEAL_LOG_FILE=%q\n' "$log_file"
+    printf 'ARCHIDEAL_LOCK_FILE=%q\n' "$lock_path"
+    printf 'ARCHIDEAL_UPDATE_PATH=%q\n' "$PATH"
   } >"$destination"
   chown "$target_user:$target_group" "$destination"
   chmod 0600 "$destination"
@@ -328,7 +346,8 @@ fi
 
 if [[ -e "$compose_env_file" ]]; then
   secure_installed_file "$compose_env_file" "the installed Compose env file"
-  if [[ "$replace_compose_env" == "true" ]]; then
+  if [[ "$replace_compose_env" == "true" && \
+        "$compose_env_source" != "$compose_env_file" ]]; then
     install -m 0600 -o "$target_user" -g "$target_group" \
       "$compose_env_source" "$compose_env_file"
     log "replaced the installed Compose env file explicitly."
@@ -403,5 +422,5 @@ fi
 crontab -u "$target_user" "$new_crontab"
 
 log "installation complete."
-log "cron checks $remote/$branch every $interval_minutes minute(s) as $target_user."
+log "cron checks for updates every $interval_minutes minute(s) as $target_user."
 log "updater log: $log_file"
