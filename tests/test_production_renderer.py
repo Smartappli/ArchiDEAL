@@ -1321,6 +1321,37 @@ class ProductionRendererTests(unittest.TestCase):
         self.assertIn("Unreviewed NetworkPolicy", result.stderr)
         self.assertIn("additive policies are forbidden", result.stderr)
 
+        def add_component_selected_worker_policy(documents) -> None:
+            documents.append(
+                {
+                    "apiVersion": "networking.k8s.io/v1",
+                    "kind": "NetworkPolicy",
+                    "metadata": {"name": "unreviewed-worker-component-egress"},
+                    "spec": {
+                        "podSelector": {
+                            "matchLabels": {"app.kubernetes.io/component": "worker"}
+                        },
+                        "policyTypes": ["Egress"],
+                        "egress": [
+                            {
+                                "to": [{}],
+                                "ports": [{"protocol": "TCP", "port": 443}],
+                            }
+                        ],
+                    },
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "additive-worker-component-policy",
+                "base/network-policies.yaml",
+                add_component_selected_worker_policy,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("Unreviewed NetworkPolicy", result.stderr)
+        self.assertIn("additive policies are forbidden", result.stderr)
+
     def test_dependency_ports_must_match_network_policies(self) -> None:
         invalid_values = {
             "KAFKA_BOOTSTRAP_SERVERS": (
@@ -1537,6 +1568,28 @@ class ProductionRendererTests(unittest.TestCase):
                 )
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(f"must not contain {kind}", result.stderr)
+
+        def add_unreviewed_runtime_crd(documents) -> None:
+            documents.append(
+                {
+                    "apiVersion": "networking.istio.io/v1",
+                    "kind": "VirtualService",
+                    "metadata": {
+                        "name": "runtime-exposure-via-unreviewed-crd",
+                        "namespace": "archideal-runtime-apps",
+                    },
+                    "spec": {"hosts": ["runtime.example.invalid"]},
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-unreviewed-crd",
+                "runtime-apps/serviceaccount.yaml",
+                add_unreviewed_runtime_crd,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("exactly the reviewed static resource inventory", result.stderr)
 
         def add_explicitly_runtime_scoped_ingress(documents) -> None:
             documents.append(
