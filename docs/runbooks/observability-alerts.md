@@ -82,6 +82,59 @@ credentials remain valid; do not initialize an empty etcd cluster under the prod
 Restore into a new quorum according to `backup-restore.md`, verify the snapshot, then rerun the
 idempotent route bootstrap.
 
+## ArchiDEAL runtime management unavailable
+
+Alerts: `ArchiDEALRuntimeControllerUnavailable`,
+`ArchiDEALRuntimeKubernetesBackendUnavailable`, `ArchiDEALRuntimeWorkerUnavailable`.
+
+First distinguish discovery, process health and dependency health. The controller metric target
+uses HTTPS with the private controller CA; a failed scrape can therefore mean an expired or
+mismatched certificate as well as a stopped process. The controller readiness and
+`dealhost_runtime_controller_kubernetes_ready` additionally prove a bounded authenticated query to
+the Kubernetes API. Worker readiness requires both a recent processing-loop heartbeat and a query
+of the durable PostgreSQL operation store.
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n archideal get pods,services,endpoints \
+  -l 'app.kubernetes.io/name in (dealhost-runtime-controller,dealhost-runtime-worker)'
+kubectl --context "$KUBE_CONTEXT" -n archideal get servicemonitor \
+  archideal-runtime-controller archideal-runtime-worker -o yaml
+kubectl --context "$KUBE_CONTEXT" -n archideal logs deploy/dealhost-runtime-worker \
+  --all-pods --since=20m
+kubectl --context "$KUBE_CONTEXT" -n archideal logs deploy/dealhost-runtime-controller \
+  --all-pods --since=20m
+```
+
+For controller backend failure, inspect ServiceAccount token projection, the exact runtime-apps
+Role/RoleBinding, API-server DNS/TLS and `KUBERNETES_API_EGRESS_CIDR`. For worker failure, inspect
+PostgreSQL TLS/connectivity and the loop heartbeat age before restarting anything. A controller
+outage does not authorize giving the web Deployment a controller token or Kubernetes permissions.
+Do not delete queued operations: they are idempotent durable records and should drain after the
+dependency is restored. Confirm at least one controller and worker target is ready, then observe a
+new uniquely keyed test operation reach a terminal state before resolving.
+
+## ArchiDEAL runtime operation backlog or stall
+
+Alerts: `ArchiDEALRuntimeOperationBacklogOld`, `ArchiDEALRuntimeOperationBacklogHigh`,
+`ArchiDEALRuntimeOperationStuck`.
+
+Compare `dealhost_runtime_operation_queue_depth`,
+`dealhost_runtime_operation_oldest_age_seconds`, `dealhost_runtime_operation_stale_leases` and
+`dealhost_runtime_active_controller_failures`. All worker replicas intentionally report the same
+database-backed queue gauges, so use `max`, not `sum`, when investigating global depth. Break the
+backlog down by the bounded `operation_type` and `status` labels, then correlate the oldest request
+time with controller 4xx/5xx logs and Kubernetes rollout events. Never add deployment IDs,
+application names or idempotency keys as metric labels.
+
+A short lease-free interval while a reconciliation schedules its next poll is normal. The stale
+lease gauge counts only an expired lease or a lease-free operation already eligible to run. The
+worker normally fails a reconciliation after 30 minutes; a running age above 35 minutes therefore
+indicates that timeout enforcement itself is not progressing. Preserve the operation row and
+logs, restore worker/controller capacity, and let lease recovery replay it. Manually changing
+status, generation, lease fields or idempotency keys can violate ordering and is prohibited. Scale
+workers only after confirming the bottleneck is worker capacity rather than Kubernetes or database
+availability.
+
 ## ArchiDEAL bridge unavailable or degraded
 
 Alerts: `ArchiDEALBridgeUnavailable`, `ArchiDEALBridgeReplicaDegraded`.

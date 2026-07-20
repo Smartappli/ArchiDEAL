@@ -317,6 +317,14 @@ python manage.py process_runtime_operations
 python manage.py process_runtime_operations --once
 ```
 
+Le worker expose, sur une interface dédiée, `/health/live`, `/health/ready` et `/metrics`.
+La readiness exige une boucle de traitement récente et un accès à la base qui porte la file
+durable. Les métriques publient uniquement des agrégats à cardinalité bornée : profondeur et âge
+de file par statut, types d'opération, leases expirés et échecs contrôleur actifs. Aucun identifiant
+d'application, de déploiement ou d'idempotence n'est utilisé comme label. Le contrôleur expose
+également `/metrics` sur son listener TLS ; ce endpoint vérifie l'accès Kubernetes et reste limité
+au scraper Prometheus par NetworkPolicy.
+
 Chaque mutation exige une `Idempotency-Key` de 8 à 128 caractères sûrs. Les créations
 utilisent l'ETag de la `HostedApplication`; les configurations, actions, demandes de
 logs et suppressions utilisent celui du déploiement. Une réponse `202` signifie
@@ -346,6 +354,9 @@ DEALHOST_RUNTIME_CONTROLLER_URL=https://runtime-controller.internal
 DEALHOST_RUNTIME_CONTROLLER_TOKEN=<secret>
 DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS=15
 DEALHOST_RUNTIME_CONTROLLER_CA_FILE=/var/run/runtime-controller-ca/ca.crt
+DEALHOST_RUNTIME_WORKER_METRICS_BIND=127.0.0.1
+DEALHOST_RUNTIME_WORKER_METRICS_PORT=9102
+DEALHOST_RUNTIME_WORKER_HEARTBEAT_TIMEOUT_SECONDS=90
 ```
 
 En production, le web partage uniquement le drapeau d'activation avec le worker. Le

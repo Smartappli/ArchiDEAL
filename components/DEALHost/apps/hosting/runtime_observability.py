@@ -124,8 +124,7 @@ def collect_runtime_worker_snapshot(
         stale_leases=stale_leases,
         active_controller_failures=active_controller_failures,
         deployment_counts=tuple(
-            (str(row["observed_state"]), int(row["total"]))
-            for row in deployment_rows
+            (str(row["observed_state"]), int(row["total"])) for row in deployment_rows
         ),
     )
 
@@ -140,7 +139,9 @@ def render_runtime_worker_metrics(
     lines = [
         "# HELP dealhost_runtime_worker_process_start_time_seconds Unix time when the worker process started.",
         "# TYPE dealhost_runtime_worker_process_start_time_seconds gauge",
-        _sample("dealhost_runtime_worker_process_start_time_seconds", health.started_at),
+        _sample(
+            "dealhost_runtime_worker_process_start_time_seconds", health.started_at
+        ),
         "# HELP dealhost_runtime_worker_loop_heartbeat_age_seconds Seconds since the operation loop last made progress.",
         "# TYPE dealhost_runtime_worker_loop_heartbeat_age_seconds gauge",
         _sample("dealhost_runtime_worker_loop_heartbeat_age_seconds", heartbeat_age),
@@ -287,7 +288,9 @@ def _handler_for(health: RuntimeWorkerHealth) -> type[BaseHTTPRequestHandler]:
             if self.path == "/health/ready":
                 ready = snapshot is not None and health.is_fresh()
                 status = HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE
-                payload = b'{"status":"ready"}\n' if ready else b'{"status":"unavailable"}\n'
+                payload = (
+                    b'{"status":"ready"}\n' if ready else b'{"status":"unavailable"}\n'
+                )
                 self._send(status, payload, "application/json")
                 return
             self._send(
