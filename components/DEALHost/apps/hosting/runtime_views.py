@@ -255,6 +255,12 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                     code="deployment_deleted",
                     status_code=status.HTTP_409_CONFLICT,
                 )
+            if locked.desired_state == RuntimeDeployment.DesiredState.ABSENT:
+                return _problem(
+                    "A deployment pending removal cannot be configured.",
+                    code="deployment_deleting",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
             for field, value in serializer.validated_data.items():
                 setattr(locked, field, value)
             locked.generation += 1
@@ -437,6 +443,18 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                 return _problem(
                     "Logs are unavailable until the deployment has a runtime identity.",
                     code="runtime_identity_unavailable",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            if locked.observed_state not in {
+                RuntimeDeployment.ObservedState.RUNNING,
+                RuntimeDeployment.ObservedState.DEGRADED,
+                RuntimeDeployment.ObservedState.STOPPED,
+                RuntimeDeployment.ObservedState.FAILED,
+                RuntimeDeployment.ObservedState.UNKNOWN,
+            }:
+                return _problem(
+                    "Logs are unavailable during this runtime transition.",
+                    code="invalid_runtime_transition",
                     status_code=status.HTTP_409_CONFLICT,
                 )
             if not locked.components.filter(

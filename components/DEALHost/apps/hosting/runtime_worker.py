@@ -22,7 +22,7 @@ from .runtime_controller import (
 
 
 TRANSITIONAL_STATES = {"pending", "reconciling", "deleting"}
-MAX_OPERATION_ATTEMPTS = 5
+MAX_CONTROLLER_FAILURES = 5
 MAX_RECONCILIATION_AGE = timedelta(minutes=30)
 LOG_TTL_SECONDS = 300
 logger = logging.getLogger(__name__)
@@ -212,7 +212,10 @@ class RuntimeOperationProcessor:
                         "updated_at",
                     ]
                 )
-                if now - locked_operation.requested_at >= MAX_RECONCILIATION_AGE:
+                reconciliation_started_at = (
+                    locked_operation.started_at or locked_operation.requested_at
+                )
+                if now - reconciliation_started_at >= MAX_RECONCILIATION_AGE:
                     detail = "Runtime reconciliation timed out."
                     deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
                     deployment.last_error = detail
@@ -411,7 +414,8 @@ class RuntimeOperationProcessor:
             locked = RuntimeOperation.objects.select_for_update().get(pk=operation.pk)
             if locked.lease_token != lease_token:
                 return
-            if retryable and locked.attempts < MAX_OPERATION_ATTEMPTS:
+            locked.controller_failures += 1
+            if retryable and locked.controller_failures < MAX_CONTROLLER_FAILURES:
                 locked.status = RuntimeOperation.Status.QUEUED
                 locked.progress = {"stage": "retrying", "percent": None}
                 locked.next_attempt_at = timezone.now() + timedelta(

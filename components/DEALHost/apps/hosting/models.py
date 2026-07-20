@@ -389,6 +389,7 @@ class RuntimeOperation(models.Model):
     )
     actor_label = models.CharField(max_length=255, blank=True, default="")
     attempts = models.PositiveSmallIntegerField(default=0)
+    controller_failures = models.PositiveSmallIntegerField(default=0)
     next_attempt_at = models.DateTimeField(null=True, blank=True)
     leased_by = models.CharField(max_length=128, blank=True, default="")
     lease_token = models.UUIDField(null=True, blank=True)

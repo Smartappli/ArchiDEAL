@@ -1248,6 +1248,129 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     }
     if not required_dealhost_config <= runtime_config.keys():
         fail("DEALHost native production database/OIDC configuration is incomplete.")
+    expected_runtime_controller_config = {
+        "DEALHOST_RUNTIME_ENABLED": "true",
+        "DEALHOST_RUNTIME_CONTROLLER_URL": (
+            "https://dealhost-runtime-controller.archideal.svc.cluster.local:8443"
+        ),
+        "DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS": "15",
+        "DEALHOST_RUNTIME_CONTROLLER_CA_FILE": (
+            "/var/run/runtime-controller-ca/ca.crt"
+        ),
+    }
+    if expected_runtime_controller_config.items() - runtime_config.items():
+        fail(
+            "DEALHost runtime management must use the internal TLS controller and "
+            "its mounted private CA."
+        )
+
+    runtime_controller_pod = workloads["dealhost-runtime-controller"]["spec"][
+        "template"
+    ]["spec"]
+    runtime_controller = runtime_controller_pod["containers"][0]
+    runtime_controller_env = {
+        item["name"]: item for item in runtime_controller.get("env", [])
+    }
+    expected_controller_args = [
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8081",
+        "--interface",
+        "asgi",
+        "--ssl-certificate",
+        "/var/run/runtime-controller-tls/tls.crt",
+        "--ssl-keyfile",
+        "/var/run/runtime-controller-tls/tls.key",
+        "--ssl-protocol-min",
+        "tls1.2",
+        "--no-ws",
+        "dealhost.runtime_controller_service.asgi:application",
+    ]
+    if (
+        runtime_controller_pod.get("serviceAccountName")
+        != "dealhost-runtime-controller"
+        or runtime_controller_pod.get("automountServiceAccountToken") is not True
+        or runtime_controller.get("command") != ["granian"]
+        or runtime_controller.get("args") != expected_controller_args
+        or runtime_controller_env.get("RUNTIME_CONTROLLER_NAMESPACE", {}).get(
+            "value"
+        )
+        != "archideal-runtime-apps"
+        or runtime_controller_env.get(
+            "RUNTIME_CONTROLLER_WORKLOAD_SERVICE_ACCOUNT", {}
+        ).get("value")
+        != "dealhost-runtime-application"
+        or runtime_controller_env.get("RUNTIME_CONTROLLER_IMAGE_PULL_SECRET", {}).get(
+            "value"
+        )
+        != "archideal-registry-credentials"
+        or runtime_controller_env.get("RUNTIME_CONTROLLER_AUTH_TOKEN", {})
+        .get("valueFrom", {})
+        .get("secretKeyRef", {})
+        .get("key")
+        != "dealhost-runtime-controller-token"
+    ):
+        fail(
+            "The runtime-controller Deployment must use its isolated identity, "
+            "namespace, TLS listener and bearer credential."
+        )
+    readiness_command = (
+        runtime_controller.get("readinessProbe", {}).get("exec", {}).get("command", [])
+    )
+    if (
+        len(readiness_command) != 3
+        or readiness_command[:2] != ["python", "-c"]
+        or "ssl.create_default_context" not in readiness_command[2]
+        or "dealhost-runtime-controller.archideal.svc.cluster.local"
+        not in readiness_command[2]
+    ):
+        fail(
+            "The runtime-controller readiness probe must verify its private CA and "
+            "service DNS certificate identity."
+        )
+
+    runtime_worker_pod = workloads["dealhost-runtime-worker"]["spec"]["template"][
+        "spec"
+    ]
+    runtime_worker = runtime_worker_pod["containers"][0]
+    runtime_worker_env = {item["name"]: item for item in runtime_worker.get("env", [])}
+    worker_secret_keys = {
+        item.get("valueFrom", {}).get("secretKeyRef", {}).get("key")
+        for item in runtime_worker_env.values()
+        if item.get("valueFrom", {}).get("secretKeyRef")
+    }
+    if (
+        runtime_worker_pod.get("serviceAccountName") != "dealhost-runtime-worker"
+        or runtime_worker_pod.get("automountServiceAccountToken") is not False
+        or "command" in runtime_worker
+        or runtime_worker.get("args")
+        != ["python", "manage.py", "process_runtime_operations"]
+        or runtime_worker.get("envFrom")
+        != [{"configMapRef": {"name": "archideal-runtime"}}]
+        or runtime_worker_env.get("DJANGO_SETTINGS_MODULE", {}).get("value")
+        != "dealhost.settings.runtime_worker"
+        or worker_secret_keys
+        != {
+            "dealhost-django-secret-key",
+            "dealhost-database-password",
+            "valkey-url",
+            "dealhost-runtime-controller-token",
+        }
+    ):
+        fail(
+            "The runtime worker must use its tokenless identity, dedicated settings "
+            "and only DB, cache and controller credentials."
+        )
+
+    dealhost_controller_token = (
+        dealhost_env.get("DEALHOST_RUNTIME_CONTROLLER_TOKEN", {})
+        .get("valueFrom", {})
+        .get("secretKeyRef", {})
+        .get("key")
+    )
+    if dealhost_controller_token != "dealhost-runtime-controller-token":
+        fail("DEALHost must read the runtime-controller token from ExternalSecret.")
     required_dealdata_oidc_config = {
         "DEALDATA_OIDC_INTROSPECTION_URL",
         "DEALDATA_OIDC_ISSUER",
@@ -1594,6 +1717,17 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         for document in documents
         if document.get("kind") == "Service"
     }
+    runtime_controller_service = services.get("dealhost-runtime-controller", {})
+    if (
+        runtime_controller_service.get("spec", {}).get("type") != "ClusterIP"
+        or runtime_controller_service.get("spec", {}).get("selector")
+        != {"app.kubernetes.io/name": "dealhost-runtime-controller"}
+        or runtime_controller_service.get("spec", {}).get("ports")
+        != [{"name": "https", "port": 8443, "targetPort": "tls"}]
+    ):
+        fail(
+            "The runtime controller must be exposed only by its internal TLS Service."
+        )
     for name in ("dealdata-core", "dealdata-gps", "dealdata-sensor"):
         metrics_ports = [
             port

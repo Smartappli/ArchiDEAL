@@ -330,6 +330,7 @@ class Migration(migrations.Migration):
                     models.CharField(blank=True, default="", max_length=255),
                 ),
                 ("attempts", models.PositiveSmallIntegerField(default=0)),
+                ("controller_failures", models.PositiveSmallIntegerField(default=0)),
                 ("next_attempt_at", models.DateTimeField(blank=True, null=True)),
                 ("leased_by", models.CharField(blank=True, default="", max_length=128)),
                 ("lease_token", models.UUIDField(blank=True, null=True)),

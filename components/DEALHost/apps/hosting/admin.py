@@ -178,6 +178,7 @@ class RuntimeOperationAdmin(ImmutableRuntimeAdminMixin, admin.ModelAdmin):
         "operation_type",
         "status",
         "attempts",
+        "controller_failures",
         "requested_at",
         "finished_at",
     )

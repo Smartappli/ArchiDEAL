@@ -509,6 +509,11 @@ class FailingLogRuntimeController(FakeRuntimeController):
         raise RuntimeControllerError("Log access was rejected.", status_code=403)
 
 
+class TransientStatusRuntimeController(StaleRuntimeController):
+    def status(self, controller_id, *, request_id: str) -> RuntimeSnapshot:
+        raise RuntimeControllerError("Temporary controller failure.", status_code=503)
+
+
 @override_settings(RUNTIME_CONTROLLER=ENABLED_CONTROLLER, RUNTIME_ENABLED=True)
 class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
     def test_worker_reconciles_deploy_and_keeps_logs_only_in_ttl_cache(self) -> None:
@@ -574,6 +579,24 @@ class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(operation.result, {"dispatched": True})
         self.assertEqual(operation.progress["stage"], "waiting_for_generation")
         self.assertIsNotNone(operation.next_attempt_at)
+
+    def test_status_polling_does_not_consume_controller_failure_retries(self) -> None:
+        created = self.queue_deployment(key="runtime-poll-retry-budget")
+        processor = RuntimeOperationProcessor(
+            worker_id="retry-worker",
+            controller=TransientStatusRuntimeController(self.module),
+        )
+        self.assertTrue(processor.process_next())
+        operation = RuntimeOperation.objects.get(pk=created.data["operation"]["id"])
+        operation.next_attempt_at = timezone.now()
+        operation.save(update_fields=["next_attempt_at"])
+
+        self.assertTrue(processor.process_next())
+
+        operation.refresh_from_db()
+        self.assertEqual(operation.attempts, 2)
+        self.assertEqual(operation.controller_failures, 1)
+        self.assertEqual(operation.status, RuntimeOperation.Status.QUEUED)
 
     def test_log_failure_does_not_mark_a_healthy_deployment_failed(self) -> None:
         created = self.queue_deployment(key="runtime-log-failure-deploy")
