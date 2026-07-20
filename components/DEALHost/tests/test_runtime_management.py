@@ -167,6 +167,21 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(RuntimeDeployment.objects.count(), 1)
         self.assertEqual(RuntimeOperation.objects.count(), 1)
 
+    def test_rejects_invalid_runtime_deployment_filters(self) -> None:
+        invalid_application = self.client.get(
+            reverse("deployments-list"),
+            {"application_id": "not-a-number"},
+        )
+        self.assertEqual(invalid_application.status_code, 400)
+        self.assertIn("application_id", invalid_application.data)
+
+        invalid_state = self.client.get(
+            reverse("deployments-list"),
+            {"observed_state": "not-a-runtime-state"},
+        )
+        self.assertEqual(invalid_state.status_code, 400)
+        self.assertIn("observed_state", invalid_state.data)
+
     def test_rejects_stale_revisions_and_idempotency_key_reuse(self) -> None:
         stale = self.client.post(
             reverse("deployments-list"),

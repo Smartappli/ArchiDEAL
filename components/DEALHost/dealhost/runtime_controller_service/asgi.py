@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import re
+import time
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -15,6 +16,7 @@ from .contract import (
     validate_request_id,
 )
 from .kubernetes import KubernetesApiError, KubernetesClient
+from .metrics import RuntimeControllerMetrics
 from .service import RuntimeReconciler
 
 
@@ -37,9 +39,12 @@ class RuntimeControllerApplication:
         self,
         settings: ControllerSettings,
         reconciler: RuntimeReconciler,
+        *,
+        metrics: RuntimeControllerMetrics | None = None,
     ) -> None:
         self.settings = settings
         self.reconciler = reconciler
+        self.metrics = metrics or RuntimeControllerMetrics()
 
     async def __call__(self, scope, receive, send) -> None:
         if scope.get("type") == "lifespan":
@@ -49,11 +54,31 @@ class RuntimeControllerApplication:
             return
         method = str(scope.get("method", "")).upper()
         path = str(scope.get("path", ""))
+        started_at = time.monotonic()
+        original_send = send
+        response_observed = False
+
+        async def observed_send(message) -> None:
+            nonlocal response_observed
+            if message.get("type") == "http.response.start" and not response_observed:
+                response_observed = True
+                self.metrics.observe_request(
+                    method=method,
+                    route=_route_label(path),
+                    status=int(message["status"]),
+                    duration_seconds=time.monotonic() - started_at,
+                )
+            await original_send(message)
+
+        send = observed_send
         if method == "GET" and path == "/health/live":
             await _response(send, 200, {"status": "ok"})
             return
         if method == "GET" and path == "/health/ready":
             await self._ready(send)
+            return
+        if method == "GET" and path == "/metrics":
+            await self._metrics(send)
             return
 
         try:
@@ -237,6 +262,19 @@ class RuntimeControllerApplication:
             return
         await _response(send, 200, {"status": "ready"})
 
+    async def _metrics(self, send) -> None:
+        kubernetes_ready = True
+        try:
+            self.settings.validate(require_files=True)
+            await self.reconciler.kubernetes.ready()
+        except (ControllerConfigurationError, KubernetesApiError, OSError):
+            kubernetes_ready = False
+        await _text_response(
+            send,
+            200,
+            self.metrics.render(kubernetes_ready=kubernetes_ready),
+        )
+
     @staticmethod
     async def _lifespan(receive, send) -> None:
         while True:
@@ -403,6 +441,19 @@ def _query_integer(
     return parsed
 
 
+def _route_label(path: str) -> str:
+    if path in {"/health/live", "/health/ready", "/metrics", "/v1/deployments"}:
+        return path
+    if _LOG_ROUTE.fullmatch(path):
+        return "/v1/deployments/{deployment_id}/logs"
+    action_match = _ACTION_ROUTE.fullmatch(path)
+    if action_match:
+        return f"/v1/deployments/{{deployment_id}}/actions/{action_match.group(2)}"
+    if _DEPLOYMENT_ROUTE.fullmatch(path):
+        return "/v1/deployments/{deployment_id}"
+    return "unknown"
+
+
 async def _response(
     send,
     status: int,
@@ -425,6 +476,17 @@ async def _response(
         headers.append((b"x-request-id", request_id.encode("ascii")))
     if status == 401:
         headers.append((b"www-authenticate", b'Bearer realm="runtime-controller"'))
+    await send({"type": "http.response.start", "status": status, "headers": headers})
+    await send({"type": "http.response.body", "body": content})
+
+
+async def _text_response(send, status: int, content: bytes) -> None:
+    headers = [
+        (b"content-type", b"text/plain; version=0.0.4; charset=utf-8"),
+        (b"cache-control", b"no-store"),
+        (b"content-length", str(len(content)).encode("ascii")),
+        (b"x-content-type-options", b"nosniff"),
+    ]
     await send({"type": "http.response.start", "status": status, "headers": headers})
     await send({"type": "http.response.body", "body": content})
 
