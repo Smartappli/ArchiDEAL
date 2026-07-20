@@ -542,9 +542,7 @@ export type RuntimeOperationType =
   | "restart"
   | "scale"
   | "undeploy"
-  | "log_snapshot"
-  | "domain_attach"
-  | "domain_detach";
+  | "log_snapshot";
 
 export type RuntimeOperationStatus = "queued" | "running" | "succeeded" | "failed";
 
@@ -784,7 +782,7 @@ function runtimeResourcePath(resource: "deployments" | "operations", id: string)
 
 function runtimeMutationHeaders(revision: number, idempotencyKey: string) {
   const normalizedKey = idempotencyKey.trim();
-  if (!normalizedKey || normalizedKey.length > 128 || /[\u0000-\u001f\u007f]/.test(normalizedKey)) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(normalizedKey)) {
     throw new ManagementApiError({
       kind: "validation",
       message: "A valid idempotency key is required for a runtime mutation.",

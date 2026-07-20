@@ -509,6 +509,15 @@ describe("managementRequest", () => {
       configuration: {},
       secret_refs: {},
     }, "")).toThrow(ManagementApiError);
+    for (const invalidKey of ["short", "-runtime-command", "runtime command"]) {
+      expect(() => createRuntimeDeployment({ ...application, revision: 1 }, {
+        environment: "production",
+        version: "1.5.0",
+        scaling: {},
+        configuration: {},
+        secret_refs: {},
+      }, invalidKey)).toThrow(ManagementApiError);
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

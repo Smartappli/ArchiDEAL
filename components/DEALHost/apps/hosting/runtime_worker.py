@@ -115,6 +115,11 @@ class RuntimeOperationProcessor:
             )
             self._complete_logs(operation, lease_token, logs)
             return
+        if deployment.generation != operation.target_generation:
+            raise RuntimeControllerError(
+                "The queued operation no longer matches the deployment generation.",
+                status_code=409,
+            )
 
         already_dispatched = bool(
             isinstance(operation.result, dict) and operation.result.get("dispatched")
@@ -125,7 +130,7 @@ class RuntimeOperationProcessor:
                 request_id=str(operation.id),
             )
         else:
-            payload = _controller_payload(deployment)
+            payload = _controller_payload(deployment, operation)
             operation_type = operation.operation_type
             if operation_type == RuntimeOperation.OperationType.DEPLOY:
                 snapshot = self.controller.deploy(payload, request_id=str(operation.id))
@@ -176,14 +181,18 @@ class RuntimeOperationProcessor:
                 .select_related("release__application_version")
                 .get(pk=locked_operation.deployment_id)
             )
-            _apply_snapshot(deployment, snapshot)
+            _apply_snapshot(
+                deployment,
+                snapshot,
+                target_generation=locked_operation.target_generation,
+            )
             deployment.revision += 1
             deployment.last_reconciled_at = now
             deployment.save()
             self._apply_components(deployment, snapshot)
 
             waiting_for_generation = (
-                snapshot.observed_generation < deployment.generation
+                snapshot.observed_generation < locked_operation.target_generation
             )
             if snapshot.state in TRANSITIONAL_STATES or waiting_for_generation:
                 if now - locked_operation.requested_at >= MAX_RECONCILIATION_AGE:
@@ -421,12 +430,17 @@ class RuntimeOperationProcessor:
             deployment.save()
 
 
-def _controller_payload(deployment: RuntimeDeployment) -> dict[str, Any]:
+def _controller_payload(
+    deployment: RuntimeDeployment,
+    operation: RuntimeOperation,
+) -> dict[str, Any]:
     return {
         "deployment_id": str(deployment.id),
         "environment": deployment.environment_id,
-        "generation": deployment.generation,
-        "desired_state": deployment.desired_state,
+        "generation": operation.target_generation,
+        "desired_state": operation.payload.get(
+            "desired_state", deployment.desired_state
+        ),
         "release": {
             "digest": deployment.release.manifest_digest,
             "manifest": deployment.release.manifest,
@@ -440,10 +454,12 @@ def _controller_payload(deployment: RuntimeDeployment) -> dict[str, Any]:
 def _apply_snapshot(
     deployment: RuntimeDeployment,
     snapshot: RuntimeSnapshot,
+    *,
+    target_generation: int,
 ) -> None:
-    if snapshot.observed_generation > deployment.generation:
+    if snapshot.observed_generation > target_generation:
         raise RuntimeControllerError(
-            "Runtime controller reported a generation newer than the desired state."
+            "Runtime controller reported a generation newer than the queued operation."
         )
     deployment.controller_id = snapshot.controller_id
     deployment.observed_state = snapshot.state
@@ -467,12 +483,13 @@ def _terminal_state_error(
         return ""
     if operation.operation_type == RuntimeOperation.OperationType.UNDEPLOY:
         expected = {RuntimeDeployment.ObservedState.DELETED}
-    elif deployment.desired_state == RuntimeDeployment.DesiredState.RUNNING:
+    desired_state = operation.payload.get("desired_state", deployment.desired_state)
+    if desired_state == RuntimeDeployment.DesiredState.RUNNING:
         expected = {
             RuntimeDeployment.ObservedState.RUNNING,
             RuntimeDeployment.ObservedState.DEGRADED,
         }
-    elif deployment.desired_state == RuntimeDeployment.DesiredState.STOPPED:
+    elif desired_state == RuntimeDeployment.DesiredState.STOPPED:
         expected = {RuntimeDeployment.ObservedState.STOPPED}
     else:
         expected = {RuntimeDeployment.ObservedState.DELETED}
@@ -480,5 +497,5 @@ def _terminal_state_error(
         return ""
     return (
         f"Runtime controller reported terminal state {snapshot.state} while "
-        f"the desired state is {deployment.desired_state}."
+        f"the desired state is {desired_state}."
     )

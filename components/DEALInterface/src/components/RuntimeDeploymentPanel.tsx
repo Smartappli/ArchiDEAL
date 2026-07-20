@@ -32,6 +32,14 @@ interface RuntimeDeploymentPanelProps {
 }
 
 const TRANSITIONAL_STATES = new Set(["pending", "reconciling", "deleting"]);
+const STARTABLE_STATES = new Set(["stopped", "failed", "unknown"]);
+const STOPPABLE_STATES = new Set(["running", "degraded", "failed", "unknown"]);
+const RESTARTABLE_STATES = new Set(["running", "degraded"]);
+const OPERATION_POLL_DELAY_MS = 1_500;
+const OPERATION_POLL_MAX_DELAY_MS = 12_000;
+const OPERATION_POLL_MAX_CONSECUTIVE_FAILURES = 5;
+const MAX_LOG_TAIL_LINES = 1_000;
+const MAX_LOG_SINCE_SECONDS = 604_800;
 
 function reconnectUrl() {
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -124,6 +132,10 @@ function isRuntimeLogSnapshot(value: RuntimeOperation["result"]): value is Runti
   );
 }
 
+function isPendingOperation(operation: RuntimeOperation | undefined) {
+  return operation?.status === "queued" || operation?.status === "running";
+}
+
 export function RuntimeDeploymentPanel({
   areaDescription,
   areaTitle,
@@ -143,6 +155,7 @@ export function RuntimeDeploymentPanel({
   const [isMutating, setIsMutating] = useState(false);
   const [catalogProblem, setCatalogProblem] = useState<ApiProblem>();
   const [deploymentProblem, setDeploymentProblem] = useState<ApiProblem>();
+  const [operationHistoryProblem, setOperationHistoryProblem] = useState<ApiProblem>();
   const [mutationProblem, setMutationProblem] = useState<ApiProblem>();
   const [successKey, setSuccessKey] = useState<MessageKey>();
   const [readOnly, setReadOnly] = useState(false);
@@ -184,11 +197,18 @@ export function RuntimeDeploymentPanel({
     return environments.filter((environment) => environment.enabled && !occupied.has(environment.slug));
   }, [activeDeployments, environments]);
   const versionOptions = selectedApplication?.versions ?? [];
-  const operationPending = activeOperation?.status === "queued" || activeOperation?.status === "running";
+  const operationPending = isPendingOperation(activeOperation);
   const runtimeUnavailable = Boolean(selectedDeployment && selectedEnvironment?.enabled !== true);
   const runtimeBusy = isMutating || operationPending || Boolean(
     selectedDeployment && TRANSITIONAL_STATES.has(selectedDeployment.observed_state),
   ) || runtimeUnavailable;
+  const configuredMaxLogLines = selectedEnvironment?.capabilities.logs.max_lines;
+  const maxLogLines = Math.min(
+    MAX_LOG_TAIL_LINES,
+    Number.isSafeInteger(configuredMaxLogLines) && Number(configuredMaxLogLines) > 0
+      ? Number(configuredMaxLogLines)
+      : MAX_LOG_TAIL_LINES,
+  );
 
   function normalizeProblem(error: unknown): ApiProblem {
     return error instanceof ManagementApiError
@@ -208,6 +228,20 @@ export function RuntimeDeploymentPanel({
       message: t("management.runtime.configurationInvalid"),
       retryable: false,
     });
+  }
+
+  function registerLocalLogProblem() {
+    setMutationProblem({
+      kind: "validation",
+      message: t("management.runtime.logRequestInvalid"),
+      retryable: false,
+    });
+  }
+
+  function reloadRuntimeData() {
+    setCatalogReloadKey((value) => value + 1);
+    setDeploymentReloadKey((value) => value + 1);
+    setOperationReloadKey((value) => value + 1);
   }
 
   function commandKey(fingerprint: string) {
@@ -321,9 +355,16 @@ export function RuntimeDeploymentPanel({
       setScalingText("{}");
       setConfigurationDirty(false);
       setOperations([]);
+      setOperationHistoryProblem(undefined);
+      setActiveOperation(undefined);
       setLogComponent("");
       return;
     }
+    setOperations([]);
+    setOperationHistoryProblem(undefined);
+    setActiveOperation((current) => (
+      current?.deployment_id === selectedDeployment.id ? current : undefined
+    ));
     setConfigurationText(prettyConfiguration(selectedDeployment.configuration));
     setSecretRefsText(prettyConfiguration(selectedDeployment.secret_refs));
     setScalingText(prettyScaling(selectedDeployment.scaling));
@@ -342,16 +383,23 @@ export function RuntimeDeploymentPanel({
   useEffect(() => {
     if (!selectedDeployment) return;
     const controller = new AbortController();
+    setOperationHistoryProblem(undefined);
     listRuntimeOperations(selectedDeployment.id, controller.signal)
-      .then((page) => setOperations(page.results))
+      .then((page) => {
+        setOperations(page.results);
+        const resumableOperation = page.results.find(isPendingOperation);
+        setActiveOperation((current) => {
+          if (current?.deployment_id !== selectedDeployment.id) return resumableOperation;
+          if (!isPendingOperation(current)) return resumableOperation ?? current;
+          return page.results.find((operation) => operation.id === current.id) ?? current;
+        });
+      })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        // History is supplementary; the current deployment remains usable if
-        // an older operation page is temporarily unavailable.
-        setOperations([]);
+        setOperationHistoryProblem(normalizeProblem(error));
       });
     return () => controller.abort();
-  }, [operationReloadKey, selectedDeployment?.id]);
+  }, [operationReloadKey, selectedDeployment?.id, t]);
 
   useEffect(() => {
     const versions = selectedApplication?.versions ?? [];
@@ -371,16 +419,32 @@ export function RuntimeDeploymentPanel({
   }, [availableEnvironments, deployEnvironment]);
 
   useEffect(() => {
+    setLogTailLines((current) => (
+      Number.isSafeInteger(current)
+        ? Math.min(Math.max(current, 1), maxLogLines)
+        : Math.min(200, maxLogLines)
+    ));
+  }, [maxLogLines]);
+
+  useEffect(() => {
     if (!activeOperation || !operationPending) return;
+    const operationId = activeOperation.id;
     const controller = new AbortController();
     let timeoutId: number | undefined;
+    let consecutiveFailures = 0;
 
-    const poll = async () => {
+    function schedulePoll(delay: number) {
+      timeoutId = window.setTimeout(poll, delay);
+    }
+
+    async function poll() {
       try {
-        const nextOperation = await getRuntimeOperation(activeOperation.id, controller.signal);
+        const nextOperation = await getRuntimeOperation(operationId, controller.signal);
+        consecutiveFailures = 0;
+        setMutationProblem(undefined);
         setActiveOperation(nextOperation);
-        if (nextOperation.status === "queued" || nextOperation.status === "running") {
-          timeoutId = window.setTimeout(poll, 1_500);
+        if (isPendingOperation(nextOperation)) {
+          schedulePoll(OPERATION_POLL_DELAY_MS);
           return;
         }
         setOperationReloadKey((value) => value + 1);
@@ -402,11 +466,19 @@ export function RuntimeDeploymentPanel({
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        setMutationProblem(normalizeProblem(error));
+        const problem = normalizeProblem(error);
+        setMutationProblem(problem);
+        consecutiveFailures += 1;
+        if (problem.retryable && consecutiveFailures < OPERATION_POLL_MAX_CONSECUTIVE_FAILURES) {
+          schedulePoll(Math.min(
+            OPERATION_POLL_DELAY_MS * (2 ** consecutiveFailures),
+            OPERATION_POLL_MAX_DELAY_MS,
+          ));
+        }
       }
-    };
+    }
 
-    timeoutId = window.setTimeout(poll, 1_500);
+    schedulePoll(OPERATION_POLL_DELAY_MS);
     return () => {
       controller.abort();
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
@@ -565,6 +637,17 @@ export function RuntimeDeploymentPanel({
   async function requestLogs(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedDeployment || !logComponent) return;
+    if (
+      !Number.isSafeInteger(logTailLines)
+      || logTailLines < 1
+      || logTailLines > maxLogLines
+      || !Number.isSafeInteger(logSinceSeconds)
+      || logSinceSeconds < 1
+      || logSinceSeconds > MAX_LOG_SINCE_SECONDS
+    ) {
+      registerLocalLogProblem();
+      return;
+    }
     setIsMutating(true);
     setMutationProblem(undefined);
     setSuccessKey(undefined);
@@ -620,11 +703,15 @@ export function RuntimeDeploymentPanel({
     );
   }
 
-  const canStart = selectedDeployment?.observed_state === "stopped";
-  const canStop = selectedDeployment?.observed_state === "running"
-    || selectedDeployment?.observed_state === "degraded";
-  const canRestart = canStop || selectedDeployment?.observed_state === "failed";
-  const maxLogLines = selectedEnvironment?.capabilities.logs.max_lines ?? 1000;
+  const canStart = Boolean(
+    selectedDeployment && STARTABLE_STATES.has(selectedDeployment.observed_state),
+  );
+  const canStop = Boolean(
+    selectedDeployment && STOPPABLE_STATES.has(selectedDeployment.observed_state),
+  );
+  const canRestart = Boolean(
+    selectedDeployment && RESTARTABLE_STATES.has(selectedDeployment.observed_state),
+  );
   const totalReadyReplicas = selectedDeployment?.components.reduce(
     (total, component) => total + component.ready_replicas,
     0,
@@ -643,7 +730,7 @@ export function RuntimeDeploymentPanel({
       <div className="management-surface">
         <div className="management-toolbar">
           <code>/dealhost/api/hosting/deployments/</code>
-          <button onClick={() => setCatalogReloadKey((value) => value + 1)} type="button">
+          <button onClick={reloadRuntimeData} type="button">
             {t("management.retry")}
           </button>
         </div>
@@ -833,7 +920,7 @@ export function RuntimeDeploymentPanel({
                           </label>
                           <label>
                             <span>{t("management.runtime.sinceSeconds")}</span>
-                            <input disabled={readOnly || runtimeBusy} min={1} onChange={(event) => setLogSinceSeconds(event.target.valueAsNumber)} required type="number" value={logSinceSeconds} />
+                            <input disabled={readOnly || runtimeBusy} max={MAX_LOG_SINCE_SECONDS} min={1} onChange={(event) => setLogSinceSeconds(event.target.valueAsNumber)} required type="number" value={logSinceSeconds} />
                           </label>
                           <button disabled={readOnly || runtimeBusy || !logComponent || selectedEnvironment?.capabilities.logs === undefined} type="submit">{t("management.runtime.requestLogs")}</button>
                         </form>
@@ -848,6 +935,7 @@ export function RuntimeDeploymentPanel({
 
                       <section className="management-history runtime-history" aria-labelledby="runtime-history-title">
                         <h3 id="runtime-history-title">{t("management.runtime.operationHistory")}</h3>
+                        {operationHistoryProblem ? renderProblem(operationHistoryProblem) : null}
                         {operations.length ? (
                           <ul>
                             {operations.map((operation) => (
@@ -858,7 +946,7 @@ export function RuntimeDeploymentPanel({
                               </li>
                             ))}
                           </ul>
-                        ) : <p>{t("management.runtime.noOperations")}</p>}
+                        ) : operationHistoryProblem ? null : <p>{t("management.runtime.noOperations")}</p>}
                       </section>
                     </>
                   ) : null}

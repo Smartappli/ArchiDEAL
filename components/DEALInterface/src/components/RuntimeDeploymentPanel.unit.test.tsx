@@ -304,3 +304,115 @@ it("confirms asynchronous undeployment and uses the selected runtime revision", 
     "runtime-command-001",
   ));
 });
+
+it("resumes a queued operation from history and retries a transient polling failure", async () => {
+  const queuedOperation: RuntimeOperation = {
+    ...operation("deploy"),
+    status: "queued",
+    started_at: null,
+    finished_at: null,
+    progress: { stage: "queued", percent: null },
+    result: null,
+  };
+  const completedOperation: RuntimeOperation = {
+    ...queuedOperation,
+    status: "succeeded",
+    started_at: "2026-07-20T08:04:01Z",
+    finished_at: "2026-07-20T08:04:02Z",
+    progress: { stage: "complete", percent: 100 },
+    result: {},
+  };
+  api.listRuntimeDeployments.mockResolvedValue(page([deployment]));
+  api.listRuntimeOperations
+    .mockResolvedValueOnce(page([queuedOperation]))
+    .mockResolvedValue(page([completedOperation]));
+  api.getRuntimeOperation
+    .mockRejectedValueOnce(new ManagementApiError({
+      kind: "network",
+      message: "The operation status is temporarily unavailable.",
+      retryable: true,
+    }))
+    .mockResolvedValueOnce(completedOperation);
+  renderPanel();
+
+  expect((await screen.findAllByText("Queued")).length).toBeGreaterThanOrEqual(1);
+  expect(await screen.findByText("The operation status is temporarily unavailable.", {}, {
+    timeout: 2_500,
+  })).toBeInTheDocument();
+  await waitFor(() => expect(api.getRuntimeOperation).toHaveBeenCalledTimes(2), {
+    timeout: 6_000,
+  });
+  expect(await screen.findByText("The runtime operation completed successfully.")).toBeInTheDocument();
+}, 8_000);
+
+it.each([
+  ["stopped", true, false, false],
+  ["failed", true, true, false],
+  ["unknown", true, true, false],
+  ["running", false, true, true],
+  ["degraded", false, true, true],
+] as const)(
+  "matches backend lifecycle transitions from %s",
+  async (observedState, startEnabled, stopEnabled, restartEnabled) => {
+    api.listRuntimeDeployments.mockResolvedValue(page([{
+      ...deployment,
+      observed_state: observedState,
+    }]));
+    renderPanel();
+
+    await screen.findByRole("heading", { name: "Runtime deployment" });
+    expect(screen.getByRole("button", { name: "Start" })).toHaveProperty("disabled", !startEnabled);
+    expect(screen.getByRole("button", { name: "Stop" })).toHaveProperty("disabled", !stopEnabled);
+    expect(screen.getByRole("button", { name: "Restart" })).toHaveProperty("disabled", !restartEnabled);
+  },
+);
+
+it("shows operation-history errors and retries every runtime data source", async () => {
+  api.listRuntimeDeployments.mockResolvedValue(page([deployment]));
+  api.listRuntimeOperations
+    .mockRejectedValueOnce(new ManagementApiError({
+      kind: "network",
+      message: "Operation history is unavailable.",
+      retryable: true,
+    }))
+    .mockResolvedValue(page([]));
+  renderPanel();
+
+  expect(await screen.findByText("Operation history is unavailable.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+  await waitFor(() => {
+    expect(api.listManagementResources).toHaveBeenCalledTimes(2);
+    expect(api.listRuntimeEnvironments).toHaveBeenCalledTimes(2);
+    expect(api.listRuntimeDeployments).toHaveBeenCalledTimes(2);
+    expect(api.listRuntimeOperations).toHaveBeenCalledTimes(2);
+  });
+  expect(screen.queryByText("Operation history is unavailable.")).not.toBeInTheDocument();
+});
+
+it.each([
+  [100, 100],
+  [5_000, 1_000],
+] as const)(
+  "limits log requests to the lower of the environment cap %i and the API cap",
+  async (environmentLimit, expectedLimit) => {
+    api.listRuntimeEnvironments.mockResolvedValue(page([{
+      ...environment,
+      capabilities: {
+        ...environment.capabilities,
+        logs: { ...environment.capabilities.logs, max_lines: environmentLimit },
+      },
+    }]));
+    api.listRuntimeDeployments.mockResolvedValue(page([deployment]));
+    renderPanel();
+
+    await screen.findByRole("heading", { name: "Runtime logs" });
+    const tailLines = screen.getByLabelText("Maximum lines");
+    const sinceSeconds = screen.getByLabelText("Look-back period (seconds)");
+    expect(tailLines).toHaveAttribute("max", String(expectedLimit));
+    expect(sinceSeconds).toHaveAttribute("max", "604800");
+    if (environmentLimit < 200) {
+      await waitFor(() => expect(tailLines).toHaveValue(expectedLimit));
+    }
+  },
+);
