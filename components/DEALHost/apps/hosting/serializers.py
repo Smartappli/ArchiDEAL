@@ -167,14 +167,12 @@ def _runtime_profile_rules(application: HostedApplication) -> dict[str, dict[str
     for module in application.modules.all():
         try:
             profile = module.runtime_profile
-        except ModuleRuntimeProfile.DoesNotExist as exc:
-            raise serializers.ValidationError(
-                f"Module {module.slug} has no reviewed runtime profile."
-            ) from exc
+        except ModuleRuntimeProfile.DoesNotExist:
+            rules[module.slug] = {"plain": set(), "secret": set()}
+            continue
         if not profile.enabled or profile.verified_at is None:
-            raise serializers.ValidationError(
-                f"Runtime profile for {module.slug} is not enabled and verified."
-            )
+            rules[module.slug] = {"plain": set(), "secret": set()}
+            continue
         configuration = profile.spec.get("configuration", {})
         if not isinstance(configuration, dict):
             raise serializers.ValidationError(
