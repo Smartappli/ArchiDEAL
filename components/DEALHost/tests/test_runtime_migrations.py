@@ -25,7 +25,9 @@ class RuntimeActiveLogMigrationTests(TransactionTestCase):
             manifest={},
             manifest_digest="a" * 64,
         )
-        environment = old_apps.get_model("hosting", "RuntimeEnvironment").objects.create(
+        environment = old_apps.get_model(
+            "hosting", "RuntimeEnvironment"
+        ).objects.create(
             slug="migration",
             name="Migration",
         )
@@ -82,4 +84,6 @@ class RuntimeActiveLogMigrationTests(TransactionTestCase):
             )
             self.assertEqual(migrated.progress, {"stage": "failed", "percent": 100})
             self.assertIsNotNone(migrated.finished_at)
-        self.assertEqual(migrated_operation.objects.get(pk=mutation.pk).status, "queued")
+        self.assertEqual(
+            migrated_operation.objects.get(pk=mutation.pk).status, "queued"
+        )

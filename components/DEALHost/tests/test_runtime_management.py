@@ -182,6 +182,29 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(invalid_state.status_code, 400)
         self.assertIn("observed_state", invalid_state.data)
 
+        invalid_active = self.client.get(
+            reverse("deployments-list"),
+            {"active": "yes"},
+        )
+        self.assertEqual(invalid_active.status_code, 400)
+        self.assertIn("active", invalid_active.data)
+
+    def test_active_deployment_filter_excludes_deleted_history(self) -> None:
+        created = self.queue_deployment(key="runtime-active-filter")
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+
+        active = self.client.get(reverse("deployments-list"), {"active": "true"})
+        self.assertEqual(active.status_code, 200)
+        self.assertEqual(active.data["count"], 1)
+
+        deployment.deleted_at = timezone.now()
+        deployment.observed_state = RuntimeDeployment.ObservedState.DELETED
+        deployment.save(update_fields=["deleted_at", "observed_state", "updated_at"])
+        active = self.client.get(reverse("deployments-list"), {"active": "true"})
+        inactive = self.client.get(reverse("deployments-list"), {"active": "false"})
+        self.assertEqual(active.data["count"], 0)
+        self.assertEqual(inactive.data["count"], 1)
+
     def test_rejects_stale_revisions_and_idempotency_key_reuse(self) -> None:
         stale = self.client.post(
             reverse("deployments-list"),

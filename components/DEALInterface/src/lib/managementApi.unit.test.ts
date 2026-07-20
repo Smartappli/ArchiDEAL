@@ -475,7 +475,7 @@ describe("managementRequest", () => {
 
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       "/dealhost/api/hosting/runtime-environments/?page=1&page_size=100",
-      "/dealhost/api/hosting/deployments/?application_id=4&page=1&page_size=100",
+      "/dealhost/api/hosting/deployments/?application_id=4&active=true&page=1&page_size=100",
       "/dealhost/api/hosting/deployments/deployment-1/operations/?page=1&page_size=20",
       "/dealhost/api/hosting/operations/operation-1/",
     ]);
@@ -498,14 +498,14 @@ describe("managementRequest", () => {
       }))
       .mockResolvedValueOnce(jsonResponse({
         count: 2,
-        next: "/dealhost/api/hosting/deployments/?application_id=4&page=2&page_size=100",
+        next: "/dealhost/api/hosting/deployments/?application_id=4&active=true&page=2&page_size=100",
         previous: null,
         results: [{ id: "deployment-first" }],
       }))
       .mockResolvedValueOnce(jsonResponse({
         count: 2,
         next: null,
-        previous: "/dealhost/api/hosting/deployments/?application_id=4&page=1&page_size=100",
+        previous: "/dealhost/api/hosting/deployments/?application_id=4&active=true&page=1&page_size=100",
         results: [{ id: "deployment-second" }],
       }));
     vi.stubGlobal("fetch", fetchMock);

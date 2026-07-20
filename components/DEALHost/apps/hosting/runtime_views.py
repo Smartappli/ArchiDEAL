@@ -106,6 +106,7 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
         application_id = self.request.query_params.get("application_id")
         environment = self.request.query_params.get("environment")
         observed_state = self.request.query_params.get("observed_state")
+        active = self.request.query_params.get("active")
         if application_id:
             if not re.fullmatch(r"[1-9][0-9]*", application_id):
                 raise ValidationError(
@@ -120,6 +121,12 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                     {"observed_state": "The observed runtime state is invalid."}
                 )
             queryset = queryset.filter(observed_state=observed_state)
+        if active is not None:
+            if active not in {"true", "false"}:
+                raise ValidationError(
+                    {"active": "Active must be the literal true or false."}
+                )
+            queryset = queryset.filter(deleted_at__isnull=active == "true")
         return queryset.order_by(
             "application__name", "environment__name", "-created_at"
         )
@@ -766,11 +773,13 @@ def _revision_precondition(
 
 
 def _busy_response(deployment: RuntimeDeployment) -> Response | None:
-    if deployment.operations.filter(
-        status__in=[RuntimeOperation.Status.QUEUED, RuntimeOperation.Status.RUNNING]
-    ).exclude(
-        operation_type=RuntimeOperation.OperationType.LOG_SNAPSHOT
-    ).exists():
+    if (
+        deployment.operations.filter(
+            status__in=[RuntimeOperation.Status.QUEUED, RuntimeOperation.Status.RUNNING]
+        )
+        .exclude(operation_type=RuntimeOperation.OperationType.LOG_SNAPSHOT)
+        .exists()
+    ):
         return _problem(
             "Another runtime operation is already in progress.",
             code="operation_in_progress",

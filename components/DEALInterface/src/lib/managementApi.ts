@@ -878,6 +878,7 @@ export async function listRuntimeDeployments(
   }
   const query = new URLSearchParams({
     application_id: String(applicationId),
+    active: "true",
     page: "1",
     page_size: "100",
   });
