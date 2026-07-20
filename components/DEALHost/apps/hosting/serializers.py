@@ -162,8 +162,50 @@ class HostedApplicationSerializer(serializers.ModelSerializer):
 
 def _runtime_profile_rules(
     application: HostedApplication,
+    *,
+    manifest: dict[str, object] | None = None,
 ) -> dict[str, dict[str, set[str]]]:
     rules: dict[str, dict[str, set[str]]] = {}
+    if manifest is not None:
+        modules = manifest.get("modules")
+        if not isinstance(modules, list):
+            raise serializers.ValidationError(
+                "The immutable runtime release has an invalid module contract."
+            )
+        for raw_module in modules:
+            if not isinstance(raw_module, dict):
+                raise serializers.ValidationError(
+                    "The immutable runtime release has an invalid module contract."
+                )
+            module_slug = raw_module.get("slug")
+            spec = raw_module.get("spec")
+            if (
+                not isinstance(module_slug, str)
+                or not module_slug
+                or module_slug in rules
+                or not isinstance(spec, dict)
+            ):
+                raise serializers.ValidationError(
+                    "The immutable runtime release has an invalid module contract."
+                )
+            configuration = spec.get("configuration", {})
+            if not isinstance(configuration, dict):
+                raise serializers.ValidationError(
+                    f"Runtime release for {module_slug} has an invalid configuration contract."
+                )
+            plain = configuration.get("plain", [])
+            secret = configuration.get("secret", [])
+            if (
+                not isinstance(plain, list)
+                or not isinstance(secret, list)
+                or any(not isinstance(key, str) for key in [*plain, *secret])
+            ):
+                raise serializers.ValidationError(
+                    f"Runtime release for {module_slug} has invalid configuration keys."
+                )
+            rules[module_slug] = {"plain": set(plain), "secret": set(secret)}
+        return rules
+
     for module in application.modules.all():
         try:
             profile = module.runtime_profile
@@ -197,11 +239,12 @@ def _validate_component_values(
     *,
     application: HostedApplication,
     secret: bool,
+    manifest: dict[str, object] | None = None,
 ) -> dict[str, dict[str, str]]:
     label = "Secret references" if secret else "Configuration"
     if not isinstance(value, dict):
         raise serializers.ValidationError(f"{label} must be keyed by module slug.")
-    rules = _runtime_profile_rules(application)
+    rules = _runtime_profile_rules(application, manifest=manifest)
     unknown_modules = sorted(set(value) - set(rules))
     if unknown_modules:
         raise serializers.ValidationError(
@@ -251,28 +294,59 @@ def validate_runtime_configuration(
     value: object,
     *,
     application: HostedApplication,
+    manifest: dict[str, object] | None = None,
 ) -> dict[str, dict[str, str]]:
-    return _validate_component_values(value, application=application, secret=False)
+    return _validate_component_values(
+        value,
+        application=application,
+        secret=False,
+        manifest=manifest,
+    )
 
 
 def validate_runtime_secret_references(
     value: object,
     *,
     application: HostedApplication,
+    manifest: dict[str, object] | None = None,
 ) -> dict[str, dict[str, str]]:
-    return _validate_component_values(value, application=application, secret=True)
+    return _validate_component_values(
+        value,
+        application=application,
+        secret=True,
+        manifest=manifest,
+    )
 
 
 def validate_runtime_scaling(
     value: object,
     *,
     application: HostedApplication,
+    manifest: dict[str, object] | None = None,
 ) -> dict[str, dict[str, int | str]]:
     if not isinstance(value, dict):
         raise serializers.ValidationError(
             "Scaling must be a JSON object keyed by module slug."
         )
-    module_slugs = {module.slug for module in application.modules.all()}
+    if manifest is None:
+        module_slugs = {module.slug for module in application.modules.all()}
+    else:
+        raw_modules = manifest.get("modules")
+        if not isinstance(raw_modules, list):
+            raise serializers.ValidationError(
+                "The immutable runtime release has an invalid module contract."
+            )
+        module_slugs = {
+            raw_module.get("slug")
+            for raw_module in raw_modules
+            if isinstance(raw_module, dict)
+            and isinstance(raw_module.get("slug"), str)
+            and raw_module.get("slug")
+        }
+        if len(module_slugs) != len(raw_modules):
+            raise serializers.ValidationError(
+                "The immutable runtime release has an invalid module contract."
+            )
     unknown_slugs = sorted(set(value) - module_slugs)
     if unknown_slugs:
         raise serializers.ValidationError(
@@ -531,16 +605,26 @@ class RuntimeDeploymentUpdateSerializer(serializers.Serializer):
 
     def validate_configuration(self, value: object) -> dict[str, dict[str, str]]:
         deployment = self.context["deployment"]
-        return validate_runtime_configuration(value, application=deployment.application)
+        return validate_runtime_configuration(
+            value,
+            application=deployment.application,
+            manifest=deployment.release.manifest,
+        )
 
     def validate_scaling(self, value: object) -> dict[str, dict[str, int | str]]:
         deployment = self.context["deployment"]
-        return validate_runtime_scaling(value, application=deployment.application)
+        return validate_runtime_scaling(
+            value,
+            application=deployment.application,
+            manifest=deployment.release.manifest,
+        )
 
     def validate_secret_refs(self, value: object) -> dict[str, dict[str, str]]:
         deployment = self.context["deployment"]
         return validate_runtime_secret_references(
-            value, application=deployment.application
+            value,
+            application=deployment.application,
+            manifest=deployment.release.manifest,
         )
 
 
