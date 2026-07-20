@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 from datetime import timedelta
-from typing import Any
+from typing import Any, Callable
 
 from django.core.cache import cache
 from django.db import transaction
@@ -65,9 +65,19 @@ class RuntimeOperationProcessor:
             self._record_unexpected_failure(operation, lease_token)
         return True
 
-    def run(self, *, once: bool = False, poll_seconds: float = 2.0) -> None:
+    def run(
+        self,
+        *,
+        once: bool = False,
+        poll_seconds: float = 2.0,
+        heartbeat: Callable[[], None] | None = None,
+    ) -> None:
         while True:
+            if heartbeat is not None:
+                heartbeat()
             processed = self.process_next()
+            if heartbeat is not None:
+                heartbeat()
             if once:
                 return
             if not processed:

@@ -106,10 +106,18 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
         environment = self.request.query_params.get("environment")
         observed_state = self.request.query_params.get("observed_state")
         if application_id:
-            queryset = queryset.filter(application_id=application_id)
+            if not re.fullmatch(r"[1-9][0-9]*", application_id):
+                raise ValidationError(
+                    {"application_id": "A positive application identifier is required."}
+                )
+            queryset = queryset.filter(application_id=int(application_id))
         if environment:
             queryset = queryset.filter(environment_id=environment)
         if observed_state:
+            if observed_state not in RuntimeDeployment.ObservedState.values:
+                raise ValidationError(
+                    {"observed_state": "The observed runtime state is invalid."}
+                )
             queryset = queryset.filter(observed_state=observed_state)
         return queryset.order_by(
             "application__name", "environment__name", "-created_at"
