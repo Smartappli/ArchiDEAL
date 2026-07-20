@@ -331,7 +331,8 @@ Une version est déployable seulement si chaque module capturé lors de sa publi
   la spécification (port, probe, ressources, clés de configuration et règles réseau).
 
 Les valeurs sensibles ne sont jamais acceptées dans `configuration`. `secret_refs`
-contient seulement des noms logiques canoniques résolus côté contrôleur. Les snapshots
+contient seulement des noms logiques canoniques présents dans
+`RuntimeEnvironment.policy.allowed_secret_refs`, puis résolus côté contrôleur. Les snapshots
 de logs sont limités par l'environnement, conservés cinq minutes dans le cache puis
 supprimés; leur réponse utilise `Cache-Control: private, no-store`. Les domaines
 personnalisés ne sont pas exposés tant que DNS, certificats et callback OIDC ne disposent
