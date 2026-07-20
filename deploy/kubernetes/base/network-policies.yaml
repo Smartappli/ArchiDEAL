@@ -294,12 +294,8 @@ spec:
   ingress:
     - from:
         - podSelector:
-            matchExpressions:
-              - key: app.kubernetes.io/name
-                operator: In
-                values:
-                  - dealhost
-                  - dealhost-runtime-worker
+            matchLabels:
+              app.kubernetes.io/name: dealhost-runtime-worker
       ports:
         - protocol: TCP
           port: 8081
@@ -312,12 +308,8 @@ metadata:
     app.kubernetes.io/part-of: archideal
 spec:
   podSelector:
-    matchExpressions:
-      - key: app.kubernetes.io/name
-        operator: In
-        values:
-          - dealhost
-          - dealhost-runtime-worker
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-worker
   policyTypes:
     - Egress
   egress:

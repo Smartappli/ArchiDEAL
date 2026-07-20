@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
+import re
 from typing import Any
 
 from .config import ControllerSettings
@@ -14,15 +15,24 @@ from .contract import (
 from .kubernetes import KubernetesClient
 from .resources import (
     COMPONENT_LABEL,
+    DEPLOYMENT_LABEL,
+    ENVIRONMENT_LABEL,
+    MANAGED_BY,
     component_config_map,
     component_name,
     deployment_resource,
     hpa_resource,
+    resolved_secret_name,
     selector,
     service_resource,
     state_config_map,
     state_name,
 )
+
+
+_ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+_CATALOG_MANAGED_BY = "archideal-operator"
+_CATALOG_LABEL = "archideal.io/runtime-secret-catalog"
 
 
 @dataclass(frozen=True)
@@ -107,6 +117,8 @@ class RuntimeReconciler:
                     "The runtime generation was already used for another desired state."
                 )
 
+        await self._preflight_deploy(desired)
+
         await self.kubernetes.apply(
             state_config_map(
                 desired,
@@ -183,9 +195,12 @@ class RuntimeReconciler:
         desired: DesiredDeployment | None,
     ) -> RuntimeResult:
         current = await self._state(deployment_id)
+        if desired is not None and desired.desired_state != "absent":
+            raise ContractError("DELETE requires absent desired state.")
         if current is None:
             if desired is None:
                 return RuntimeResult(deployment_id, "deleted", "", 0, ())
+            await self._assert_owned_resources(desired)
             await self.kubernetes.apply(
                 state_config_map(
                     desired,
@@ -202,9 +217,23 @@ class RuntimeReconciler:
                 raise ContractError("DELETE payload identifier does not match its path.")
             if desired.generation < current_desired.generation:
                 raise RuntimeConflict("The requested runtime generation is stale.")
-            current_desired = desired
+            if desired.release_digest != current_desired.release_digest:
+                raise RuntimeConflict(
+                    "DELETE cannot replace the immutable runtime release."
+                )
+            current_desired = self._deletion_desired(
+                current_desired,
+                generation=desired.generation,
+            )
+        else:
+            current_desired = self._deletion_desired(
+                current_desired,
+                generation=current_desired.generation,
+            )
         if self._phase(current) == "deleted":
             return self._deleted_result(current_desired)
+
+        await self._assert_owned_resources(current_desired)
 
         await self.kubernetes.apply(
             state_config_map(
@@ -371,11 +400,167 @@ class RuntimeReconciler:
         if state is None:
             return None
         labels = state.get("metadata", {}).get("labels", {})
-        if not isinstance(labels, dict) or labels.get(
-            "archideal.io/runtime-deployment"
-        ) != deployment_id:
+        if (
+            not isinstance(labels, dict)
+            or labels.get("app.kubernetes.io/managed-by") != MANAGED_BY
+            or labels.get(DEPLOYMENT_LABEL) != deployment_id
+        ):
             raise RuntimeConflict("The runtime state object identity is invalid.")
         return state
+
+    async def _preflight_deploy(self, desired: DesiredDeployment) -> None:
+        await self._validate_secret_catalog(desired)
+        await self._assert_owned_resources(desired)
+
+    async def _validate_secret_catalog(self, desired: DesiredDeployment) -> None:
+        required: dict[str, set[str]] = {}
+        for component in desired.components:
+            for environment_key, logical_name in component.secret_refs.items():
+                required.setdefault(logical_name, set()).add(environment_key)
+        if not required:
+            return
+
+        catalog = await self.kubernetes.get(
+            "ConfigMap",
+            self.settings.secret_catalog_name,
+            namespace=self.settings.secret_catalog_namespace,
+        )
+        if catalog is None:
+            raise ContractError(
+                "Runtime secret references are not provisioned.",
+                code="secret_reference_unavailable",
+            )
+        metadata = catalog.get("metadata")
+        labels = metadata.get("labels") if isinstance(metadata, dict) else None
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("name") != self.settings.secret_catalog_name
+            or metadata.get("namespace") != self.settings.secret_catalog_namespace
+            or not isinstance(labels, dict)
+            or labels.get("app.kubernetes.io/managed-by") != _CATALOG_MANAGED_BY
+            or labels.get(_CATALOG_LABEL) != "true"
+        ):
+            raise RuntimeConflict("The runtime secret catalog identity is invalid.")
+        data = catalog.get("data")
+        if not isinstance(data, dict):
+            raise RuntimeConflict("The runtime secret catalog is invalid.")
+
+        for logical_name, requested_keys in required.items():
+            raw_entry = data.get(logical_name)
+            if not isinstance(raw_entry, str) or len(raw_entry) > 4096:
+                raise ContractError(
+                    "Runtime secret references are not provisioned.",
+                    code="secret_reference_unavailable",
+                )
+            try:
+                entry = json.loads(raw_entry, object_pairs_hook=self._unique_object)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeConflict("The runtime secret catalog is invalid.") from exc
+            if not isinstance(entry, dict) or set(entry) != {"secret_name", "keys"}:
+                raise RuntimeConflict("The runtime secret catalog is invalid.")
+            secret_name = entry.get("secret_name")
+            keys = entry.get("keys")
+            if (
+                secret_name != resolved_secret_name(self.settings, logical_name)
+                or not isinstance(keys, list)
+                or len(keys) > 50
+                or len(keys) != len(set(keys))
+                or any(
+                    not isinstance(key, str) or not _ENV_KEY.fullmatch(key)
+                    for key in keys
+                )
+                or not requested_keys.issubset(keys)
+            ):
+                raise ContractError(
+                    "Runtime secret references are not provisioned.",
+                    code="secret_reference_unavailable",
+                )
+
+    async def _assert_owned_resources(self, desired: DesiredDeployment) -> None:
+        await self._assert_owned(
+            "ConfigMap",
+            state_name(desired.deployment_id),
+            desired,
+        )
+        for component in desired.components:
+            name = component_name(desired.deployment_id, component.slug)
+            for kind, resource_name in (
+                ("Deployment", name),
+                ("Service", name),
+                ("HorizontalPodAutoscaler", name),
+                (
+                    "ConfigMap",
+                    component_name(
+                        desired.deployment_id,
+                        component.slug,
+                        suffix="-cfg",
+                    ),
+                ),
+            ):
+                await self._assert_owned(
+                    kind,
+                    resource_name,
+                    desired,
+                    component_slug=component.slug,
+                )
+
+    async def _assert_owned(
+        self,
+        kind: str,
+        name: str,
+        desired: DesiredDeployment,
+        *,
+        component_slug: str = "",
+    ) -> None:
+        resource = await self.kubernetes.get(kind, name)
+        if resource is None:
+            return
+        metadata = resource.get("metadata")
+        labels = metadata.get("labels") if isinstance(metadata, dict) else None
+        expected = {
+            "app.kubernetes.io/managed-by": MANAGED_BY,
+            DEPLOYMENT_LABEL: desired.deployment_id,
+            ENVIRONMENT_LABEL: desired.environment,
+        }
+        if component_slug:
+            expected[COMPONENT_LABEL] = component_slug
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("name") != name
+            or metadata.get("namespace") != self.settings.namespace
+            or not isinstance(labels, dict)
+            or any(labels.get(key) != value for key, value in expected.items())
+        ):
+            raise RuntimeConflict(
+                "A target Kubernetes resource is not owned by this runtime deployment."
+            )
+
+    @staticmethod
+    def _deletion_desired(
+        desired: DesiredDeployment,
+        *,
+        generation: int,
+    ) -> DesiredDeployment:
+        normalized_payload = {
+            **desired.normalized_payload,
+            "generation": generation,
+            "desired_state": "absent",
+        }
+        return replace(
+            desired,
+            generation=generation,
+            desired_state="absent",
+            normalized_payload=normalized_payload,
+        )
+
+    @staticmethod
+    def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate runtime secret catalog key.")
+            result[key] = value
+        return result
 
     def _desired_from_state(self, state: dict[str, Any]) -> DesiredDeployment:
         data = state.get("data")
@@ -514,8 +699,9 @@ class RuntimeReconciler:
                 and condition.get("status") == "False"
             )
             if failed:
-                message = condition.get("message") or condition.get("reason") or "Deployment reconciliation failed."
-                return " ".join(str(message).split())[:500]
+                if condition.get("type") == "ReplicaFailure":
+                    return "Kubernetes could not create a runtime replica."
+                return "The runtime rollout did not progress."
         return ""
 
     @staticmethod

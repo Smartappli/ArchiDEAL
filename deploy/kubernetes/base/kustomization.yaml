@@ -6,6 +6,7 @@ namespace: archideal
 resources:
   - namespace.yaml
   - serviceaccounts.yaml
+  - runtime-controller-rbac.yaml
   - configuration.yaml
   - services.yaml
   - workloads.yaml

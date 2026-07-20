@@ -5,7 +5,6 @@ resources:
   - namespace.yaml
   - serviceaccount.yaml
   - rbac.yaml
-  - secret-catalog.yaml
   - resource-governance.yaml
   - network-policies.yaml
   - registry-external-secret.yaml

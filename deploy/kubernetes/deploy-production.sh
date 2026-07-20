@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 namespace="archideal"
 runtime_apps_namespace="archideal-runtime-apps"
@@ -109,7 +110,7 @@ case "${timeout: -1}" in
   h) timeout_seconds="$((10#$timeout_value * 3600))" ;;
 esac
 
-for executable in python git kubectl cosign openssl; do
+for executable in python git kubectl cosign openssl cmp; do
   if ! command -v "$executable" >/dev/null 2>&1; then
     printf 'Missing required executable: %s\n' "$executable" >&2
     exit 2
@@ -142,6 +143,8 @@ python "$script_dir/verify-release.py" \
 release_id="$(read_value RELEASE_ID)"
 runtime_secret_name="archideal-runtime-secrets-$release_id"
 runtime_controller_tls_secret_name="dealhost-runtime-controller-tls-$release_id"
+runtime_secret_catalog_name="dealhost-runtime-secret-catalog"
+runtime_controller_dns_name="dealhost-runtime-controller.archideal.svc.cluster.local"
 public_host="$(read_value PUBLIC_HOST)"
 tls_secret_name="$(read_value TLS_SECRET_NAME)"
 ingress_class="$(read_value INGRESS_CLASS)"
@@ -639,6 +642,50 @@ annotate_promotion_state in-progress
 
 printf 'Phase 2/6: configuration, secrets, private DNS and policies\n'
 apply_file "$rendered/base/serviceaccounts.yaml"
+apply_file "$rendered/base/runtime-controller-rbac.yaml"
+if ! "${kubectl_ns[@]}" get "configmap/$runtime_secret_catalog_name" >/dev/null 2>&1; then
+  "${kubectl_ns[@]}" apply --server-side \
+    --field-manager=archideal-operator \
+    -f "$rendered/base/runtime-secret-catalog.yaml"
+fi
+"${kubectl_ns[@]}" get "configmap/$runtime_secret_catalog_name" -o json | python -c '
+import json, re, sys
+catalog = json.load(sys.stdin)
+metadata = catalog.get("metadata", {})
+labels = metadata.get("labels", {})
+if metadata.get("namespace") != "archideal":
+    raise SystemExit("Runtime Secret catalog must remain in namespace archideal")
+if labels.get("app.kubernetes.io/managed-by") != "archideal-operator":
+    raise SystemExit("Runtime Secret catalog must remain operator-owned")
+if labels.get("archideal.io/runtime-secret-catalog") != "true":
+    raise SystemExit("Runtime Secret catalog ownership label is missing")
+if catalog.get("immutable") is not True or catalog.get("binaryData"):
+    raise SystemExit("Runtime Secret catalog must be immutable and contain no binary data")
+logical_pattern = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
+key_pattern = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+for logical_ref, raw_entry in catalog.get("data", {}).items():
+    try:
+        entry = json.loads(raw_entry)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Runtime Secret catalog entry {logical_ref!r} is invalid JSON") from exc
+    keys = entry.get("keys") if isinstance(entry, dict) else None
+    valid_keys = (
+        isinstance(keys, list)
+        and bool(keys)
+        and all(isinstance(key, str) and key_pattern.fullmatch(key) for key in keys)
+        and keys == sorted(set(keys))
+    )
+    if (
+        not isinstance(logical_ref, str)
+        or not logical_pattern.fullmatch(logical_ref)
+        or not isinstance(entry, dict)
+        or list(entry) != ["secret_name", "keys"]
+        or json.dumps(entry, separators=(",", ":")) != raw_entry
+        or entry.get("secret_name") != f"dealapp-{logical_ref}"
+        or not valid_keys
+    ):
+        raise SystemExit(f"Runtime Secret catalog entry {logical_ref!r} is not canonical")
+'
 apply_cluster_file "$runtime_apps_bundle"
 apply_file "$rendered/base/configuration.yaml"
 apply_file "$rendered/base/services.yaml"
@@ -665,8 +712,11 @@ except Exception as exc:
 if len(token) < 32 or any(byte <= 0x20 or byte >= 0x7f for byte in token):
     raise SystemExit("Runtime-controller token must be at least 32 visible ASCII bytes")
 '
+runtime_controller_tls_dir="$work_dir/runtime-controller-tls"
+mkdir -m 0700 "$runtime_controller_tls_dir"
 "${kubectl_ns[@]}" get "secret/$runtime_controller_tls_secret_name" -o json | python -c '
 import base64, json, sys
+from pathlib import Path
 data = json.load(sys.stdin).get("data", {})
 required = {"tls.crt", "tls.key", "ca.crt"}
 if set(data) != required:
@@ -678,7 +728,44 @@ if not decoded["ca.crt"].startswith(b"-----BEGIN CERTIFICATE-----"):
     raise SystemExit("Runtime-controller CA is not PEM")
 if not decoded["tls.key"].startswith(b"-----BEGIN PRIVATE KEY-----"):
     raise SystemExit("Runtime-controller key must be unencrypted PKCS#8 PEM")
+target = Path(sys.argv[1])
+for name, content in decoded.items():
+    (target / name).write_bytes(content)
+' "$runtime_controller_tls_dir"
+runtime_controller_cert="$runtime_controller_tls_dir/tls.crt"
+runtime_controller_key="$runtime_controller_tls_dir/tls.key"
+runtime_controller_ca="$runtime_controller_tls_dir/ca.crt"
+openssl x509 -in "$runtime_controller_cert" -noout >/dev/null
+openssl pkey -in "$runtime_controller_key" -noout >/dev/null
+openssl x509 -in "$runtime_controller_cert" -pubkey -noout \
+  >"$runtime_controller_tls_dir/cert-public.pem"
+openssl pkey -in "$runtime_controller_key" -pubout \
+  >"$runtime_controller_tls_dir/key-public.pem"
+if ! cmp -s \
+  "$runtime_controller_tls_dir/cert-public.pem" \
+  "$runtime_controller_tls_dir/key-public.pem"; then
+  printf '%s\n' 'Runtime-controller TLS certificate and private key do not match.' >&2
+  exit 1
+fi
+runtime_controller_verify_time="$(( $(python -c 'import time; print(int(time.time()))') + timeout_seconds ))"
+openssl verify \
+  -CAfile "$runtime_controller_ca" \
+  -verify_hostname "$runtime_controller_dns_name" \
+  -attime "$runtime_controller_verify_time" \
+  "$runtime_controller_cert" >/dev/null
+runtime_controller_san="$(
+  openssl x509 -in "$runtime_controller_cert" -noout -ext subjectAltName | \
+    python -c '
+import sys
+lines = sys.stdin.read().splitlines()
+print("".join(lines[1:]).replace(" ", ""))
 '
+)"
+if [[ "$runtime_controller_san" != "DNS:$runtime_controller_dns_name" ]]; then
+  printf 'Runtime-controller certificate SAN must be exactly DNS:%s.\n' \
+    "$runtime_controller_dns_name" >&2
+  exit 1
+fi
 "${kubectl_ns[@]}" get "secret/$runtime_secret_name" \
   -o go-template='{{ index .data "valkey-url" }}' | \
   python "$script_dir/validate-valkey-url.py" --expected-host "$valkey_host"
@@ -706,6 +793,7 @@ runtime_config_versions="$(
   "${kubectl_ns[@]}" get \
     configmap/archideal-runtime \
     configmap/dealhost-runtime-worker \
+    configmap/dealhost-runtime-secret-catalog \
     configmap/apisix-production-config \
     configmap/apisix-bootstrap \
     -o jsonpath='{range .items[*]}{.metadata.name}:{.metadata.resourceVersion}{"\\n"}{end}'

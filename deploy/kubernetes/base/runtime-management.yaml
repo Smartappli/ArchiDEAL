@@ -90,6 +90,8 @@ spec:
               value: dealapp
             - name: RUNTIME_CONTROLLER_SECRET_CATALOG_NAME
               value: dealhost-runtime-secret-catalog
+            - name: RUNTIME_CONTROLLER_SECRET_CATALOG_NAMESPACE
+              value: archideal
           ports:
             - name: tls
               containerPort: 8081

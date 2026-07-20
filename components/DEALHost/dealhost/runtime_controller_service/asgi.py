@@ -4,7 +4,7 @@ import hmac
 import json
 import logging
 import re
-from typing import Any, Awaitable, Callable
+from typing import Any
 from urllib.parse import parse_qs
 
 from .config import ControllerConfigurationError, ControllerSettings
@@ -229,7 +229,8 @@ class RuntimeControllerApplication:
                 raise ControllerConfigurationError(
                     "The projected Kubernetes token is empty."
                 )
-        except (ControllerConfigurationError, OSError):
+            await self.reconciler.kubernetes.ready()
+        except (ControllerConfigurationError, KubernetesApiError, OSError):
             await _response(send, 503, {"status": "unavailable"})
             return
         await _response(send, 200, {"status": "ready"})

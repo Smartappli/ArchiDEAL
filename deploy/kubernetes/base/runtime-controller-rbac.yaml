@@ -1,0 +1,30 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dealhost-runtime-secret-catalog-reader
+  namespace: archideal
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-controller
+    app.kubernetes.io/part-of: archideal
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["dealhost-runtime-secret-catalog"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dealhost-runtime-secret-catalog-reader
+  namespace: archideal
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-controller
+    app.kubernetes.io/part-of: archideal
+subjects:
+  - kind: ServiceAccount
+    name: dealhost-runtime-controller
+    namespace: archideal
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dealhost-runtime-secret-catalog-reader

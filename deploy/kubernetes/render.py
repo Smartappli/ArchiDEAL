@@ -1354,6 +1354,10 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "value"
         )
         != "dealhost-runtime-secret-catalog"
+        or runtime_controller_env.get(
+            "RUNTIME_CONTROLLER_SECRET_CATALOG_NAMESPACE", {}
+        ).get("value")
+        != "archideal"
         or runtime_controller_env.get("RUNTIME_CONTROLLER_AUTH_TOKEN", {})
         .get("valueFrom", {})
         .get("secretKeyRef", {})
@@ -1756,15 +1760,15 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         for port in rule.get("ports", [])
     }
     if (
-        controller_ingress_sources != {"dealhost", "dealhost-runtime-worker"}
+        controller_ingress_sources != {"dealhost-runtime-worker"}
         or controller_ingress_ports != {8081}
-        or controller_client_names != {"dealhost", "dealhost-runtime-worker"}
+        or controller_client_names != {"dealhost-runtime-worker"}
         or controller_client_destinations != {"dealhost-runtime-controller"}
         or controller_client_ports != {8081, 8443}
     ):
         fail(
-            "Runtime-controller traffic must be isolated to DEALHost and its worker "
-            "on the internal TLS Service path."
+            "Runtime-controller traffic must be isolated to the runtime worker on "
+            "the internal TLS Service path."
         )
 
     runtime_apps_default_deny = network_policies.get(
@@ -2259,6 +2263,298 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
                 f"{account['metadata']['name']} has an unexpected service-account "
                 "token automount policy."
             )
+
+    runtime_namespace = next(
+        (
+            document
+            for document in documents
+            if document.get("kind") == "Namespace"
+            and document.get("metadata", {}).get("name")
+            == "archideal-runtime-apps"
+        ),
+        None,
+    )
+    required_namespace_labels = {
+        "archideal.io/environment": "production",
+        "archideal.io/purpose": "managed-applications",
+        "pod-security.kubernetes.io/audit": "restricted",
+        "pod-security.kubernetes.io/audit-version": "latest",
+        "pod-security.kubernetes.io/enforce": "restricted",
+        "pod-security.kubernetes.io/enforce-version": "latest",
+        "pod-security.kubernetes.io/warn": "restricted",
+        "pod-security.kubernetes.io/warn-version": "latest",
+    }
+    if (
+        not runtime_namespace
+        or required_namespace_labels.items()
+        - runtime_namespace.get("metadata", {}).get("labels", {}).items()
+    ):
+        fail(
+            "Managed applications require their dedicated production namespace "
+            "with the restricted Pod Security Standard."
+        )
+
+    runtime_application_account = next(
+        (
+            account
+            for account in service_accounts
+            if account.get("metadata", {}).get("name")
+            == "dealhost-runtime-application"
+        ),
+        None,
+    )
+    if (
+        not runtime_application_account
+        or runtime_application_account.get("metadata", {}).get("namespace")
+        != "archideal-runtime-apps"
+        or runtime_application_account.get("automountServiceAccountToken") is not False
+    ):
+        fail(
+            "Managed applications must use the static tokenless runtime ServiceAccount."
+        )
+
+    runtime_roles = [
+        document
+        for document in documents
+        if document.get("kind") == "Role"
+        and document.get("metadata", {}).get("name")
+        == "dealhost-runtime-controller"
+    ]
+    runtime_role_bindings = [
+        document
+        for document in documents
+        if document.get("kind") == "RoleBinding"
+        and document.get("metadata", {}).get("name")
+        == "dealhost-runtime-controller"
+    ]
+    if len(runtime_roles) != 1 or len(runtime_role_bindings) != 1:
+        fail("The runtime controller requires exactly one namespace-scoped Role binding.")
+    runtime_role = runtime_roles[0]
+    runtime_role_binding = runtime_role_bindings[0]
+
+    def rbac_rule_signature(rule: dict) -> tuple[frozenset, frozenset, frozenset]:
+        return (
+            frozenset(rule.get("apiGroups", [])),
+            frozenset(rule.get("resources", [])),
+            frozenset(rule.get("verbs", [])),
+        )
+
+    lifecycle_verbs = frozenset(
+        {"get", "list", "watch", "create", "update", "patch", "delete"}
+    )
+    expected_runtime_role_rules = {
+        (frozenset({"apps"}), frozenset({"deployments"}), lifecycle_verbs),
+        (
+            frozenset({""}),
+            frozenset({"services", "configmaps"}),
+            lifecycle_verbs,
+        ),
+        (
+            frozenset({"autoscaling"}),
+            frozenset({"horizontalpodautoscalers"}),
+            lifecycle_verbs,
+        ),
+        (
+            frozenset({""}),
+            frozenset({"pods"}),
+            frozenset({"get", "list", "watch"}),
+        ),
+        (frozenset({""}), frozenset({"pods/log"}), frozenset({"get"})),
+    }
+    actual_runtime_role_rules = {
+        rbac_rule_signature(rule) for rule in runtime_role.get("rules", [])
+    }
+    controller_cluster_bindings = [
+        document
+        for document in documents
+        if document.get("kind") in {"ClusterRole", "ClusterRoleBinding"}
+        and document.get("metadata", {}).get("name")
+        == "dealhost-runtime-controller"
+    ]
+    if (
+        runtime_role.get("metadata", {}).get("namespace")
+        != "archideal-runtime-apps"
+        or actual_runtime_role_rules != expected_runtime_role_rules
+        or controller_cluster_bindings
+        or runtime_role_binding.get("metadata", {}).get("namespace")
+        != "archideal-runtime-apps"
+        or runtime_role_binding.get("subjects")
+        != [
+            {
+                "kind": "ServiceAccount",
+                "name": "dealhost-runtime-controller",
+                "namespace": "archideal",
+            }
+        ]
+        or runtime_role_binding.get("roleRef")
+        != {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "Role",
+            "name": "dealhost-runtime-controller",
+        }
+    ):
+        fail(
+            "The runtime controller RBAC must be namespace-scoped, exact and grant "
+            "no Secret or cluster-wide access."
+        )
+
+    catalog_reader_roles = [
+        document
+        for document in documents
+        if document.get("kind") == "Role"
+        and document.get("metadata", {}).get("name")
+        == "dealhost-runtime-secret-catalog-reader"
+    ]
+    catalog_reader_bindings = [
+        document
+        for document in documents
+        if document.get("kind") == "RoleBinding"
+        and document.get("metadata", {}).get("name")
+        == "dealhost-runtime-secret-catalog-reader"
+    ]
+    expected_catalog_reader_rule = {
+        "apiGroups": [""],
+        "resources": ["configmaps"],
+        "resourceNames": ["dealhost-runtime-secret-catalog"],
+        "verbs": ["get"],
+    }
+    if (
+        len(catalog_reader_roles) != 1
+        or len(catalog_reader_bindings) != 1
+        or catalog_reader_roles[0].get("metadata", {}).get("namespace")
+        != "archideal"
+        or catalog_reader_roles[0].get("rules") != [expected_catalog_reader_rule]
+        or catalog_reader_bindings[0].get("metadata", {}).get("namespace")
+        != "archideal"
+        or catalog_reader_bindings[0].get("subjects")
+        != [
+            {
+                "kind": "ServiceAccount",
+                "name": "dealhost-runtime-controller",
+                "namespace": "archideal",
+            }
+        ]
+        or catalog_reader_bindings[0].get("roleRef")
+        != {
+            "apiGroup": "rbac.authorization.k8s.io",
+            "kind": "Role",
+            "name": "dealhost-runtime-secret-catalog-reader",
+        }
+    ):
+        fail(
+            "The runtime controller may only get the named operator Secret catalog "
+            "from its platform namespace."
+        )
+
+    runtime_secret_catalog = next(
+        (
+            document
+            for document in documents
+            if document.get("kind") == "ConfigMap"
+            and document.get("metadata", {}).get("name")
+            == "dealhost-runtime-secret-catalog"
+        ),
+        None,
+    )
+    catalog_labels = (
+        runtime_secret_catalog.get("metadata", {}).get("labels", {})
+        if runtime_secret_catalog
+        else {}
+    )
+    catalog_data = runtime_secret_catalog.get("data", {}) if runtime_secret_catalog else {}
+    if (
+        not runtime_secret_catalog
+        or runtime_secret_catalog.get("metadata", {}).get("namespace") != "archideal"
+        or runtime_secret_catalog.get("immutable") is not True
+        or catalog_labels.get("app.kubernetes.io/managed-by")
+        != "archideal-operator"
+        or catalog_labels.get("archideal.io/runtime-secret-catalog") != "true"
+        or not isinstance(catalog_data, dict)
+        or runtime_secret_catalog.get("binaryData")
+    ):
+        fail(
+            "The operator-owned immutable runtime Secret catalog must contain only "
+            "metadata references in the platform namespace."
+        )
+    environment_key = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+    for logical_ref, raw_entry in catalog_data.items():
+        try:
+            entry = json.loads(raw_entry)
+        except (TypeError, json.JSONDecodeError):
+            fail(f"Runtime Secret catalog entry {logical_ref!r} is not canonical JSON.")
+        if (
+            not isinstance(logical_ref, str)
+            or DNS_LABEL.fullmatch(logical_ref) is None
+            or not isinstance(entry, dict)
+            or list(entry) != ["secret_name", "keys"]
+            or json.dumps(entry, separators=(",", ":")) != raw_entry
+            or entry.get("secret_name") != f"dealapp-{logical_ref}"
+            or not isinstance(entry.get("keys"), list)
+            or not entry["keys"]
+            or any(
+                not isinstance(key, str) or environment_key.fullmatch(key) is None
+                for key in entry["keys"]
+            )
+            or entry["keys"] != sorted(set(entry["keys"]))
+        ):
+            fail(
+                f"Runtime Secret catalog entry {logical_ref!r} must map its "
+                "deterministic dealapp-* Secret to sorted environment keys only."
+            )
+
+    runtime_quota = next(
+        (
+            document
+            for document in documents
+            if document.get("kind") == "ResourceQuota"
+            and document.get("metadata", {}).get("name") == "runtime-apps-capacity"
+        ),
+        None,
+    )
+    expected_runtime_quota = {
+        "pods": "100",
+        "requests.cpu": "20",
+        "requests.memory": "40Gi",
+        "limits.cpu": "40",
+        "limits.memory": "80Gi",
+        "services": "50",
+        "configmaps": "100",
+        "secrets": "100",
+    }
+    runtime_limit_range = next(
+        (
+            document
+            for document in documents
+            if document.get("kind") == "LimitRange"
+            and document.get("metadata", {}).get("name")
+            == "runtime-apps-containers"
+        ),
+        None,
+    )
+    expected_runtime_limits = [
+        {
+            "type": "Container",
+            "defaultRequest": {"cpu": "100m", "memory": "128Mi"},
+            "default": {"cpu": "1", "memory": "1Gi"},
+            "min": {"cpu": "10m", "memory": "32Mi"},
+            "max": {"cpu": "4", "memory": "8Gi"},
+        }
+    ]
+    if (
+        not runtime_quota
+        or runtime_quota.get("metadata", {}).get("namespace")
+        != "archideal-runtime-apps"
+        or runtime_quota.get("spec", {}).get("hard") != expected_runtime_quota
+        or not runtime_limit_range
+        or runtime_limit_range.get("metadata", {}).get("namespace")
+        != "archideal-runtime-apps"
+        or runtime_limit_range.get("spec", {}).get("limits")
+        != expected_runtime_limits
+    ):
+        fail(
+            "Managed applications require the reviewed aggregate ResourceQuota and "
+            "per-container LimitRange."
+        )
 
     ingresses = [
         document for document in documents if document.get("kind") == "Ingress"
