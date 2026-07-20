@@ -133,6 +133,62 @@ spec:
           targetLabel: workload
 ---
 apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: archideal-runtime-controller
+  labels:
+    app.kubernetes.io/part-of: archideal
+    monitoring.archideal.io/enabled: "true"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-controller
+  endpoints:
+    - port: https
+      path: /metrics
+      scheme: https
+      interval: 15s
+      scrapeTimeout: 10s
+      tlsConfig:
+        ca:
+          secret:
+            name: dealhost-runtime-controller-tls-${RELEASE_ID}
+            key: ca.crt
+        serverName: dealhost-runtime-controller.archideal.svc.cluster.local
+        minVersion: TLS12
+      relabelings:
+        - targetLabel: job
+          replacement: archideal-runtime-controller
+        - targetLabel: environment
+          replacement: production
+        - sourceLabels: [__meta_kubernetes_pod_annotation_archideal_io_release]
+          targetLabel: revision
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: archideal-runtime-worker
+  labels:
+    app.kubernetes.io/part-of: archideal
+    monitoring.archideal.io/enabled: "true"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: job
+          replacement: archideal-runtime-worker
+        - targetLabel: environment
+          replacement: production
+        - sourceLabels: [__meta_kubernetes_pod_annotation_archideal_io_release]
+          targetLabel: revision
+---
+apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: archideal-production-slo
@@ -270,6 +326,94 @@ spec:
             summary: APISIX cannot reach its etcd control plane
             description: At least one APISIX instance reports that etcd is unreachable.
             runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-apisix-etcd-unavailable
+
+    - name: archideal-runtime-management-alerts
+      rules:
+        - alert: ArchiDEALRuntimeControllerUnavailable
+          expr: |
+            (sum(up{job="archideal-runtime-controller"}) == 0)
+            or absent(up{job="archideal-runtime-controller"})
+          for: 2m
+          labels:
+            service: dealhost-runtime-controller
+            severity: critical
+            owner: platform-on-call
+            slo: runtime-control-plane-availability
+          annotations:
+            summary: No DEALHost runtime-controller metrics target is reachable
+            description: Runtime mutations cannot be reconciled while every isolated controller target is unavailable.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-runtime-management-unavailable
+        - alert: ArchiDEALRuntimeKubernetesBackendUnavailable
+          expr: |
+            (max(dealhost_runtime_controller_kubernetes_ready) == 0)
+            or absent(dealhost_runtime_controller_kubernetes_ready)
+          for: 2m
+          labels:
+            service: dealhost-runtime-controller
+            severity: critical
+            owner: platform-on-call
+            slo: runtime-control-plane-availability
+          annotations:
+            summary: The runtime controller cannot reach its Kubernetes backend
+            description: Controller processes are scrapeable but cannot authenticate to or query the isolated runtime namespace.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-runtime-management-unavailable
+        - alert: ArchiDEALRuntimeWorkerUnavailable
+          expr: |
+            (max(dealhost_runtime_worker_ready) == 0)
+            or absent(dealhost_runtime_worker_ready)
+          for: 3m
+          labels:
+            service: dealhost-runtime-worker
+            severity: critical
+            owner: platform-on-call
+            slo: runtime-operation-processing
+          annotations:
+            summary: No DEALHost runtime-operation worker is ready
+            description: No worker reports both a live processing loop and access to the durable operation store.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-runtime-management-unavailable
+        - alert: ArchiDEALRuntimeOperationBacklogOld
+          expr: |
+            max(dealhost_runtime_operation_oldest_age_seconds{status="queued"}) > 300
+            and
+            max(dealhost_runtime_operation_queue_depth{status="queued"}) > 0
+          for: 5m
+          labels:
+            service: dealhost-runtime-worker
+            severity: warning
+            owner: platform-on-call
+            slo: runtime-operation-processing
+          annotations:
+            summary: A runtime operation has remained queued for more than five minutes
+            description: The durable runtime-operation queue is not draining within its expected retry window.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-runtime-operation-backlog-or-stall
+        - alert: ArchiDEALRuntimeOperationBacklogHigh
+          expr: |
+            max(dealhost_runtime_operation_queue_depth{status="queued"}) >= 50
+          for: 10m
+          labels:
+            service: dealhost-runtime-worker
+            severity: warning
+            owner: platform-on-call
+            slo: runtime-operation-processing
+          annotations:
+            summary: The runtime-operation backlog contains at least fifty items
+            description: Sustained operation arrival exceeds the available worker or controller processing capacity.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-runtime-operation-backlog-or-stall
+        - alert: ArchiDEALRuntimeOperationStuck
+          expr: |
+            (max(dealhost_runtime_operation_oldest_age_seconds{status="running"}) > 2100)
+            or
+            (max(dealhost_runtime_operation_stale_leases) > 0)
+          for: 3m
+          labels:
+            service: dealhost-runtime-worker
+            severity: critical
+            owner: platform-on-call
+            slo: runtime-operation-processing
+          annotations:
+            summary: A runtime operation is stalled or has an unrecovered lease
+            description: An operation exceeded the reconciliation timeout margin or remained immediately claimable without a healthy lease.
+            runbook_url: https://github.com/Smartappli/ArchiDEAL/blob/main/docs/runbooks/observability-alerts.md#archideal-runtime-operation-backlog-or-stall
 
     - name: archideal-ingestion-alerts
       rules:

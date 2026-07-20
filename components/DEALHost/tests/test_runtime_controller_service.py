@@ -228,6 +228,18 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(pod_spec["securityContext"]["runAsNonRoot"])
         self.assertTrue(container["securityContext"]["readOnlyRootFilesystem"])
         self.assertEqual(container["securityContext"]["capabilities"]["drop"], ["ALL"])
+        self.assertEqual(
+            container["startupProbe"],
+            {
+                "httpGet": {
+                    "path": desired.components[0].healthcheck_path,
+                    "port": "http",
+                },
+                "periodSeconds": 5,
+                "timeoutSeconds": 2,
+                "failureThreshold": 30,
+            },
+        )
         self.assertEqual(deployment["spec"]["replicas"], 2)
         self.assertIn(
             (self.settings.namespace, "Service", name),
@@ -455,9 +467,30 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
 
             ready = await client.get("/health/ready")
             self.assertEqual(ready.status_code, 200)
+            metrics = await client.get("/metrics")
+            self.assertEqual(metrics.status_code, 200)
+            self.assertIn(
+                "text/plain; version=0.0.4",
+                metrics.headers["content-type"],
+            )
+            self.assertIn(
+                "dealhost_runtime_controller_kubernetes_ready 1",
+                metrics.text,
+            )
+            self.assertIn(
+                'dealhost_runtime_controller_requests_total{method="POST",route="/v1/deployments",status="201"} 1',
+                metrics.text,
+            )
+            self.assertNotIn(self.settings.auth_token, metrics.text)
             self.kubernetes.ready_error = True
             unavailable = await client.get("/health/ready")
             self.assertEqual(unavailable.status_code, 503)
+            unavailable_metrics = await client.get("/metrics")
+            self.assertEqual(unavailable_metrics.status_code, 200)
+            self.assertIn(
+                "dealhost_runtime_controller_kubernetes_ready 0",
+                unavailable_metrics.text,
+            )
 
     async def test_network_egress_is_explicitly_rejected(self) -> None:
         payload = runtime_payload()

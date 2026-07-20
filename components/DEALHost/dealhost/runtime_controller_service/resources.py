@@ -174,6 +174,12 @@ def deployment_resource(
                 "ports": [{"name": "http", "containerPort": component.container_port}],
                 "env": env,
                 "resources": component.resources,
+                "startupProbe": {
+                    "httpGet": {"path": component.healthcheck_path, "port": "http"},
+                    "periodSeconds": 5,
+                    "timeoutSeconds": 2,
+                    "failureThreshold": 30,
+                },
                 "readinessProbe": {
                     "httpGet": {"path": component.healthcheck_path, "port": "http"},
                     "initialDelaySeconds": 2,
