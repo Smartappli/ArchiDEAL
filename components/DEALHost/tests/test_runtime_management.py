@@ -543,6 +543,24 @@ class TransientStatusRuntimeController(StaleRuntimeController):
         raise RuntimeControllerError("Temporary controller failure.", status_code=503)
 
 
+class MissingDeletedStateRuntimeController(FakeRuntimeController):
+    def __init__(self, module: Module) -> None:
+        super().__init__(module)
+        self.status_calls = 0
+        self.undeploy_calls = 0
+
+    def status(self, controller_id, *, request_id: str) -> RuntimeSnapshot:
+        self.status_calls += 1
+        raise RuntimeControllerError(
+            "The runtime deployment does not exist.",
+            status_code=404,
+        )
+
+    def undeploy(self, controller_id, payload, *, request_id: str) -> RuntimeSnapshot:
+        self.undeploy_calls += 1
+        return super().undeploy(controller_id, payload, request_id=request_id)
+
+
 @override_settings(RUNTIME_CONTROLLER=ENABLED_CONTROLLER, RUNTIME_ENABLED=True)
 class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
     def test_worker_reconciles_deploy_and_keeps_logs_only_in_ttl_cache(self) -> None:
@@ -626,6 +644,44 @@ class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(operation.attempts, 2)
         self.assertEqual(operation.controller_failures, 1)
         self.assertEqual(operation.status, RuntimeOperation.Status.QUEUED)
+
+    def test_undeploy_retries_delete_when_terminal_state_was_already_reclaimed(
+        self,
+    ) -> None:
+        controller = MissingDeletedStateRuntimeController(self.module)
+        processor = RuntimeOperationProcessor(
+            worker_id="tombstone-free-worker",
+            controller=controller,
+        )
+        created = self.queue_deployment(key="runtime-tombstone-free-deploy")
+        self.assertTrue(processor.process_next())
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+
+        removed = self.client.delete(
+            reverse("deployments-detail", args=[deployment.id]),
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-tombstone-free-delete",
+        )
+        self.assertEqual(removed.status_code, 202)
+        operation = RuntimeOperation.objects.get(pk=removed.data["operation"]["id"])
+        operation.status = RuntimeOperation.Status.RUNNING
+        operation.result = {"dispatched": True}
+        operation.next_attempt_at = timezone.now()
+        operation.save(
+            update_fields=["status", "result", "next_attempt_at"]
+        )
+
+        self.assertTrue(processor.process_next())
+
+        operation.refresh_from_db()
+        deployment.refresh_from_db()
+        self.assertEqual(controller.status_calls, 1)
+        self.assertEqual(controller.undeploy_calls, 1)
+        self.assertEqual(operation.status, RuntimeOperation.Status.SUCCEEDED)
+        self.assertEqual(
+            deployment.observed_state,
+            RuntimeDeployment.ObservedState.DELETED,
+        )
 
     def test_log_failure_does_not_mark_a_healthy_deployment_failed(self) -> None:
         created = self.queue_deployment(key="runtime-log-failure-deploy")

@@ -67,7 +67,13 @@ def collect_runtime_worker_snapshot(
     close_old_connections()
     try:
         rows = list(
-            RuntimeOperation.objects.values("status", "operation_type")
+            RuntimeOperation.objects.filter(
+                status__in=(
+                    RuntimeOperation.Status.QUEUED,
+                    RuntimeOperation.Status.RUNNING,
+                )
+            )
+            .values("status", "operation_type")
             .annotate(
                 total=Count("id"),
                 oldest=Min("requested_at"),
@@ -94,8 +100,6 @@ def collect_runtime_worker_snapshot(
     queue_depths = {
         RuntimeOperation.Status.QUEUED: 0,
         RuntimeOperation.Status.RUNNING: 0,
-        RuntimeOperation.Status.SUCCEEDED: 0,
-        RuntimeOperation.Status.FAILED: 0,
     }
     oldest_ages = {
         RuntimeOperation.Status.QUEUED: 0.0,
@@ -246,6 +250,12 @@ class RuntimeWorkerMonitor:
             daemon=True,
         )
         self._thread.start()
+
+    @property
+    def bound_port(self) -> int:
+        if self._server is None:
+            raise RuntimeError("runtime worker monitor is not started")
+        return int(self._server.server_address[1])
 
     def stop(self) -> None:
         if self._server is None:

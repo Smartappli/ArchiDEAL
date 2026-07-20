@@ -263,6 +263,17 @@ def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) ->
             "APISIX_ROUTE_ALLOWED_UPSTREAM_SUFFIXES must contain only strict DNS "
             "suffixes, never IP addresses or localhost."
         )
+    runtime_sentinel = (
+        f"dealrt-sentinel.{RUNTIME_APPS_NAMESPACE}.svc.cluster.local"
+    )
+    if any(_is_runtime_upstream_host(host) for host in hosts) or any(
+        runtime_sentinel == suffix or runtime_sentinel.endswith(f".{suffix}")
+        for suffix in suffixes
+    ):
+        fail(
+            "APISIX upstream allowlists must not include the runtime-apps namespace "
+            "while runtime exposure is unsupported."
+        )
 
     parsed_ports: list[int] = []
     for raw_port in ports:
@@ -308,6 +319,11 @@ def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) ->
                 "and port allowlists."
             )
         pair = (host, port)
+        if _is_runtime_upstream_host(host):
+            fail(
+                "APISIX exact upstreams must not target runtime-app Services while "
+                "runtime exposure is unsupported."
+            )
         if pair in exact_pairs:
             fail("APISIX_ROUTE_ALLOWED_UPSTREAMS must not contain duplicates.")
         exact_pairs.add(pair)
@@ -328,6 +344,18 @@ def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) ->
         fail(f"APISIX bootstrap routes are not valid JSON: {exc}")
     if not isinstance(bootstrap_routes, list):
         fail("APISIX bootstrap routes must be a JSON list.")
+    bootstrap_route_ids = [
+        route.get("id") if isinstance(route, dict) else None
+        for route in bootstrap_routes
+    ]
+    if (
+        len(bootstrap_route_ids) != len(EXPECTED_APISIX_BOOTSTRAP_UPSTREAMS)
+        or set(bootstrap_route_ids) != set(EXPECTED_APISIX_BOOTSTRAP_UPSTREAMS)
+    ):
+        fail(
+            "APISIX bootstrap must contain exactly the reviewed core routes; "
+            "runtime routes are forbidden."
+        )
 
     bootstrap_pairs: set[tuple[str, int]] = set()
     oidc_upstreams = {
@@ -353,6 +381,11 @@ def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) ->
         if not separator or not raw_port.isdigit():
             fail("APISIX bootstrap upstream nodes must use DNS host:port syntax.")
         pair = (host, int(raw_port))
+        if pair != EXPECTED_APISIX_BOOTSTRAP_UPSTREAMS[route_id]:
+            fail(
+                "APISIX bootstrap routes must target only their reviewed core "
+                "upstreams; runtime upstreams are forbidden."
+            )
         if route_id != "archideal-interface":
             bootstrap_pairs.add(pair)
 
@@ -699,6 +732,127 @@ def validate_yaml_tree(root: Path) -> list[dict]:
             document for document in documents if isinstance(document, dict)
         )
     return rendered_documents
+
+
+def validate_runtime_apps_fail_closed(
+    runtime_documents: list[dict],
+    all_documents: list[dict],
+) -> None:
+    """Reject every static ingress path into the managed-application namespace."""
+
+    for document in runtime_documents:
+        kind = document.get("kind")
+        name = document.get("metadata", {}).get("name", "<unnamed>")
+        if kind in RUNTIME_EXPOSURE_KINDS:
+            fail(
+                f"Runtime-apps must not contain {kind} resources while exposure "
+                f"is unsupported: {name}."
+            )
+        if kind != "Service":
+            continue
+        spec = document.get("spec")
+        if not isinstance(spec, dict) or spec.get("type") != "ClusterIP":
+            fail(
+                "Runtime-app Services must declare type ClusterIP; NodePort, "
+                f"LoadBalancer and ExternalName are forbidden: {name}."
+            )
+        externally_routable_fields = {
+            "allocateLoadBalancerNodePorts",
+            "externalIPs",
+            "externalName",
+            "externalTrafficPolicy",
+            "healthCheckNodePort",
+            "loadBalancerClass",
+            "loadBalancerIP",
+            "loadBalancerSourceRanges",
+        }
+        ports = spec.get("ports", [])
+        if (
+            externally_routable_fields & set(spec)
+            or not isinstance(ports, list)
+            or any(
+                not isinstance(port, dict) or "nodePort" in port for port in ports
+            )
+        ):
+            fail(
+                "Runtime-app ClusterIP Services must not declare any external or "
+                f"node port: {name}."
+            )
+
+    tree_policies = [
+        document
+        for document in runtime_documents
+        if document.get("kind") == "NetworkPolicy"
+    ]
+    cluster_runtime_policies = [
+        document
+        for document in all_documents
+        if document.get("kind") == "NetworkPolicy"
+        and document.get("metadata", {}).get("namespace")
+        == RUNTIME_APPS_NAMESPACE
+    ]
+    for policies in (tree_policies, cluster_runtime_policies):
+        names = [policy.get("metadata", {}).get("name") for policy in policies]
+        if (
+            len(policies) != len(RUNTIME_APPS_NETWORK_POLICIES)
+            or set(names) != RUNTIME_APPS_NETWORK_POLICIES
+        ):
+            fail(
+                "Runtime-apps NetworkPolicies must be exactly the default-deny "
+                "and DNS-only baseline; additional policies are forbidden."
+            )
+
+    policies_by_name = {
+        policy["metadata"]["name"]: policy for policy in tree_policies
+    }
+    expected_default_deny = {
+        "podSelector": {},
+        "policyTypes": ["Ingress", "Egress"],
+    }
+    expected_dns_only = {
+        "podSelector": {},
+        "policyTypes": ["Egress"],
+        "egress": [
+            {
+                "to": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {
+                                "kubernetes.io/metadata.name": "kube-system"
+                            }
+                        },
+                        "podSelector": {
+                            "matchExpressions": [
+                                {
+                                    "key": "k8s-app",
+                                    "operator": "In",
+                                    "values": ["kube-dns", "coredns"],
+                                }
+                            ]
+                        },
+                    }
+                ],
+                "ports": [
+                    {"protocol": "UDP", "port": 53},
+                    {"protocol": "TCP", "port": 53},
+                ],
+            }
+        ],
+    }
+    default_deny = policies_by_name["runtime-apps-default-deny"]
+    dns_only = policies_by_name["runtime-apps-allow-dns-egress"]
+    if (
+        default_deny.get("metadata", {}).get("namespace")
+        != RUNTIME_APPS_NAMESPACE
+        or default_deny.get("spec") != expected_default_deny
+        or dns_only.get("metadata", {}).get("namespace")
+        != RUNTIME_APPS_NAMESPACE
+        or dns_only.get("spec") != expected_dns_only
+    ):
+        fail(
+            "Runtime-apps must keep an exact deny-all ingress/egress policy and "
+            "the reviewed DNS-only egress exception."
+        )
 
 
 def validate_runtime_contracts(documents: list[dict]) -> None:
@@ -2726,6 +2880,8 @@ def main() -> int:
             )
 
     documents = validate_yaml_tree(output)
+    runtime_documents = validate_yaml_tree(output / "runtime-apps")
+    validate_runtime_apps_fail_closed(runtime_documents, documents)
     validate_runtime_contracts(documents)
     print(f"Rendered and validated Kubernetes baseline in {output}")
     return 0

@@ -54,6 +54,11 @@ class Command(BaseCommand):
         metrics_port = options["metrics_port"]
         if not 1 <= metrics_port <= 65535:
             raise ValueError("--metrics-port must be between 1 and 65535.")
+        heartbeat_timeout = options["heartbeat_timeout_seconds"]
+        if heartbeat_timeout <= poll_seconds:
+            raise ValueError(
+                "--heartbeat-timeout-seconds must be greater than --poll-seconds."
+            )
         worker_id = options["worker_id"] or (
             f"{socket.gethostname()}-{uuid.uuid4().hex[:12]}"
         )
@@ -63,7 +68,7 @@ class Command(BaseCommand):
             return
 
         health = RuntimeWorkerHealth(
-            heartbeat_timeout_seconds=options["heartbeat_timeout_seconds"]
+            heartbeat_timeout_seconds=heartbeat_timeout
         )
         monitor = RuntimeWorkerMonitor(
             bind=metrics_bind,

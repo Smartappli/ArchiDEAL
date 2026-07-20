@@ -139,10 +139,27 @@ class RuntimeOperationProcessor:
             isinstance(operation.result, dict) and operation.result.get("dispatched")
         )
         if already_dispatched:
-            snapshot = self.controller.status(
-                deployment.controller_id,
-                request_id=str(operation.id),
-            )
+            try:
+                snapshot = self.controller.status(
+                    deployment.controller_id,
+                    request_id=str(operation.id),
+                )
+            except RuntimeControllerError as exc:
+                # A completed undeploy deliberately removes its state ConfigMap so
+                # namespace quota is not consumed forever. If the terminal status
+                # response was lost, retry the idempotent DELETE with the immutable
+                # desired payload instead of turning the deployment into failed.
+                if (
+                    operation.operation_type
+                    != RuntimeOperation.OperationType.UNDEPLOY
+                    or exc.status_code != 404
+                ):
+                    raise
+                snapshot = self.controller.undeploy(
+                    deployment.controller_id or str(deployment.id),
+                    _controller_payload(deployment, operation),
+                    request_id=str(operation.id),
+                )
         else:
             payload = _controller_payload(deployment, operation)
             operation_type = operation.operation_type

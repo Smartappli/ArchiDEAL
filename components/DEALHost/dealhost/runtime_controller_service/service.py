@@ -115,6 +115,11 @@ class RuntimeReconciler:
                     "The runtime generation was already used for another desired state."
                 )
 
+        # Releases created by older controller versions retained a terminal state
+        # ConfigMap forever. Reclaim those bounded-quota objects before admitting a
+        # new deployment; active and transitional state objects are never touched.
+        await self._cleanup_legacy_tombstones()
+
         await self._preflight_deploy(desired)
 
         await self.kubernetes.apply(
@@ -199,39 +204,31 @@ class RuntimeReconciler:
         if current is None:
             if desired is None:
                 return RuntimeResult(deployment_id, "deleted", "", 0, ())
-            await self._assert_owned_resources(desired)
-            await self.kubernetes.apply(
-                state_config_map(
-                    desired,
-                    self.settings,
-                    phase="deleted",
-                    request_id=request_id,
-                )
-            )
-            return self._deleted_result(desired)
-
-        current_desired = self._desired_from_state(current)
-        if desired is not None:
-            if desired.deployment_id != deployment_id:
-                raise ContractError(
-                    "DELETE payload identifier does not match its path."
-                )
-            if desired.generation < current_desired.generation:
-                raise RuntimeConflict("The requested runtime generation is stale.")
-            if desired.release_digest != current_desired.release_digest:
-                raise RuntimeConflict(
-                    "DELETE cannot replace the immutable runtime release."
-                )
-            current_desired = self._deletion_desired(
-                current_desired,
-                generation=desired.generation,
-            )
+            current_desired = desired
         else:
-            current_desired = self._deletion_desired(
-                current_desired,
-                generation=current_desired.generation,
-            )
-        if self._phase(current) == "deleted":
+            current_desired = self._desired_from_state(current)
+            if desired is not None:
+                if desired.deployment_id != deployment_id:
+                    raise ContractError(
+                        "DELETE payload identifier does not match its path."
+                    )
+                if desired.generation < current_desired.generation:
+                    raise RuntimeConflict("The requested runtime generation is stale.")
+                if desired.release_digest != current_desired.release_digest:
+                    raise RuntimeConflict(
+                        "DELETE cannot replace the immutable runtime release."
+                    )
+                current_desired = self._deletion_desired(
+                    current_desired,
+                    generation=desired.generation,
+                )
+            else:
+                current_desired = self._deletion_desired(
+                    current_desired,
+                    generation=current_desired.generation,
+                )
+        if current is not None and self._phase(current) == "deleted":
+            await self.kubernetes.delete("ConfigMap", state_name(deployment_id))
             return self._deleted_result(current_desired)
 
         await self._assert_owned_resources(current_desired)
@@ -262,6 +259,7 @@ class RuntimeReconciler:
         desired = self._desired_from_state(state)
         phase = self._phase(state)
         if phase == "deleted":
+            await self.kubernetes.delete("ConfigMap", state_name(deployment_id))
             return self._deleted_result(desired)
         if phase == "deleting":
             remaining = False
@@ -289,14 +287,7 @@ class RuntimeReconciler:
                         for component in desired.components
                     ),
                 )
-            await self.kubernetes.apply(
-                state_config_map(
-                    desired,
-                    self.settings,
-                    phase="deleted",
-                    request_id=self._last_request_id(state),
-                )
-            )
+            await self.kubernetes.delete("ConfigMap", state_name(deployment_id))
             return self._deleted_result(desired)
 
         pods = await self.kubernetes.list("Pod", label_selector=selector(deployment_id))
@@ -413,6 +404,29 @@ class RuntimeReconciler:
         ):
             raise RuntimeConflict("The runtime state object identity is invalid.")
         return state
+
+    async def _cleanup_legacy_tombstones(self) -> None:
+        resources = await self.kubernetes.list(
+            "ConfigMap",
+            label_selector=f"app.kubernetes.io/managed-by={MANAGED_BY}",
+        )
+        for resource in resources:
+            metadata = resource.get("metadata")
+            labels = metadata.get("labels") if isinstance(metadata, dict) else None
+            data = resource.get("data")
+            deployment_id = (
+                labels.get(DEPLOYMENT_LABEL) if isinstance(labels, dict) else None
+            )
+            name = metadata.get("name") if isinstance(metadata, dict) else None
+            if (
+                isinstance(deployment_id, str)
+                and isinstance(name, str)
+                and name == state_name(deployment_id)
+                and isinstance(data, dict)
+                and data.get("phase") == "deleted"
+                and COMPONENT_LABEL not in labels
+            ):
+                await self.kubernetes.delete("ConfigMap", name)
 
     async def _preflight_deploy(self, desired: DesiredDeployment) -> None:
         await self._validate_secret_catalog(desired)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from urllib.request import urlopen
 from unittest.mock import Mock, patch
 
 from django.test import override_settings
@@ -10,6 +11,7 @@ from rest_framework.test import APITestCase
 from apps.hosting.models import RuntimeOperation
 from apps.hosting.runtime_observability import (
     RuntimeWorkerHealth,
+    RuntimeWorkerMonitor,
     collect_runtime_worker_snapshot,
     render_runtime_worker_metrics,
 )
@@ -94,3 +96,27 @@ class RuntimeWorkerObservabilityTests(RuntimeFixtureMixin, APITestCase):
             processor.run(once=True, heartbeat=heartbeat)
 
         self.assertEqual(heartbeat.call_count, 2)
+
+    def test_monitor_serves_live_ready_and_metrics_endpoints(self) -> None:
+        health = RuntimeWorkerHealth(heartbeat_timeout_seconds=90)
+        snapshot = collect_runtime_worker_snapshot()
+        monitor = RuntimeWorkerMonitor(bind="127.0.0.1", port=0, health=health)
+        with patch(
+            "apps.hosting.runtime_observability.collect_runtime_worker_snapshot",
+            return_value=snapshot,
+        ):
+            monitor.start()
+            try:
+                base_url = f"http://127.0.0.1:{monitor.bound_port}"
+                with urlopen(f"{base_url}/health/live", timeout=2) as response:
+                    self.assertEqual(response.status, 200)
+                with urlopen(f"{base_url}/health/ready", timeout=2) as response:
+                    self.assertEqual(response.status, 200)
+                with urlopen(f"{base_url}/metrics", timeout=2) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertIn(
+                        b"dealhost_runtime_worker_ready 1",
+                        response.read(),
+                    )
+            finally:
+                monitor.stop()

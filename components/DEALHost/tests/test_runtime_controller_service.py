@@ -21,6 +21,7 @@ from dealhost.runtime_controller_service.resources import (
     COMPONENT_LABEL,
     DEPLOYMENT_LABEL,
     component_name,
+    state_config_map,
     state_name,
 )
 from dealhost.runtime_controller_service.service import (
@@ -391,7 +392,9 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             apply_count,
         )
 
-    async def test_undeploy_keeps_stable_id_and_generation_tombstone(self) -> None:
+    async def test_undeploy_keeps_stable_result_without_retaining_a_tombstone(
+        self,
+    ) -> None:
         await self.reconciler.deploy(self.desired(), request_id="request-0007")
         absent = self.desired(generation=2, desired_state="absent")
 
@@ -405,12 +408,42 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.observed_generation, 2)
         self.assertEqual(result.state, "deleted")
         self.assertEqual(result.components[0]["state"], "deleted")
-        state = self.kubernetes.resources[
-            (self.settings.namespace, "ConfigMap", state_name(DEPLOYMENT_ID))
-        ]
-        self.assertEqual(state["data"]["phase"], "deleted")
-        self.assertEqual(
-            json.loads(state["data"]["desired.json"])["desired_state"], "absent"
+        self.assertNotIn(
+            (self.settings.namespace, "ConfigMap", state_name(DEPLOYMENT_ID)),
+            self.kubernetes.resources,
+        )
+
+        replay = await self.reconciler.undeploy(
+            DEPLOYMENT_ID,
+            request_id="request-0008",
+            desired=absent,
+        )
+        self.assertEqual(replay.state, "deleted")
+        self.assertEqual(replay.observed_generation, 2)
+        self.assertNotIn(
+            (self.settings.namespace, "ConfigMap", state_name(DEPLOYMENT_ID)),
+            self.kubernetes.resources,
+        )
+
+    async def test_new_deploy_reclaims_legacy_deleted_state_configmaps(self) -> None:
+        legacy = state_config_map(
+            self.desired(generation=2, desired_state="absent"),
+            self.settings,
+            phase="deleted",
+            request_id="legacy-delete",
+        )
+        legacy_id = "d117a390-b572-48dd-b31b-9ea20b9a4e38"
+        legacy["metadata"]["name"] = state_name(legacy_id)
+        legacy["metadata"]["labels"][DEPLOYMENT_LABEL] = legacy_id
+        self.kubernetes.resources[
+            (self.settings.namespace, "ConfigMap", state_name(legacy_id))
+        ] = legacy
+
+        await self.reconciler.deploy(self.desired(), request_id="request-legacy-gc")
+
+        self.assertNotIn(
+            (self.settings.namespace, "ConfigMap", state_name(legacy_id)),
+            self.kubernetes.resources,
         )
 
     async def test_logs_are_scoped_to_component_and_window(self) -> None:
