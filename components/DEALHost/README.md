@@ -2,7 +2,7 @@
 
 Ce composant contient un socle **Django 6 ASGI** (servi par **Granian**) pour exposer le catalogue applicatif, les métadonnées de versions, les probes de santé et la publication de routes **Apache APISIX** reliés au monorepo **`Smartappli/ArchiDEAL`**.
 
-Le périmètre actuel ne construit, ne planifie et ne déploie aucun runtime applicatif. Il ne gère pas non plus le cycle de vie des domaines, les journaux runtime ou les quotas locataires. Une version publiée est une métadonnée de catalogue immuable, pas la preuve d'un déploiement.
+DEALHost expose désormais un plan de contrôle runtime asynchrone pour déployer et exploiter les versions applicatives revues sur Kubernetes. La publication d'une version fige le catalogue runtime (images par digest et profils vérifiés), mais ne déclenche jamais un déploiement : seule une mutation explicite de l'API runtime crée une opération réconciliée par le worker et le contrôleur isolé. Le build d'images, les domaines personnalisés et les quotas locataires restent hors périmètre.
 
 [![CI Django DEALHost](https://github.com/Smartappli/DEALHost/actions/workflows/ci.yml/badge.svg)](https://github.com/Smartappli/DEALHost/actions/workflows/ci.yml)
 [![SDK Unit Tests](https://github.com/Smartappli/DEALHost/actions/workflows/sdk-unit-tests.yml/badge.svg)](https://github.com/Smartappli/DEALHost/actions/workflows/sdk-unit-tests.yml)
@@ -105,7 +105,13 @@ Upstream modules (containers/services Django)
   (`code=route_revocation_unavailable`). Les autres métadonnées restent modifiables et
   un module sans route publique reste supprimable.
 - `GET/POST /api/hosting/tools/` : catalogue CRUD des outils (chaque outil peut lier plusieurs modules).
-- `GET/POST /api/hosting/applications/` : catalogue CRUD des applications (chaque application peut lier plusieurs modules) ; cette API ne déploie pas de runtime.
+- `GET/POST /api/hosting/applications/` : catalogue CRUD des applications (chaque application peut lier plusieurs modules) ; le CRUD de catalogue ne déploie rien sans appel runtime explicite.
+- `GET /api/hosting/runtime-environments/` : environnements Kubernetes autorisés et capacités disponibles.
+- `GET/POST /api/hosting/deployments/` : état désiré/observé et création asynchrone d'un déploiement runtime.
+- `GET/PATCH/DELETE /api/hosting/deployments/{uuid}/` : lecture, configuration conditionnelle et déploiement inverse avec ETag fort.
+- `POST /api/hosting/deployments/{uuid}/actions/` : `start`, `stop`, `restart` ou `scale` selon les capacités de l'environnement.
+- `GET /api/hosting/deployments/{uuid}/operations/` et `GET /api/hosting/operations/{uuid}/` : historique et suivi des opérations durables.
+- `POST /api/hosting/deployments/{uuid}/log-requests/` : snapshot borné et éphémère des journaux d'un composant.
 - `GET/POST /api/hosting/datasets/` : catalogue des datasets et listes de visibilité. Les lectures authentifiées sont limitées aux entrées actives attribuées directement ou via un groupe ; le staff voit tout et réalise les mutations. Les mises à jour et suppressions exigent la révision courante dans `If-Match`. Ces listes ne contrôlent pas l'accès aux événements GPS ou Sensor de DEALData.
 - `GET /api/hosting/dataset-principals/` (edge monorepo :
   `GET /dealhost/api/hosting/dataset-principals/`) : catalogue staff-only minimal pour
@@ -295,8 +301,55 @@ System.out.println(response);
     `HostedApplication` courante dans `If-Match`
 - `current_version` et `released_at` sont en lecture seule dans les CRUD tools/applications ; seule l'action de publication peut les avancer.
 - Une première publication crée la version et renvoie `201`. Un rejeu avec exactement les mêmes `notes` et `source` renvoie l'objet existant avec `200`, sans modifier les dates ni produire un nouvel événement. Le même numéro avec des métadonnées différentes renvoie `409` (`code=version_conflict`) et ne modifie rien.
-- La création de l'historique, la mise à jour du pointeur de catalogue et l'incrément de `HostedApplication.revision` sont atomiques. Pour les applications, le contrôle `If-Match` est effectué sous le même verrou de ligne : l'absence renvoie `428`, un ETag mal formé `400`, et une révision périmée `412` avec l'ETag courant. Une publication réellement nouvelle avance la révision ; son rejeu exact avec la révision courante ne l'avance pas et ne ramène jamais le pointeur du catalogue vers une ancienne version. Toute réponse de succès porte l'ETag de révision courant. Cette publication reste une opération de métadonnées et ne déclenche aucun déploiement runtime.
+- La création de l'historique, le snapshot runtime protégé par digest, la mise à jour du pointeur de catalogue et l'incrément de `HostedApplication.revision` sont atomiques. Pour les applications, le contrôle `If-Match` est effectué sous le même verrou de ligne : l'absence renvoie `428`, un ETag mal formé `400`, et une révision périmée `412` avec l'ETag courant. Une publication réellement nouvelle avance la révision ; son rejeu exact avec la révision courante ne l'avance pas et ne ramène jamais le pointeur du catalogue vers une ancienne version. Toute réponse de succès porte l'ETag de révision courant. La publication ne déclenche aucun déploiement ; elle rend seulement la version éligible si toutes ses images et tous ses profils sont déployables.
 - Filtre de liste disponible: `?current_version=<semver>`.
+
+### Gestion runtime Kubernetes
+
+Le runtime est désactivé par défaut et échoue explicitement avec `503` tant que
+`DEALHOST_RUNTIME_ENABLED=true` n'est pas configuré. Le serveur web ne reçoit jamais
+d'identifiants Kubernetes. Il valide les profils, écrit une opération durable en base,
+puis un processus séparé la loue et appelle le runtime-controller interne via TLS et
+Bearer :
+
+```bash
+python manage.py process_runtime_operations
+python manage.py process_runtime_operations --once
+```
+
+Chaque mutation exige une `Idempotency-Key` de 8 à 128 caractères sûrs. Les créations
+utilisent l'ETag de la `HostedApplication`; les configurations, actions, demandes de
+logs et suppressions utilisent celui du déploiement. Une réponse `202` signifie
+uniquement « mise en file » : l'état final est donné par la ressource opération.
+
+Une version est déployable seulement si chaque module capturé lors de sa publication :
+
+- cible Kubernetes, est activé et possède un slug compatible avec un composant runtime ;
+- référence une image immuable `repository@sha256:<64 hex>` autorisée par la politique
+  de l'environnement ;
+- possède un profil runtime activé, vérifié et dont le digest correspond exactement à
+  la spécification (port, probe, ressources, clés de configuration et règles réseau).
+
+Les valeurs sensibles ne sont jamais acceptées dans `configuration`. `secret_refs`
+contient seulement des noms logiques canoniques résolus côté contrôleur. Les snapshots
+de logs sont limités par l'environnement, conservés cinq minutes dans le cache puis
+supprimés; leur réponse utilise `Cache-Control: private, no-store`. Les domaines
+personnalisés ne sont pas exposés tant que DNS, certificats et callback OIDC ne disposent
+pas d'un contrat transactionnel commun.
+
+Variables principales :
+
+```bash
+DEALHOST_RUNTIME_ENABLED=true
+DEALHOST_RUNTIME_CONTROLLER_URL=https://runtime-controller.internal
+DEALHOST_RUNTIME_CONTROLLER_TOKEN=<secret>
+DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS=15
+```
+
+En production, le web partage uniquement le drapeau d'activation avec le worker. Le
+token du contrôleur et le bundle CA sont montés dans le worker, tandis que les droits
+Kubernetes restent exclusivement attachés au pod runtime-controller dans le namespace
+applicatif isolé.
 
 ### Gestion complète des tools/apps
 

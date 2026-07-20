@@ -1613,6 +1613,11 @@ spec:
                 secretKeyRef:
                   name: archideal-runtime-secrets-${RELEASE_ID}
                   key: dealhost-oidc-client-secret
+            - name: DEALHOST_RUNTIME_CONTROLLER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-runtime-controller-token
           ports:
             - name: http
               containerPort: 8000
@@ -1670,6 +1675,9 @@ spec:
               readOnly: true
             - name: staticfiles
               mountPath: /app/staticfiles
+            - name: runtime-controller-ca
+              mountPath: /var/run/runtime-controller-ca
+              readOnly: true
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -1681,5 +1689,11 @@ spec:
                 path: postgres-ca.crt
         - name: staticfiles
           emptyDir: {}
+        - name: runtime-controller-ca
+          secret:
+            secretName: dealhost-runtime-controller-tls-${RELEASE_ID}
+            items:
+              - key: ca.crt
+                path: ca.crt
         - name: tmp
           emptyDir: {}

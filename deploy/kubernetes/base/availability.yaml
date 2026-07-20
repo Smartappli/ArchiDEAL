@@ -53,6 +53,32 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
+  name: dealhost-runtime-controller
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-controller
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-controller
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dealhost-runtime-worker
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-worker
+    app.kubernetes.io/part-of: archideal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-worker
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
   name: dealdata-core
   labels:
     app.kubernetes.io/name: dealdata-core

@@ -14,6 +14,8 @@ import yaml
 RELEASE = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,37}[a-z0-9])?$")
 EXPECTED_CONTROLLERS = {
     "dealhost": "Deployment",
+    "dealhost-runtime-controller": "Deployment",
+    "dealhost-runtime-worker": "Deployment",
     "dealdata-core": "Deployment",
     "dealdata-gps": "Deployment",
     "dealdata-sensor": "Deployment",
@@ -24,6 +26,10 @@ EXPECTED_CONTROLLERS = {
     "dealinterface": "Deployment",
     "apisix": "Deployment",
     "oauth2-proxy": "Deployment",
+}
+RUNTIME_MANAGEMENT_CONTROLLERS = {
+    "dealhost-runtime-controller",
+    "dealhost-runtime-worker",
 }
 
 # This is deliberately explicit: a serving controller may reuse an image, but
@@ -43,6 +49,14 @@ EXPECTED_IMAGE_KEYS = {
 EXPECTED_CONTROLLER_IMAGES = {
     "dealhost": {
         "containers": {"dealhost": "IMAGE_DEALHOST"},
+        "initContainers": {},
+    },
+    "dealhost-runtime-controller": {
+        "containers": {"runtime-controller": "IMAGE_DEALHOST"},
+        "initContainers": {},
+    },
+    "dealhost-runtime-worker": {
+        "containers": {"runtime-worker": "IMAGE_DEALHOST"},
         "initContainers": {},
     },
     "dealdata-core": {
@@ -270,6 +284,7 @@ def validate_release_coherence(
     *,
     expected_release: str | None = None,
     image_values: dict | None = None,
+    allow_missing_runtime_management: bool = False,
 ) -> str:
     """Return the unanimous release after checking rollout and serving-pod state."""
     if not isinstance(controllers_payload, dict) or not isinstance(pods_payload, dict):
@@ -289,13 +304,20 @@ def validate_release_coherence(
         if name in controllers:
             raise ValueError(f"duplicate controller snapshot: {name}")
         controllers[name] = controller
-    missing = sorted(set(EXPECTED_CONTROLLERS) - set(controllers))
+    optional_controllers = (
+        RUNTIME_MANAGEMENT_CONTROLLERS if allow_missing_runtime_management else set()
+    )
+    missing = sorted(
+        set(EXPECTED_CONTROLLERS) - optional_controllers - set(controllers)
+    )
     if missing:
         raise ValueError(f"missing production controllers: {', '.join(missing)}")
 
     releases: set[str] = set()
     desired_by_name: dict[str, int] = {}
     for name, expected_kind in EXPECTED_CONTROLLERS.items():
+        if name not in controllers:
+            continue
         controller = controllers[name]
         kind = controller.get("kind")
         if kind != expected_kind:
@@ -372,6 +394,10 @@ def validate_release_coherence(
         if pod_releases != {release}:
             raise ValueError(f"{name} has Ready pods from mixed releases")
     if image_values is not None:
+        if optional_controllers - set(controllers):
+            raise ValueError(
+                "image validation requires the runtime-management controllers"
+            )
         validate_controller_images(
             controllers_payload,
             pods_payload,
@@ -388,6 +414,7 @@ def main() -> int:
     parser.add_argument("--values", type=Path)
     parser.add_argument("--ingress", type=Path)
     parser.add_argument("--expected-host")
+    parser.add_argument("--allow-missing-runtime-management", action="store_true")
     args = parser.parse_args()
     try:
         if (args.ingress is None) != (args.expected_host is None):
@@ -404,6 +431,7 @@ def main() -> int:
             json.loads(args.pods.read_text(encoding="utf-8")),
             expected_release=args.expected_release,
             image_values=image_values,
+            allow_missing_runtime_management=args.allow_missing_runtime_management,
         )
         if args.ingress is not None:
             validate_promoted_ingress(

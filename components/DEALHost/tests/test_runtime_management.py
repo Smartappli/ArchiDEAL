@@ -16,9 +16,14 @@ from apps.hosting.models import (
     RuntimeEnvironment,
     RuntimeOperation,
 )
-from apps.hosting.runtime_controller import RuntimeLogs, RuntimeSnapshot
+from apps.hosting.runtime_controller import (
+    RuntimeControllerError,
+    RuntimeLogs,
+    RuntimeSnapshot,
+)
 from apps.hosting.runtime_release import sha256_json
 from apps.hosting.runtime_worker import RuntimeOperationProcessor
+from apps.hosting.versioning import publish_immutable_version
 from dealhost.settings.env import RuntimeControllerConfig
 
 
@@ -308,6 +313,109 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         )
         self.assertEqual(self.client.get(reverse("deployments-list")).status_code, 403)
 
+    def test_rejects_a_version_without_a_published_runtime_contract(self) -> None:
+        self.module.runtime_profile.delete()
+
+        response = self.queue_deployment(key="runtime-missing-profile")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "release_not_deployable")
+        self.assertFalse(RuntimeDeployment.objects.exists())
+
+    def test_existing_release_remains_deployable_after_catalog_changes(self) -> None:
+        first = self.queue_deployment(key="runtime-release-first")
+        self.assertEqual(first.status_code, 202)
+        original_image = first.data["deployment"]["components"][0]["image_digest"]
+        first_deployment = RuntimeDeployment.objects.get(
+            pk=first.data["deployment"]["id"]
+        )
+        first_deployment.deleted_at = timezone.now()
+        first_deployment.save(update_fields=["deleted_at", "updated_at"])
+
+        self.module.image = f"ghcr.io/smartappli/runtime-api@sha256:{'b' * 64}"
+        self.module.slug = "renamed-api"
+        self.module.save(update_fields=["image", "slug"])
+        self.application.modules.clear()
+        self.application.refresh_from_db()
+
+        second = self.queue_deployment(key="runtime-release-rollback")
+
+        self.assertEqual(second.status_code, 202)
+        component = second.data["deployment"]["components"][0]
+        self.assertEqual(component["slug"], "runtime-api")
+        self.assertEqual(component["image_digest"], original_image)
+
+    def test_version_publication_captures_a_digest_protected_runtime_snapshot(
+        self,
+    ) -> None:
+        publication = publish_immutable_version(
+            self.application,
+            {"version": "2.0.0", "source": "ci", "notes": "runtime snapshot"},
+            expected_revision=self.application.revision,
+        )
+
+        snapshot = publication.version.runtime_snapshot
+        self.assertEqual(snapshot["modules"][0]["slug"], "runtime-api")
+        self.assertEqual(snapshot["modules"][0]["image"], self.module.image)
+        self.assertEqual(
+            publication.version.runtime_snapshot_digest,
+            sha256_json(snapshot),
+        )
+
+    def test_updates_use_the_immutable_release_configuration_contract(self) -> None:
+        created = self.queue_deployment(key="runtime-immutable-config")
+        self.assertEqual(created.status_code, 202)
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+        operation = deployment.operations.get()
+        operation.status = RuntimeOperation.Status.SUCCEEDED
+        operation.finished_at = timezone.now()
+        operation.save()
+        deployment.controller_id = "controller-runtime-immutable"
+        deployment.observed_state = RuntimeDeployment.ObservedState.RUNNING
+        deployment.save()
+
+        profile = self.module.runtime_profile
+        changed_spec = dict(profile.spec)
+        changed_spec["configuration"] = {
+            "plain": ["NEW_SETTING"],
+            "secret": [],
+        }
+        profile.spec = changed_spec
+        profile.spec_digest = sha256_json(changed_spec)
+        profile.save(update_fields=["spec", "spec_digest", "updated_at"])
+
+        response = self.client.patch(
+            reverse("deployments-detail", args=[deployment.id]),
+            {"configuration": {"runtime-api": {"FEATURE_FLAG": "still-valid"}}},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-immutable-update",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["operation"]["type"], "configure")
+
+    def test_failed_deploy_without_controller_identity_can_be_retried(self) -> None:
+        created = self.queue_deployment(key="runtime-first-failed")
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+        operation = deployment.operations.get()
+        operation.status = RuntimeOperation.Status.FAILED
+        operation.finished_at = timezone.now()
+        operation.save()
+        deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
+        deployment.save()
+
+        retried = self.client.post(
+            reverse("deployments-actions", args=[deployment.id]),
+            {"action": "start"},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-retry-deploy",
+        )
+
+        self.assertEqual(retried.status_code, 202)
+        self.assertEqual(retried.data["operation"]["type"], "deploy")
+
 
 @override_settings(RUNTIME_CONTROLLER=DISABLED_CONTROLLER, RUNTIME_ENABLED=False)
 class RuntimeUnavailableApiTests(RuntimeFixtureMixin, APITestCase):
@@ -338,8 +446,8 @@ class FakeRuntimeController:
         state = "stopped" if action_name == "stop" else "running"
         return self.snapshot(state, payload["generation"])
 
-    def undeploy(self, controller_id, *, request_id: str) -> RuntimeSnapshot:
-        return self.snapshot("deleted", 2)
+    def undeploy(self, controller_id, payload, *, request_id: str) -> RuntimeSnapshot:
+        return self.snapshot("deleted", payload["generation"])
 
     def status(self, controller_id, *, request_id: str) -> RuntimeSnapshot:
         return self.snapshot("running", 1)
@@ -381,6 +489,24 @@ class FakeRuntimeController:
                 },
             ),
         )
+
+
+class StaleRuntimeController(FakeRuntimeController):
+    def deploy(self, payload, *, request_id: str) -> RuntimeSnapshot:
+        return self.snapshot("running", payload["generation"] - 1)
+
+
+class FailingLogRuntimeController(FakeRuntimeController):
+    def logs(
+        self,
+        controller_id,
+        *,
+        component: str,
+        tail: int,
+        since_seconds: int,
+        request_id: str,
+    ) -> RuntimeLogs:
+        raise RuntimeControllerError("Log access was rejected.", status_code=403)
 
 
 @override_settings(RUNTIME_CONTROLLER=ENABLED_CONTROLLER, RUNTIME_ENABLED=True)
@@ -433,3 +559,68 @@ class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.data["result"]["content"], "ready\nrequest complete")
         self.assertEqual(detail["Cache-Control"], "private, no-store")
+
+    def test_worker_does_not_complete_on_a_stale_observed_generation(self) -> None:
+        created = self.queue_deployment(key="runtime-stale-generation")
+        processor = RuntimeOperationProcessor(
+            worker_id="stale-worker",
+            controller=StaleRuntimeController(self.module),
+        )
+
+        self.assertTrue(processor.process_next())
+
+        operation = RuntimeOperation.objects.get(pk=created.data["operation"]["id"])
+        self.assertEqual(operation.status, RuntimeOperation.Status.RUNNING)
+        self.assertEqual(operation.result, {"dispatched": True})
+        self.assertEqual(operation.progress["stage"], "waiting_for_generation")
+        self.assertIsNotNone(operation.next_attempt_at)
+
+    def test_log_failure_does_not_mark_a_healthy_deployment_failed(self) -> None:
+        created = self.queue_deployment(key="runtime-log-failure-deploy")
+        processor = RuntimeOperationProcessor(
+            worker_id="log-worker",
+            controller=FailingLogRuntimeController(self.module),
+        )
+        self.assertTrue(processor.process_next())
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+        revision_before_logs = deployment.revision
+
+        response = self.client.post(
+            reverse("deployments-log-requests", args=[deployment.id]),
+            {"component": "runtime-api", "tail_lines": 10, "since_seconds": 60},
+            format="json",
+            HTTP_IF_MATCH=f'"{deployment.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-log-failure",
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(processor.process_next())
+
+        log_operation = RuntimeOperation.objects.get(pk=response.data["id"])
+        deployment.refresh_from_db()
+        self.assertEqual(log_operation.status, RuntimeOperation.Status.FAILED)
+        self.assertEqual(
+            deployment.observed_state, RuntimeDeployment.ObservedState.RUNNING
+        )
+        self.assertEqual(deployment.revision, revision_before_logs)
+
+    def test_worker_rejects_an_operation_for_an_obsolete_target_generation(
+        self,
+    ) -> None:
+        created = self.queue_deployment(key="runtime-obsolete-operation")
+        deployment = RuntimeDeployment.objects.get(pk=created.data["deployment"]["id"])
+        deployment.generation += 1
+        deployment.save(update_fields=["generation", "updated_at"])
+        processor = RuntimeOperationProcessor(
+            worker_id="generation-worker",
+            controller=FakeRuntimeController(self.module),
+        )
+
+        self.assertTrue(processor.process_next())
+
+        operation = RuntimeOperation.objects.get(pk=created.data["operation"]["id"])
+        deployment.refresh_from_db()
+        self.assertEqual(operation.status, RuntimeOperation.Status.FAILED)
+        self.assertEqual(operation.error["code"], "runtime_controller_error")
+        self.assertEqual(
+            deployment.observed_state, RuntimeDeployment.ObservedState.FAILED
+        )

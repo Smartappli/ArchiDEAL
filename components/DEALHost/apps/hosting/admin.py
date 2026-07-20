@@ -108,8 +108,16 @@ class ModuleRuntimeProfileAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at")
 
 
+class ImmutableRuntimeAdminMixin:
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
+
+
 @admin.register(RuntimeRelease)
-class RuntimeReleaseAdmin(admin.ModelAdmin):
+class RuntimeReleaseAdmin(ImmutableRuntimeAdminMixin, admin.ModelAdmin):
     list_display = ("application_version", "manifest_digest", "created_at")
     search_fields = (
         "application_version__application__name",
@@ -129,7 +137,8 @@ class RuntimeComponentInline(admin.TabularInline):
     model = RuntimeComponent
     extra = 0
     readonly_fields = (
-        "module",
+        "module_id",
+        "slug",
         "image_digest",
         "desired_replicas",
         "ready_replicas",
@@ -144,7 +153,7 @@ class RuntimeComponentInline(admin.TabularInline):
 
 
 @admin.register(RuntimeDeployment)
-class RuntimeDeploymentAdmin(admin.ModelAdmin):
+class RuntimeDeploymentAdmin(ImmutableRuntimeAdminMixin, admin.ModelAdmin):
     list_display = (
         "application",
         "environment",
@@ -162,7 +171,7 @@ class RuntimeDeploymentAdmin(admin.ModelAdmin):
 
 
 @admin.register(RuntimeOperation)
-class RuntimeOperationAdmin(admin.ModelAdmin):
+class RuntimeOperationAdmin(ImmutableRuntimeAdminMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "deployment",

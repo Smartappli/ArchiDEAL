@@ -108,11 +108,18 @@ class RuntimeControllerClient:
         )
         return _snapshot(data, fallback_id=controller_id)
 
-    def undeploy(self, controller_id: str, *, request_id: str) -> RuntimeSnapshot:
+    def undeploy(
+        self,
+        controller_id: str,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> RuntimeSnapshot:
         data = self._request(
             "DELETE",
             f"/v1/deployments/{_identifier(controller_id)}",
             request_id=request_id,
+            json=payload,
             expected_statuses={200, 202},
         )
         return _snapshot(data, fallback_id=controller_id)

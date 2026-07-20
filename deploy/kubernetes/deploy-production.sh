@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 namespace="archideal"
+runtime_apps_namespace="archideal-runtime-apps"
 timeout="15m"
 values_file=""
 context=""
@@ -140,6 +141,7 @@ python "$script_dir/verify-release.py" \
   --evidence-dir "$release_evidence_dir"
 release_id="$(read_value RELEASE_ID)"
 runtime_secret_name="archideal-runtime-secrets-$release_id"
+runtime_controller_tls_secret_name="dealhost-runtime-controller-tls-$release_id"
 public_host="$(read_value PUBLIC_HOST)"
 tls_secret_name="$(read_value TLS_SECRET_NAME)"
 ingress_class="$(read_value INGRESS_CLASS)"
@@ -157,6 +159,8 @@ otel_egress_cidr="$(read_value OTEL_EGRESS_CIDR)"
 valkey_host="$(read_value VALKEY_HOST)"
 
 controller_order=(
+  dealhost-runtime-controller
+  dealhost-runtime-worker
   dealhost
   dealdata-core
   dealdata-gps
@@ -434,7 +438,8 @@ if [[ -s "$active_ingress_json" ]]; then
     --selector='app.kubernetes.io/part-of=archideal' -o json >"$pods_json"
   previous_release="$(
     python "$script_dir/validate-release-coherence.py" \
-      --controllers "$controllers_json" --pods "$pods_json"
+      --controllers "$controllers_json" --pods "$pods_json" \
+      --allow-missing-runtime-management
   )"
   ingress_snapshot="$(
     python -c '
@@ -509,6 +514,7 @@ fi
 
 rendered="$work_dir/rendered"
 bundle="$work_dir/archideal-production.yaml"
+runtime_apps_bundle="$work_dir/archideal-runtime-apps.yaml"
 invocation_metadata="$work_dir/invocation.json"
 python "$script_dir/render.py" --values "$values_file" --output "$rendered"
 python "$script_dir/prepare-invocation-jobs.py" \
@@ -529,7 +535,9 @@ private_network_preflight_job="$(read_invocation_value private_network_preflight
 production_smoke_job="$(read_invocation_value production_smoke_job)"
 smoke_device_id="$(read_invocation_value smoke_device_id)"
 kubectl kustomize "$rendered/overlays/production" >"$bundle"
+kubectl kustomize "$rendered/runtime-apps" >"$runtime_apps_bundle"
 kubectl --context "$context" apply --dry-run=client -f "$bundle" >/dev/null
+kubectl --context "$context" apply --dry-run=client -f "$runtime_apps_bundle" >/dev/null
 apply_cluster_file() {
   "${kubectl_base[@]}" apply --server-side --field-manager=archideal-production -f "$1"
 }
@@ -580,19 +588,21 @@ wait_created_once_external_secret() {
 }
 force_and_wait_periodic_external_secret() {
   local name="$1"
+  local target_namespace="${2:-$namespace}"
+  local kubectl_target=(kubectl --context "$context" --namespace "$target_namespace")
   local previous_refresh sync_token state refresh ready deadline
   previous_refresh="$(
-    "${kubectl_ns[@]}" get "externalsecret/$name" \
+    "${kubectl_target[@]}" get "externalsecret/$name" \
       -o jsonpath='{.status.refreshTime}' 2>/dev/null || true
   )"
   sleep 1
   sync_token="$(python -c 'import time; print(time.time_ns())')"
-  "${kubectl_ns[@]}" annotate "externalsecret/$name" \
+  "${kubectl_target[@]}" annotate "externalsecret/$name" \
     "force-sync=$sync_token" --overwrite >/dev/null
   deadline="$((SECONDS + timeout_seconds))"
   while ((SECONDS < deadline)); do
     state="$(
-      "${kubectl_ns[@]}" get "externalsecret/$name" -o json | python -c '
+      "${kubectl_target[@]}" get "externalsecret/$name" -o json | python -c '
 import json, sys
 resource = json.load(sys.stdin)
 status = resource.get("status", {})
@@ -611,27 +621,64 @@ print(f"{refresh}|{ready}")
     sleep 2
   done
   printf 'ExternalSecret did not complete a fresh reconciliation: %s\n' "$name" >&2
-  "${kubectl_ns[@]}" get "externalsecret/$name" -o yaml >&2 || true
+  "${kubectl_target[@]}" get "externalsecret/$name" -o yaml >&2 || true
   return 1
 }
 
 printf 'Phase 1/6: namespace and server-side admission validation\n'
 mutation_started="true"
 apply_cluster_file "$rendered/base/namespace.yaml"
+apply_cluster_file "$rendered/runtime-apps/namespace.yaml"
+"${kubectl_base[@]}" get "namespace/$runtime_apps_namespace" >/dev/null
 annotate_promotion_state in-progress
 "${kubectl_base[@]}" apply --server-side \
   --field-manager=archideal-production --dry-run=server -f "$bundle" >/dev/null
+"${kubectl_base[@]}" apply --server-side \
+  --field-manager=archideal-production --dry-run=server \
+  -f "$runtime_apps_bundle" >/dev/null
 
 printf 'Phase 2/6: configuration, secrets, private DNS and policies\n'
 apply_file "$rendered/base/serviceaccounts.yaml"
+apply_cluster_file "$runtime_apps_bundle"
 apply_file "$rendered/base/configuration.yaml"
 apply_file "$rendered/base/services.yaml"
 apply_file "$rendered/overlays/production/platform-contract.yaml"
 apply_file "$rendered/overlays/production/external-secrets.yaml"
 wait_created_once_external_secret "$runtime_secret_name"
-force_and_wait_periodic_external_secret archideal-registry-credentials
+wait_created_once_external_secret "$runtime_controller_tls_secret_name"
+force_and_wait_periodic_external_secret archideal-registry-credentials "$namespace"
+force_and_wait_periodic_external_secret \
+  archideal-registry-credentials "$runtime_apps_namespace"
 "${kubectl_ns[@]}" get "secret/$runtime_secret_name" >/dev/null
+"${kubectl_ns[@]}" get "secret/$runtime_controller_tls_secret_name" >/dev/null
 "${kubectl_ns[@]}" get secret/archideal-registry-credentials >/dev/null
+"${kubectl_base[@]}" --namespace "$runtime_apps_namespace" \
+  get secret/archideal-registry-credentials >/dev/null
+"${kubectl_ns[@]}" get "secret/$runtime_secret_name" -o json | python -c '
+import base64, json, sys
+secret = json.load(sys.stdin)
+encoded = secret.get("data", {}).get("dealhost-runtime-controller-token", "")
+try:
+    token = base64.b64decode(encoded, validate=True)
+except Exception as exc:
+    raise SystemExit("Runtime-controller token is not valid base64") from exc
+if len(token) < 32 or any(byte <= 0x20 or byte >= 0x7f for byte in token):
+    raise SystemExit("Runtime-controller token must be at least 32 visible ASCII bytes")
+'
+"${kubectl_ns[@]}" get "secret/$runtime_controller_tls_secret_name" -o json | python -c '
+import base64, json, sys
+data = json.load(sys.stdin).get("data", {})
+required = {"tls.crt", "tls.key", "ca.crt"}
+if set(data) != required:
+    raise SystemExit("Runtime-controller TLS Secret must contain exactly tls.crt, tls.key and ca.crt")
+decoded = {key: base64.b64decode(data[key], validate=True) for key in required}
+if not decoded["tls.crt"].startswith(b"-----BEGIN CERTIFICATE-----"):
+    raise SystemExit("Runtime-controller certificate is not PEM")
+if not decoded["ca.crt"].startswith(b"-----BEGIN CERTIFICATE-----"):
+    raise SystemExit("Runtime-controller CA is not PEM")
+if not decoded["tls.key"].startswith(b"-----BEGIN PRIVATE KEY-----"):
+    raise SystemExit("Runtime-controller key must be unencrypted PKCS#8 PEM")
+'
 "${kubectl_ns[@]}" get "secret/$runtime_secret_name" \
   -o go-template='{{ index .data "valkey-url" }}' | \
   python "$script_dir/validate-valkey-url.py" --expected-host "$valkey_host"
@@ -651,6 +698,10 @@ runtime_secret_version="$(
   "${kubectl_ns[@]}" get "secret/$runtime_secret_name" \
     -o jsonpath='{.metadata.resourceVersion}'
 )"
+runtime_controller_tls_secret_version="$(
+  "${kubectl_ns[@]}" get "secret/$runtime_controller_tls_secret_name" \
+    -o jsonpath='{.metadata.resourceVersion}'
+)"
 runtime_config_versions="$(
   "${kubectl_ns[@]}" get \
     configmap/archideal-runtime \
@@ -661,13 +712,15 @@ runtime_config_versions="$(
 runtime_revision="$(
   python -c \
     'import hashlib, sys; print(hashlib.sha256("\n".join(sys.argv[1:]).encode()).hexdigest())' \
-    "$release_id" "$runtime_secret_version" "$runtime_config_versions"
+    "$release_id" "$runtime_secret_version" \
+    "$runtime_controller_tls_secret_version" "$runtime_config_versions"
 )"
 controller_dir="$work_dir/controllers"
 python "$script_dir/prepare-rollouts.py" \
   --revision "$runtime_revision" \
   --output "$controller_dir" \
   "$rendered/base/workloads.yaml" \
+  "$rendered/base/runtime-management.yaml" \
   "$rendered/base/consumers.yaml" >/dev/null
 "${kubectl_ns[@]}" apply --server-side \
   --field-manager=archideal-production --dry-run=server -f "$controller_dir" >/dev/null

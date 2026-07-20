@@ -51,7 +51,7 @@ class RuntimeOperationProcessor:
                 "deployment__release__application_version",
                 "deployment__environment",
             )
-            .prefetch_related("deployment__components__module")
+            .prefetch_related("deployment__components")
             .get(pk=operation_id)
         )
         try:
@@ -59,7 +59,9 @@ class RuntimeOperationProcessor:
         except (RuntimeControllerUnavailable, RuntimeControllerError) as exc:
             self._record_controller_failure(operation, lease_token, exc)
         except Exception:
-            logger.exception("Unexpected runtime worker failure for operation %s", operation.id)
+            logger.exception(
+                "Unexpected runtime worker failure for operation %s", operation.id
+            )
             self._record_unexpected_failure(operation, lease_token)
         return True
 
@@ -159,6 +161,7 @@ class RuntimeOperationProcessor:
             elif operation_type == RuntimeOperation.OperationType.UNDEPLOY:
                 snapshot = self.controller.undeploy(
                     deployment.controller_id or str(deployment.id),
+                    payload,
                     request_id=str(operation.id),
                 )
             else:
@@ -183,20 +186,32 @@ class RuntimeOperationProcessor:
                 .select_related("release__application_version")
                 .get(pk=locked_operation.deployment_id)
             )
-            _apply_snapshot(
-                deployment,
-                snapshot,
-                target_generation=locked_operation.target_generation,
-            )
-            deployment.revision += 1
-            deployment.last_reconciled_at = now
-            deployment.save()
-            self._apply_components(deployment, snapshot)
-
             waiting_for_generation = (
                 snapshot.observed_generation < locked_operation.target_generation
+                and snapshot.state
+                not in {
+                    RuntimeDeployment.ObservedState.FAILED,
+                    RuntimeDeployment.ObservedState.UNKNOWN,
+                }
             )
             if snapshot.state in TRANSITIONAL_STATES or waiting_for_generation:
+                _validate_snapshot_generation(
+                    deployment,
+                    snapshot,
+                    target_generation=locked_operation.target_generation,
+                )
+                self._apply_components(deployment, snapshot, mutate=False)
+                deployment.controller_id = snapshot.controller_id
+                deployment.revision += 1
+                deployment.last_reconciled_at = now
+                deployment.save(
+                    update_fields=[
+                        "controller_id",
+                        "revision",
+                        "last_reconciled_at",
+                        "updated_at",
+                    ]
+                )
                 if now - locked_operation.requested_at >= MAX_RECONCILIATION_AGE:
                     detail = "Runtime reconciliation timed out."
                     deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
@@ -234,6 +249,16 @@ class RuntimeOperationProcessor:
                 locked_operation.lease_expires_at = None
                 locked_operation.save()
                 return
+
+            _apply_snapshot(
+                deployment,
+                snapshot,
+                target_generation=locked_operation.target_generation,
+            )
+            deployment.revision += 1
+            deployment.last_reconciled_at = now
+            deployment.save()
+            self._apply_components(deployment, snapshot)
 
             terminal_error = _terminal_state_error(operation, deployment, snapshot)
             if (
@@ -277,13 +302,26 @@ class RuntimeOperationProcessor:
         self,
         deployment: RuntimeDeployment,
         snapshot: RuntimeSnapshot,
+        *,
+        mutate: bool = True,
     ) -> None:
         components = {
-            component.module.slug: component
-            for component in deployment.components.select_related("module")
+            component.slug: component for component in deployment.components.all()
         }
         expected = set(components)
         received = {component["slug"] for component in snapshot.components}
+        if snapshot.state == RuntimeDeployment.ObservedState.DELETED and not received:
+            if not mutate:
+                return
+            for component in components.values():
+                component.desired_replicas = 0
+                component.ready_replicas = 0
+                component.available_replicas = 0
+                component.state = RuntimeDeployment.ObservedState.DELETED
+                component.health = "stopped"
+                component.last_error = ""
+                component.save()
+            return
         if received != expected:
             raise RuntimeControllerError(
                 "Runtime controller component set does not match the immutable release."
@@ -294,6 +332,8 @@ class RuntimeOperationProcessor:
                 raise RuntimeControllerError(
                     "Runtime controller reported an image outside the immutable release."
                 )
+            if not mutate:
+                continue
             for field in (
                 "desired_replicas",
                 "ready_replicas",
@@ -461,10 +501,11 @@ def _apply_snapshot(
     *,
     target_generation: int,
 ) -> None:
-    if snapshot.observed_generation > target_generation:
-        raise RuntimeControllerError(
-            "Runtime controller reported a generation newer than the queued operation."
-        )
+    _validate_snapshot_generation(
+        deployment,
+        snapshot,
+        target_generation=target_generation,
+    )
     deployment.controller_id = snapshot.controller_id
     deployment.observed_state = snapshot.state
     deployment.observed_generation = snapshot.observed_generation
@@ -473,6 +514,22 @@ def _apply_snapshot(
     )
     if snapshot.state == RuntimeDeployment.ObservedState.DELETED:
         deployment.deleted_at = timezone.now()
+
+
+def _validate_snapshot_generation(
+    deployment: RuntimeDeployment,
+    snapshot: RuntimeSnapshot,
+    *,
+    target_generation: int,
+) -> None:
+    if snapshot.observed_generation > target_generation:
+        raise RuntimeControllerError(
+            "Runtime controller reported a generation newer than the queued operation."
+        )
+    if snapshot.observed_generation < deployment.observed_generation:
+        raise RuntimeControllerError(
+            "Runtime controller reported an observed generation older than DEALHost state."
+        )
 
 
 def _terminal_state_error(

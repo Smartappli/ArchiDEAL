@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAdminUser
 from rest_framework.request import Request
@@ -31,6 +32,9 @@ from .serializers import (
     RuntimeEnvironmentSerializer,
     RuntimeLogRequestSerializer,
     RuntimeOperationSerializer,
+    validate_runtime_configuration,
+    validate_runtime_scaling,
+    validate_runtime_secret_references,
 )
 
 
@@ -78,7 +82,7 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             "application",
             "release__application_version",
             "environment",
-        ).prefetch_related("components__module")
+        ).prefetch_related("components")
         application_id = self.request.query_params.get("application_id")
         environment = self.request.query_params.get("environment")
         observed_state = self.request.query_params.get("observed_state")
@@ -161,15 +165,34 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                         code=exc.code,
                         status_code=status.HTTP_409_CONFLICT,
                     )
+                try:
+                    scaling = validate_runtime_scaling(
+                        serializer.validated_data["scaling"],
+                        application=locked_application,
+                        manifest=release.manifest,
+                        environment=environment,
+                    )
+                    configuration = validate_runtime_configuration(
+                        serializer.validated_data["configuration"],
+                        application=locked_application,
+                        manifest=release.manifest,
+                    )
+                    secret_refs = validate_runtime_secret_references(
+                        serializer.validated_data["secret_refs"],
+                        application=locked_application,
+                        manifest=release.manifest,
+                    )
+                except ValidationError as exc:
+                    return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
                 actor, actor_label = _actor(request)
                 deployment = RuntimeDeployment.objects.create(
                     application=locked_application,
                     release=release,
                     environment=environment,
                     observed_state=RuntimeDeployment.ObservedState.PENDING,
-                    configuration=serializer.validated_data["configuration"],
-                    secret_refs=serializer.validated_data["secret_refs"],
-                    scaling=serializer.validated_data["scaling"],
+                    configuration=configuration,
+                    secret_refs=secret_refs,
+                    scaling=scaling,
                     created_by=actor,
                     created_by_label=actor_label,
                 )
@@ -308,6 +331,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             busy = _busy_response(locked)
             if busy is not None:
                 return busy
+            capability_error = _validate_action_capability(locked, action_name)
+            if capability_error is not None:
+                return capability_error
             transition_error = _validate_transition(locked, action_name)
             if transition_error is not None:
                 return transition_error
@@ -330,11 +356,7 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             elif action_name == "scale":
                 component_slug = serializer.validated_data["component"]
                 replicas = serializer.validated_data["replicas"]
-                component = (
-                    locked.components.select_related("module")
-                    .filter(module__slug=component_slug)
-                    .first()
-                )
+                component = locked.components.filter(slug=component_slug).first()
                 if component is None:
                     return _problem(
                         "The requested component is not part of the deployment.",
@@ -343,7 +365,15 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                     )
                 scaling = dict(locked.scaling)
                 scaling[component_slug] = {"mode": "fixed", "replicas": replicas}
-                locked.scaling = scaling
+                try:
+                    locked.scaling = validate_runtime_scaling(
+                        scaling,
+                        application=locked.application,
+                        manifest=locked.release.manifest,
+                        environment=locked.environment,
+                    )
+                except ValidationError as exc:
+                    return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
                 component.desired_replicas = replicas
                 component.save(update_fields=["desired_replicas", "updated_at"])
                 payload = {"component": component_slug, "replicas": replicas}
@@ -398,7 +428,7 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                     status_code=status.HTTP_409_CONFLICT,
                 )
             if not locked.components.filter(
-                module__slug=serializer.validated_data["component"]
+                slug=serializer.validated_data["component"]
             ).exists():
                 return _problem(
                     "The requested log component is not part of the deployment.",
@@ -409,11 +439,23 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             log_limits = (
                 capabilities.get("logs", {}) if isinstance(capabilities, dict) else {}
             )
-            maximum = (
-                log_limits.get("max_lines", 1000)
-                if isinstance(log_limits, dict)
-                else 1000
-            )
+            if not isinstance(log_limits, dict):
+                return _problem(
+                    "Logs are not supported by this environment.",
+                    code="runtime_capability_unavailable",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            maximum = log_limits.get("max_lines")
+            if (
+                not isinstance(maximum, int)
+                or isinstance(maximum, bool)
+                or not 1 <= maximum <= 1000
+            ):
+                return _problem(
+                    "The runtime environment has an invalid log contract.",
+                    code="runtime_environment_invalid",
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
             if serializer.validated_data["tail_lines"] > maximum:
                 return _problem(
                     "The requested log tail exceeds the environment limit.",
@@ -474,13 +516,10 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
 
     @staticmethod
     def _create_components(deployment: RuntimeDeployment) -> None:
-        modules_by_id = {
-            module.id: module for module in deployment.application.modules.all()
-        }
         components = []
         for manifest_component in deployment.release.manifest["modules"]:
-            module = modules_by_id[manifest_component["module_id"]]
-            policy = deployment.scaling[module.slug]
+            component_slug = manifest_component["slug"]
+            policy = deployment.scaling[component_slug]
             desired = (
                 policy["replicas"]
                 if policy["mode"] == "fixed"
@@ -489,7 +528,8 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             components.append(
                 RuntimeComponent(
                     deployment=deployment,
-                    module=module,
+                    module_id=manifest_component["module_id"],
+                    slug=component_slug,
                     image_digest=manifest_component["image"],
                     desired_replicas=desired,
                 )
@@ -498,8 +538,8 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
 
     @staticmethod
     def _sync_component_scaling(deployment: RuntimeDeployment) -> None:
-        for component in deployment.components.select_related("module"):
-            policy = deployment.scaling[component.module.slug]
+        for component in deployment.components.all():
+            policy = deployment.scaling[component.slug]
             component.desired_replicas = (
                 policy["replicas"]
                 if policy["mode"] == "fixed"
@@ -657,6 +697,29 @@ def _validate_transition(
             status_code=status.HTTP_409_CONFLICT,
         )
     return None
+
+
+def _validate_action_capability(
+    deployment: RuntimeDeployment,
+    action_name: str,
+) -> Response | None:
+    capabilities = deployment.environment.capabilities
+    if not isinstance(capabilities, dict):
+        supported = False
+    elif action_name in {"start", "stop"}:
+        supported = capabilities.get("start_stop") is True
+    elif action_name == "restart":
+        supported = capabilities.get("restart") is True
+    else:
+        scaling = capabilities.get("scaling")
+        supported = isinstance(scaling, dict) and isinstance(scaling.get("fixed"), dict)
+    if supported:
+        return None
+    return _problem(
+        f"Action {action_name} is not supported by this environment.",
+        code="runtime_capability_unavailable",
+        status_code=status.HTTP_409_CONFLICT,
+    )
 
 
 def _actor(request: Request):

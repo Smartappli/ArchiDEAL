@@ -48,9 +48,20 @@ def publish_immutable_version(
             and locked_resource.revision != expected_revision
         ):
             raise VersionRevisionConflict(locked_resource)
+        defaults = {"notes": notes, "source": source}
+        if locked_resource._meta.model_name == "hostedapplication":
+            from .runtime_release import sha256_json, snapshot_application_runtime
+
+            runtime_snapshot = snapshot_application_runtime(locked_resource)
+            defaults.update(
+                {
+                    "runtime_snapshot": runtime_snapshot,
+                    "runtime_snapshot_digest": sha256_json(runtime_snapshot),
+                }
+            )
         version_obj, created = locked_resource.versions.get_or_create(
             version=version,
-            defaults={"notes": notes, "source": source},
+            defaults=defaults,
         )
         if not created:
             if version_obj.notes != notes or version_obj.source != source:

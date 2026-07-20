@@ -19,6 +19,7 @@ from .models import (
 IMAGE_DIGEST_PATTERN = re.compile(
     r"^(?P<repository>[a-z0-9][a-z0-9._/-]*[a-z0-9])@sha256:[0-9a-f]{64}$"
 )
+RUNTIME_COMPONENT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 RESOURCE_VALUE_PATTERN = re.compile(r"^[0-9]+(?:m|Ki|Mi|Gi)?$")
 
 
@@ -41,104 +42,61 @@ def sha256_json(value: object) -> str:
     return hashlib.sha256(canonical_json(value)).hexdigest()
 
 
-def validate_runtime_profile(profile: ModuleRuntimeProfile) -> dict[str, Any]:
-    if not profile.enabled or profile.verified_at is None:
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} is not enabled and verified."
+def snapshot_application_runtime(application: HostedApplication) -> dict[str, Any]:
+    """Capture the runtime catalog exactly once when a version is published."""
+
+    modules: list[dict[str, Any]] = []
+    for module in (
+        application.modules.select_for_update()
+        .select_related("runtime_profile")
+        .order_by("slug")
+    ):
+        try:
+            profile = module.runtime_profile
+        except ModuleRuntimeProfile.DoesNotExist:
+            profile_snapshot = None
+        else:
+            profile_snapshot = {
+                "schema_version": profile.schema_version,
+                "spec": json.loads(canonical_json(profile.spec)),
+                "spec_digest": profile.spec_digest,
+                "enabled": profile.enabled,
+                "verified_at": (
+                    profile.verified_at.isoformat() if profile.verified_at else None
+                ),
+            }
+        modules.append(
+            {
+                "module_id": module.id,
+                "slug": module.slug,
+                "image": module.image,
+                "enabled": module.enabled,
+                "deployment_target": module.deployment_target,
+                "profile": profile_snapshot,
+            }
         )
-    if profile.schema_version != 1 or not isinstance(profile.spec, dict):
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} uses an unsupported schema."
-        )
-    expected_digest = sha256_json(profile.spec)
-    if profile.spec_digest != expected_digest:
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile digest for {profile.module.slug} does not match its spec."
-        )
-    allowed_fields = {
-        "kind",
-        "container_port",
-        "healthcheck_path",
-        "resources",
-        "configuration",
-        "network_egress",
+    return {
+        "schema_version": 1,
+        "application": {"id": application.id, "slug": application.slug},
+        "modules": modules,
     }
-    if set(profile.spec) - allowed_fields:
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} contains unsupported fields."
-        )
-    if profile.spec.get("kind") != "deployment":
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} is not a stateless deployment."
-        )
-    container_port = profile.spec.get("container_port")
-    if (
-        not isinstance(container_port, int)
-        or isinstance(container_port, bool)
-        or not 1 <= container_port <= 65535
-    ):
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} has an invalid container port."
-        )
-    healthcheck_path = profile.spec.get("healthcheck_path")
-    if (
-        not isinstance(healthcheck_path, str)
-        or not healthcheck_path.startswith("/")
-        or healthcheck_path.startswith("//")
-        or len(healthcheck_path) > 255
-        or any(character.isspace() for character in healthcheck_path)
-    ):
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} has an invalid healthcheck path."
-        )
-    resources = profile.spec.get("resources")
-    if not isinstance(resources, dict) or set(resources) != {"requests", "limits"}:
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} must declare requests and limits."
-        )
-    for group in ("requests", "limits"):
-        resource_values = resources[group]
-        if not isinstance(resource_values, dict) or set(resource_values) != {
-            "cpu",
-            "memory",
-        }:
-            raise RuntimeReleaseNotDeployable(
-                f"Runtime profile for {profile.module.slug} has incomplete resources."
-            )
-        if any(
-            not isinstance(value, str) or not RESOURCE_VALUE_PATTERN.fullmatch(value)
-            for value in resource_values.values()
-        ):
-            raise RuntimeReleaseNotDeployable(
-                f"Runtime profile for {profile.module.slug} has invalid resource values."
-            )
-    configuration = profile.spec.get("configuration", {})
-    if not isinstance(configuration, dict) or set(configuration) - {"plain", "secret"}:
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} has an invalid configuration schema."
-        )
-    for group in ("plain", "secret"):
-        keys = configuration.get(group, [])
-        if not isinstance(keys, list) or any(not isinstance(key, str) for key in keys):
-            raise RuntimeReleaseNotDeployable(
-                f"Runtime profile for {profile.module.slug} has invalid configuration keys."
-            )
-    network_egress = profile.spec.get("network_egress", [])
-    if not isinstance(network_egress, list) or any(
-        not isinstance(item, dict)
-        or set(item) != {"host", "port"}
-        or not isinstance(item["host"], str)
-        or not item["host"]
-        or any(character.isspace() for character in item["host"])
-        or not isinstance(item["port"], int)
-        or isinstance(item["port"], bool)
-        or not 1 <= item["port"] <= 65535
-        for item in network_egress
-    ):
-        raise RuntimeReleaseNotDeployable(
-            f"Runtime profile for {profile.module.slug} has invalid egress rules."
-        )
-    return profile.spec
+
+
+def validate_runtime_profile(profile: ModuleRuntimeProfile) -> dict[str, Any]:
+    """Validate an editable profile before it is captured in a release snapshot."""
+
+    return _validate_profile_snapshot(
+        profile.module.slug,
+        {
+            "schema_version": profile.schema_version,
+            "spec": profile.spec,
+            "spec_digest": profile.spec_digest,
+            "enabled": profile.enabled,
+            "verified_at": profile.verified_at.isoformat()
+            if profile.verified_at
+            else None,
+        },
+    )
 
 
 def runtime_release_for(
@@ -157,59 +115,12 @@ def runtime_release_for(
         application_version=application_version
     ).first()
     if existing is not None:
-        _validate_release_still_matches_application(existing, application)
+        _validate_release_integrity(existing, application)
         _validate_environment_policy(existing.manifest, environment)
         return existing
 
-    modules = list(
-        application.modules.select_related("runtime_profile").order_by("slug")
-    )
-    if not modules:
-        raise RuntimeReleaseNotDeployable("The application has no deployable modules.")
-    manifest_modules: list[dict[str, Any]] = []
-    for module in modules:
-        if not module.enabled:
-            raise RuntimeReleaseNotDeployable(f"Module {module.slug} is disabled.")
-        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", module.slug):
-            raise RuntimeReleaseNotDeployable(
-                f"Module {module.slug} is not a valid runtime component name."
-            )
-        if module.deployment_target != module.DeploymentTarget.KUBERNETES:
-            raise RuntimeReleaseNotDeployable(
-                f"Module {module.slug} is not declared for Kubernetes."
-            )
-        image_match = IMAGE_DIGEST_PATTERN.fullmatch(module.image)
-        if image_match is None:
-            raise RuntimeReleaseNotDeployable(
-                f"Module {module.slug} must use an immutable sha256 image digest."
-            )
-        try:
-            profile = module.runtime_profile
-        except ModuleRuntimeProfile.DoesNotExist as exc:
-            raise RuntimeReleaseNotDeployable(
-                f"Module {module.slug} has no reviewed runtime profile."
-            ) from exc
-        spec = validate_runtime_profile(profile)
-        manifest_modules.append(
-            {
-                "module_id": module.id,
-                "slug": module.slug,
-                "image": module.image,
-                "profile_schema_version": profile.schema_version,
-                "profile_digest": profile.spec_digest,
-                "spec": spec,
-            }
-        )
-    manifest = {
-        "schema_version": 1,
-        "application": {
-            "id": application.id,
-            "slug": application.slug,
-        },
-        "version": application_version.version,
-        "version_source": application_version.source,
-        "modules": manifest_modules,
-    }
+    snapshot = _version_runtime_snapshot(application_version, application)
+    manifest = _manifest_from_snapshot(application_version, application, snapshot)
     _validate_environment_policy(manifest, environment)
     digest = sha256_json(manifest)
     with transaction.atomic():
@@ -221,12 +132,247 @@ def runtime_release_for(
             release.manifest_digest != digest or release.manifest != manifest
         ):
             raise RuntimeReleaseNotDeployable(
-                "The immutable runtime release conflicts with the current module catalog."
+                "The immutable runtime release conflicts with its published snapshot."
             )
+        _validate_release_integrity(release, application)
         return release
 
 
-def _validate_release_still_matches_application(
+def _version_runtime_snapshot(
+    application_version: ApplicationVersion,
+    application: HostedApplication,
+) -> dict[str, Any]:
+    snapshot = application_version.runtime_snapshot
+    digest = application_version.runtime_snapshot_digest
+    if not snapshot and not digest:
+        # Versions created before runtime snapshots existed are materialized once. The
+        # row lock makes the first deploy the immutable publication boundary.
+        with transaction.atomic():
+            locked = ApplicationVersion.objects.select_for_update().get(
+                pk=application_version.pk
+            )
+            if not locked.runtime_snapshot and not locked.runtime_snapshot_digest:
+                locked.runtime_snapshot = snapshot_application_runtime(application)
+                locked.runtime_snapshot_digest = sha256_json(locked.runtime_snapshot)
+                locked.save(
+                    update_fields=["runtime_snapshot", "runtime_snapshot_digest"]
+                )
+            snapshot = locked.runtime_snapshot
+            digest = locked.runtime_snapshot_digest
+    if (
+        not isinstance(snapshot, dict)
+        or not isinstance(digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        or sha256_json(snapshot) != digest
+    ):
+        raise RuntimeReleaseNotDeployable(
+            "The published runtime snapshot failed its integrity check."
+        )
+    return snapshot
+
+
+def _manifest_from_snapshot(
+    application_version: ApplicationVersion,
+    application: HostedApplication,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    application_snapshot = snapshot.get("application")
+    raw_modules = snapshot.get("modules")
+    if (
+        snapshot.get("schema_version") != 1
+        or not isinstance(application_snapshot, dict)
+        or application_snapshot.get("id") != application.id
+        or not isinstance(application_snapshot.get("slug"), str)
+        or not isinstance(raw_modules, list)
+        or not raw_modules
+        or len(raw_modules) > 100
+    ):
+        raise RuntimeReleaseNotDeployable(
+            "The published runtime snapshot has an invalid module catalog."
+        )
+
+    manifest_modules: list[dict[str, Any]] = []
+    module_ids: set[int] = set()
+    module_slugs: set[str] = set()
+    for raw_module in raw_modules:
+        if not isinstance(raw_module, dict):
+            raise RuntimeReleaseNotDeployable(
+                "The published runtime snapshot has an invalid module catalog."
+            )
+        module_id = raw_module.get("module_id")
+        module_slug = raw_module.get("slug")
+        image = raw_module.get("image")
+        if (
+            not isinstance(module_id, int)
+            or isinstance(module_id, bool)
+            or module_id < 1
+            or module_id in module_ids
+            or not isinstance(module_slug, str)
+            or not RUNTIME_COMPONENT_PATTERN.fullmatch(module_slug)
+            or module_slug in module_slugs
+        ):
+            raise RuntimeReleaseNotDeployable(
+                "The published runtime snapshot has invalid component identifiers."
+            )
+        module_ids.add(module_id)
+        module_slugs.add(module_slug)
+        if raw_module.get("enabled") is not True:
+            raise RuntimeReleaseNotDeployable(f"Module {module_slug} is disabled.")
+        if raw_module.get("deployment_target") != "kubernetes":
+            raise RuntimeReleaseNotDeployable(
+                f"Module {module_slug} is not declared for Kubernetes."
+            )
+        if not isinstance(image, str) or not IMAGE_DIGEST_PATTERN.fullmatch(image):
+            raise RuntimeReleaseNotDeployable(
+                f"Module {module_slug} must use an immutable sha256 image digest."
+            )
+        profile_snapshot = raw_module.get("profile")
+        if not isinstance(profile_snapshot, dict):
+            raise RuntimeReleaseNotDeployable(
+                f"Module {module_slug} has no reviewed runtime profile."
+            )
+        spec = _validate_profile_snapshot(module_slug, profile_snapshot)
+        manifest_modules.append(
+            {
+                "module_id": module_id,
+                "slug": module_slug,
+                "image": image,
+                "profile_schema_version": profile_snapshot["schema_version"],
+                "profile_digest": profile_snapshot["spec_digest"],
+                "spec": spec,
+            }
+        )
+
+    return {
+        "schema_version": 1,
+        "application": application_snapshot,
+        "version": application_version.version,
+        "version_source": application_version.source,
+        "modules": manifest_modules,
+    }
+
+
+def _validate_profile_snapshot(
+    module_slug: str,
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    if profile.get("enabled") is not True or not isinstance(
+        profile.get("verified_at"), str
+    ):
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} is not enabled and verified."
+        )
+    spec = profile.get("spec")
+    if profile.get("schema_version") != 1 or not isinstance(spec, dict):
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} uses an unsupported schema."
+        )
+    expected_digest = sha256_json(spec)
+    if profile.get("spec_digest") != expected_digest:
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile digest for {module_slug} does not match its spec."
+        )
+    allowed_fields = {
+        "kind",
+        "container_port",
+        "healthcheck_path",
+        "resources",
+        "configuration",
+        "network_egress",
+    }
+    if set(spec) - allowed_fields:
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} contains unsupported fields."
+        )
+    if spec.get("kind") != "deployment":
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} is not a stateless deployment."
+        )
+    container_port = spec.get("container_port")
+    if (
+        not isinstance(container_port, int)
+        or isinstance(container_port, bool)
+        or not 1 <= container_port <= 65535
+    ):
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} has an invalid container port."
+        )
+    healthcheck_path = spec.get("healthcheck_path")
+    if (
+        not isinstance(healthcheck_path, str)
+        or not healthcheck_path.startswith("/")
+        or healthcheck_path.startswith("//")
+        or len(healthcheck_path) > 255
+        or any(character.isspace() for character in healthcheck_path)
+    ):
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} has an invalid healthcheck path."
+        )
+    resources = spec.get("resources")
+    if not isinstance(resources, dict) or set(resources) != {"requests", "limits"}:
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} must declare requests and limits."
+        )
+    for group in ("requests", "limits"):
+        resource_values = resources[group]
+        if not isinstance(resource_values, dict) or set(resource_values) != {
+            "cpu",
+            "memory",
+        }:
+            raise RuntimeReleaseNotDeployable(
+                f"Runtime profile for {module_slug} has incomplete resources."
+            )
+        if any(
+            not isinstance(value, str) or not RESOURCE_VALUE_PATTERN.fullmatch(value)
+            for value in resource_values.values()
+        ):
+            raise RuntimeReleaseNotDeployable(
+                f"Runtime profile for {module_slug} has invalid resource values."
+            )
+    configuration = spec.get("configuration", {})
+    if not isinstance(configuration, dict) or set(configuration) - {"plain", "secret"}:
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} has an invalid configuration schema."
+        )
+    for group in ("plain", "secret"):
+        keys = configuration.get(group, [])
+        if (
+            not isinstance(keys, list)
+            or len(keys) > 50
+            or len(set(keys)) != len(keys)
+            or any(
+                not isinstance(key, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", key)
+                for key in keys
+            )
+        ):
+            raise RuntimeReleaseNotDeployable(
+                f"Runtime profile for {module_slug} has invalid configuration keys."
+            )
+    if set(configuration.get("plain", [])) & set(configuration.get("secret", [])):
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} reuses plain keys as secrets."
+        )
+    network_egress = spec.get("network_egress", [])
+    if not isinstance(network_egress, list) or any(
+        not isinstance(item, dict)
+        or set(item) != {"host", "port"}
+        or not isinstance(item["host"], str)
+        or not item["host"]
+        or len(item["host"]) > 253
+        or any(character.isspace() for character in item["host"])
+        or not isinstance(item["port"], int)
+        or isinstance(item["port"], bool)
+        or not 1 <= item["port"] <= 65535
+        for item in network_egress
+    ):
+        raise RuntimeReleaseNotDeployable(
+            f"Runtime profile for {module_slug} has invalid egress rules."
+        )
+    return json.loads(canonical_json(spec))
+
+
+def _validate_release_integrity(
     release: RuntimeRelease,
     application: HostedApplication,
 ) -> None:
@@ -235,74 +381,24 @@ def _validate_release_still_matches_application(
         not isinstance(manifest, dict)
         or sha256_json(manifest) != release.manifest_digest
         or manifest.get("schema_version") != 1
+        or manifest.get("version") != release.application_version.version
     ):
         raise RuntimeReleaseNotDeployable(
             "The immutable runtime release failed its integrity check."
         )
-
     application_snapshot = manifest.get("application")
+    raw_modules = manifest.get("modules")
     if (
-        not isinstance(application_snapshot, dict)
+        release.application_version.application_id != application.id
+        or not isinstance(application_snapshot, dict)
         or application_snapshot.get("id") != application.id
-        or application_snapshot.get("slug") != application.slug
-        or manifest.get("version") != release.application_version.version
+        or not isinstance(application_snapshot.get("slug"), str)
+        or not isinstance(raw_modules, list)
+        or not raw_modules
     ):
         raise RuntimeReleaseNotDeployable(
-            "The immutable runtime release no longer matches its application version."
+            "The immutable runtime release has an invalid application catalog."
         )
-
-    raw_modules = manifest.get("modules")
-    if not isinstance(raw_modules, list) or not raw_modules:
-        raise RuntimeReleaseNotDeployable(
-            "The immutable runtime release has an invalid module catalog."
-        )
-    snapshots: dict[int, dict[str, Any]] = {}
-    for raw_module in raw_modules:
-        if not isinstance(raw_module, dict):
-            raise RuntimeReleaseNotDeployable(
-                "The immutable runtime release has an invalid module catalog."
-            )
-        module_id = raw_module.get("module_id")
-        if (
-            not isinstance(module_id, int)
-            or isinstance(module_id, bool)
-            or module_id in snapshots
-        ):
-            raise RuntimeReleaseNotDeployable(
-                "The immutable runtime release has an invalid module catalog."
-            )
-        snapshots[module_id] = raw_module
-
-    modules = list(application.modules.select_related("runtime_profile"))
-    if {module.id for module in modules} != set(snapshots):
-        raise RuntimeReleaseNotDeployable(
-            "The application module set changed after this version was published; "
-            "publish a new version before deploying it."
-        )
-    for module in modules:
-        snapshot = snapshots[module.id]
-        try:
-            profile = module.runtime_profile
-        except ModuleRuntimeProfile.DoesNotExist as exc:
-            raise RuntimeReleaseNotDeployable(
-                f"Runtime profile for {module.slug} changed after publication; "
-                "publish a new version before deploying it."
-            ) from exc
-        spec = validate_runtime_profile(profile)
-        if (
-            not module.enabled
-            or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", module.slug)
-            or module.deployment_target != module.DeploymentTarget.KUBERNETES
-            or snapshot.get("slug") != module.slug
-            or snapshot.get("image") != module.image
-            or snapshot.get("profile_schema_version") != profile.schema_version
-            or snapshot.get("profile_digest") != profile.spec_digest
-            or snapshot.get("spec") != spec
-        ):
-            raise RuntimeReleaseNotDeployable(
-                f"Module {module.slug} changed after this version was published; "
-                "publish a new version before deploying it."
-            )
 
 
 def _validate_environment_policy(
@@ -312,7 +408,8 @@ def _validate_environment_policy(
     if not environment.enabled or environment.orchestrator != "kubernetes":
         raise RuntimeReleaseNotDeployable("The runtime environment is not enabled.")
     policy = environment.policy
-    if not isinstance(policy, dict):
+    capabilities = environment.capabilities
+    if not isinstance(policy, dict) or not isinstance(capabilities, dict):
         raise RuntimeReleaseNotDeployable("The runtime environment policy is invalid.")
     allowed_registries = policy.get("allowed_registries", [])
     if not isinstance(allowed_registries, list) or any(
@@ -323,9 +420,30 @@ def _validate_environment_policy(
         raise RuntimeReleaseNotDeployable(
             "The runtime environment must require immutable image digests."
         )
-    for module in manifest.get("modules", []):
-        image = module.get("image", "")
-        if not any(image.startswith(prefix) for prefix in allowed_registries):
+    modules = manifest.get("modules")
+    if not isinstance(modules, list):
+        raise RuntimeReleaseNotDeployable(
+            "The immutable runtime release has an invalid module catalog."
+        )
+    for module in modules:
+        if not isinstance(module, dict):
             raise RuntimeReleaseNotDeployable(
-                f"Image registry for {module.get('slug', 'module')} is not allowed."
+                "The immutable runtime release has an invalid module catalog."
+            )
+        image = module.get("image")
+        slug = module.get("slug", "module")
+        if not isinstance(image, str) or not any(
+            image.startswith(prefix) for prefix in allowed_registries
+        ):
+            raise RuntimeReleaseNotDeployable(
+                f"Image registry for {slug} is not allowed."
+            )
+        spec = module.get("spec")
+        if (
+            isinstance(spec, dict)
+            and spec.get("network_egress")
+            and capabilities.get("network_egress") is not True
+        ):
+            raise RuntimeReleaseNotDeployable(
+                f"Network egress requested by {slug} is not supported in this environment."
             )

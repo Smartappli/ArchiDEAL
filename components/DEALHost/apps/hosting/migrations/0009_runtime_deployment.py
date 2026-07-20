@@ -14,6 +14,16 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.AddField(
+            model_name="applicationversion",
+            name="runtime_snapshot",
+            field=models.JSONField(blank=True, default=dict),
+        ),
+        migrations.AddField(
+            model_name="applicationversion",
+            name="runtime_snapshot_digest",
+            field=models.CharField(blank=True, default="", max_length=64),
+        ),
         migrations.CreateModel(
             name="RuntimeEnvironment",
             fields=[
@@ -229,6 +239,8 @@ class Migration(migrations.Migration):
                         verbose_name="ID",
                     ),
                 ),
+                ("module_id", models.PositiveBigIntegerField()),
+                ("slug", models.SlugField(max_length=63)),
                 ("image_digest", models.CharField(max_length=255)),
                 ("desired_replicas", models.PositiveSmallIntegerField(default=1)),
                 ("ready_replicas", models.PositiveSmallIntegerField(default=0)),
@@ -242,12 +254,6 @@ class Migration(migrations.Migration):
                 ),
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 (
-                    "module",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT, to="hosting.module"
-                    ),
-                ),
-                (
                     "deployment",
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
@@ -257,11 +263,11 @@ class Migration(migrations.Migration):
                 ),
             ],
             options={
-                "ordering": ("module__slug",),
+                "ordering": ("slug",),
                 "constraints": [
                     models.UniqueConstraint(
-                        fields=("deployment", "module"),
-                        name="hosting_runtime_unique_deployment_module",
+                        fields=("deployment", "slug"),
+                        name="hosting_runtime_unique_deployment_slug",
                     )
                 ],
             },

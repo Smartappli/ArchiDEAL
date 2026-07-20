@@ -323,6 +323,7 @@ def validate_runtime_scaling(
     *,
     application: HostedApplication,
     manifest: dict[str, object] | None = None,
+    environment: RuntimeEnvironment | None = None,
 ) -> dict[str, dict[str, int | str]]:
     if not isinstance(value, dict):
         raise serializers.ValidationError(
@@ -354,6 +355,17 @@ def validate_runtime_scaling(
             + ", ".join(unknown_slugs)
         )
     normalized: dict[str, dict[str, int | str]] = {}
+    scaling_capabilities: dict[str, object] | None = None
+    if environment is not None:
+        capabilities = environment.capabilities
+        raw_scaling = (
+            capabilities.get("scaling") if isinstance(capabilities, dict) else None
+        )
+        if not isinstance(raw_scaling, dict):
+            raise serializers.ValidationError(
+                "The runtime environment has an invalid scaling contract."
+            )
+        scaling_capabilities = raw_scaling
     for module_slug in sorted(module_slugs):
         raw_policy = value.get(module_slug, {"mode": "fixed", "replicas": 1})
         if not isinstance(raw_policy, dict):
@@ -375,6 +387,19 @@ def validate_runtime_scaling(
                 raise serializers.ValidationError(
                     f"Fixed replicas for {module_slug} must be between 1 and 50."
                 )
+            if scaling_capabilities is not None:
+                fixed = scaling_capabilities.get("fixed")
+                if (
+                    not isinstance(fixed, dict)
+                    or not isinstance(fixed.get("min_replicas"), int)
+                    or isinstance(fixed.get("min_replicas"), bool)
+                    or not isinstance(fixed.get("max_replicas"), int)
+                    or isinstance(fixed.get("max_replicas"), bool)
+                    or not fixed["min_replicas"] <= replicas <= fixed["max_replicas"]
+                ):
+                    raise serializers.ValidationError(
+                        f"Fixed scaling for {module_slug} exceeds the environment limits."
+                    )
             normalized[module_slug] = {"mode": "fixed", "replicas": replicas}
             continue
         if mode == "autoscale":
@@ -407,6 +432,21 @@ def validate_runtime_scaling(
                 raise serializers.ValidationError(
                     f"Autoscaling for {module_slug} must use 1-50 replicas and a 10-90 CPU target."
                 )
+            if scaling_capabilities is not None:
+                autoscaling = scaling_capabilities.get("autoscaling")
+                if (
+                    not isinstance(autoscaling, dict)
+                    or autoscaling.get("enabled") is not True
+                    or not isinstance(autoscaling.get("min_replicas"), int)
+                    or isinstance(autoscaling.get("min_replicas"), bool)
+                    or not isinstance(autoscaling.get("max_replicas"), int)
+                    or isinstance(autoscaling.get("max_replicas"), bool)
+                    or minimum < autoscaling["min_replicas"]
+                    or maximum > autoscaling["max_replicas"]
+                ):
+                    raise serializers.ValidationError(
+                        f"Autoscaling for {module_slug} is unavailable or exceeds the environment limits."
+                    )
             normalized[module_slug] = {
                 "mode": "autoscale",
                 "min_replicas": minimum,
@@ -441,8 +481,6 @@ class RuntimeEnvironmentSerializer(serializers.ModelSerializer):
 
 
 class RuntimeComponentSerializer(serializers.ModelSerializer):
-    module_id = serializers.IntegerField(read_only=True)
-    slug = serializers.CharField(source="module.slug", read_only=True)
     last_error = serializers.SerializerMethodField()
 
     class Meta:
@@ -557,19 +595,6 @@ class RuntimeDeploymentCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"application_id": "Disabled applications cannot be deployed."}
             )
-        modules = list(application.modules.all())
-        if not modules:
-            raise serializers.ValidationError(
-                {"application_id": "The application has no deployable modules."}
-            )
-        if any(not module.enabled for module in modules):
-            raise serializers.ValidationError(
-                {"application_id": "Every application module must be enabled."}
-            )
-        if any(not module.image.strip() for module in modules):
-            raise serializers.ValidationError(
-                {"application_id": "Every application module must declare an image."}
-            )
         version = str(attrs.get("version") or application.current_version).strip()
         if not re.fullmatch(SEMVER_PATTERN, version):
             raise serializers.ValidationError(
@@ -580,16 +605,6 @@ class RuntimeDeploymentCreateSerializer(serializers.Serializer):
                 {"version": "Only published application versions can be deployed."}
             )
         attrs["version"] = version
-        attrs["scaling"] = validate_runtime_scaling(
-            attrs["scaling"],
-            application=application,
-        )
-        attrs["configuration"] = validate_runtime_configuration(
-            attrs["configuration"], application=application
-        )
-        attrs["secret_refs"] = validate_runtime_secret_references(
-            attrs["secret_refs"], application=application
-        )
         return attrs
 
 
@@ -617,6 +632,7 @@ class RuntimeDeploymentUpdateSerializer(serializers.Serializer):
             value,
             application=deployment.application,
             manifest=deployment.release.manifest,
+            environment=deployment.environment,
         )
 
     def validate_secret_refs(self, value: object) -> dict[str, dict[str, str]]:

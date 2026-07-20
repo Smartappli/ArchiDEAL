@@ -1,0 +1,276 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealhost-runtime-controller
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-controller
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealhost-runtime-controller
+        app.kubernetes.io/component: controller
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: dealhost-runtime-controller
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealhost-runtime-controller
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealhost-runtime-controller
+      containers:
+        - name: runtime-controller
+          image: "${IMAGE_DEALHOST}"
+          imagePullPolicy: IfNotPresent
+          command: ["granian"]
+          args:
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8081"
+            - --interface
+            - asgi
+            - --ssl-certificate
+            - /var/run/runtime-controller-tls/tls.crt
+            - --ssl-keyfile
+            - /var/run/runtime-controller-tls/tls.key
+            - --ssl-protocol-min
+            - tls1.2
+            - --no-ws
+            - dealhost.runtime_controller_service.asgi:application
+          env:
+            - name: DEALHOST_RUNTIME_CONTROLLER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-runtime-controller-token
+            - name: DEALHOST_RUNTIME_CONTROLLER_NAMESPACE
+              value: archideal-runtime-apps
+          ports:
+            - name: tls
+              containerPort: 8081
+          startupProbe:
+            tcpSocket:
+              port: tls
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 2
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - >-
+                  import socket, ssl;
+                  context = ssl.create_default_context(cafile='/var/run/runtime-controller-tls/ca.crt');
+                  raw = socket.create_connection(('127.0.0.1', 8081), timeout=2);
+                  tls = context.wrap_socket(raw, server_hostname='dealhost-runtime-controller.archideal.svc.cluster.local');
+                  tls.close()
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 2
+          livenessProbe:
+            tcpSocket:
+              port: tls
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: runtime-controller-tls
+              mountPath: /var/run/runtime-controller-tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: runtime-controller-tls
+          secret:
+            secretName: dealhost-runtime-controller-tls-${RELEASE_ID}
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealhost-runtime-worker
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: archideal
+spec:
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dealhost-runtime-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: archideal
+      annotations:
+        archideal.io/release: "${RELEASE_ID}"
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      serviceAccountName: dealhost-runtime-worker
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 90
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealhost-runtime-worker
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealhost-runtime-worker
+      containers:
+        - name: runtime-worker
+          image: "${IMAGE_DEALHOST}"
+          imagePullPolicy: IfNotPresent
+          args: ["python", "manage.py", "process_runtime_operations"]
+          envFrom:
+            - configMapRef:
+                name: archideal-runtime
+          env:
+            - name: RUN_MIGRATIONS
+              value: "0"
+            - name: RUN_COLLECTSTATIC
+              value: "0"
+            - name: DJANGO_SETTINGS_MODULE
+              value: dealhost.settings.runtime_worker
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-django-secret-key
+            - name: DEALHOST_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-database-password
+            - name: VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: valkey-url
+            - name: DEALHOST_RUNTIME_CONTROLLER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: archideal-runtime-secrets-${RELEASE_ID}
+                  key: dealhost-runtime-controller-token
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: ca
+              mountPath: /var/run/archideal-ca
+              readOnly: true
+            - name: runtime-controller-ca
+              mountPath: /var/run/runtime-controller-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: ca
+          secret:
+            secretName: archideal-runtime-secrets-${RELEASE_ID}
+            items:
+              - key: postgres-ca.crt
+                path: postgres-ca.crt
+        - name: runtime-controller-ca
+          secret:
+            secretName: dealhost-runtime-controller-tls-${RELEASE_ID}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir: {}

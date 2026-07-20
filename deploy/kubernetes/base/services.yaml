@@ -102,6 +102,23 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  name: dealhost-runtime-controller
+  labels:
+    app.kubernetes.io/name: dealhost-runtime-controller
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: archideal
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dealhost-runtime-controller
+  ports:
+    - name: https
+      port: 8443
+      targetPort: tls
+---
+apiVersion: v1
+kind: Service
+metadata:
   name: dealdata-core
   labels:
     app.kubernetes.io/name: dealdata-core

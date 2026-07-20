@@ -115,6 +115,8 @@ class ApplicationVersion(models.Model):
     version = models.CharField(max_length=32)
     notes = models.TextField(blank=True)
     source = models.CharField(max_length=32, default="manual")
+    runtime_snapshot = models.JSONField(default=dict, blank=True)
+    runtime_snapshot_digest = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -318,7 +320,8 @@ class RuntimeComponent(models.Model):
         on_delete=models.CASCADE,
         related_name="components",
     )
-    module = models.ForeignKey(Module, on_delete=models.PROTECT)
+    module_id = models.PositiveBigIntegerField()
+    slug = models.SlugField(max_length=63)
     image_digest = models.CharField(max_length=255)
     desired_replicas = models.PositiveSmallIntegerField(default=1)
     ready_replicas = models.PositiveSmallIntegerField(default=0)
@@ -330,11 +333,11 @@ class RuntimeComponent(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ("module__slug",)
+        ordering = ("slug",)
         constraints = [
             models.UniqueConstraint(
-                fields=("deployment", "module"),
-                name="hosting_runtime_unique_deployment_module",
+                fields=("deployment", "slug"),
+                name="hosting_runtime_unique_deployment_slug",
             )
         ]
 

@@ -9,6 +9,7 @@ resources:
   - configuration.yaml
   - services.yaml
   - workloads.yaml
+  - runtime-management.yaml
   - consumers.yaml
   - private-network-preflight.yaml
   - preflight.yaml

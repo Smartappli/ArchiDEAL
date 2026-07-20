@@ -282,6 +282,104 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: dealhost-runtime-controller-ingress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-controller
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - dealhost
+                  - dealhost-runtime-worker
+      ports:
+        - protocol: TCP
+          port: 8081
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealhost-runtime-controller-clients-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - dealhost
+          - dealhost-runtime-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dealhost-runtime-controller
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealhost-runtime-worker-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${POSTGRES_METADATA_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - ipBlock:
+            cidr: "${VALKEY_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 6380
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dealhost-runtime-controller-egress
+  labels:
+    app.kubernetes.io/part-of: archideal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dealhost-runtime-controller
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "${KUBERNETES_API_EGRESS_CIDR}"
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: dealhost-migration-egress
   labels:
     app.kubernetes.io/part-of: archideal

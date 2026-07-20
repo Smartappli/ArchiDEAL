@@ -121,6 +121,7 @@ REQUIRED = {
     "POSTGRES_METADATA_EGRESS_CIDR",
     "POSTGRES_DATA_EGRESS_CIDR",
     "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR",
+    "KUBERNETES_API_EGRESS_CIDR",
     "VALKEY_EGRESS_CIDR",
     "ETCD_EGRESS_CIDR",
     "POD_CIDR",
@@ -512,6 +513,7 @@ def load_values(path: Path, *, allow_example: bool) -> dict[str, str]:
         "POSTGRES_METADATA_EGRESS_CIDR",
         "POSTGRES_DATA_EGRESS_CIDR",
         "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR",
+        "KUBERNETES_API_EGRESS_CIDR",
         "VALKEY_EGRESS_CIDR",
         "ETCD_EGRESS_CIDR",
         "POD_CIDR",
@@ -530,6 +532,7 @@ def load_values(path: Path, *, allow_example: bool) -> dict[str, str]:
         "POSTGRES_METADATA_EGRESS_CIDR",
         "POSTGRES_DATA_EGRESS_CIDR",
         "POSTGRES_DEALIOT_REGISTRY_EGRESS_CIDR",
+        "KUBERNETES_API_EGRESS_CIDR",
         "VALKEY_EGRESS_CIDR",
         "ETCD_EGRESS_CIDR",
     )
@@ -681,6 +684,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     }
     for workload in pod_owners:
         pod_spec = workload["spec"]["template"]["spec"]
+        workload_name = workload["metadata"]["name"]
+        expected_automount = workload_name == "dealhost-runtime-controller"
         if pod_spec.get("nodeSelector") != {
             "kubernetes.io/os": "linux",
             "kubernetes.io/arch": "amd64",
@@ -693,7 +698,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         if (
             pod_security.get("runAsNonRoot") is not True
             or pod_security.get("seccompProfile", {}).get("type") != "RuntimeDefault"
-            or pod_spec.get("automountServiceAccountToken") is not False
+            or pod_spec.get("automountServiceAccountToken") is not expected_automount
         ):
             fail(
                 f"{workload['metadata']['name']}: pod security baseline is incomplete."
@@ -1234,6 +1239,11 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "DEALHOST_OIDC_GROUPS_CLAIM",
         "DEALHOST_OIDC_READ_GROUPS",
         "DEALHOST_OIDC_ADMIN_GROUPS",
+        "DEALHOST_RUNTIME_ENABLED",
+        "DEALHOST_RUNTIME_CONTROLLER_URL",
+        "DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS",
+        "DEALHOST_RUNTIME_CONTROLLER_CA_FILE",
+        "DEALHOST_RUNTIME_CONTROLLER_NAMESPACE",
         "DJANGO_CSRF_TRUSTED_ORIGINS",
         "DEALHOST_SCRIPT_NAME",
     }
@@ -1491,6 +1501,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     }
     expected_egress_ports = {
         "dealhost-external-egress": {443, 5432, 6380},
+        "dealhost-runtime-worker-egress": {5432, 6380},
+        "dealhost-runtime-controller-egress": {443},
         "dealhost-migration-egress": {5432},
         "dealdata-api-egress": {443, 5432},
         "dealdata-consumer-egress": {5432, 9093},
@@ -1606,13 +1618,27 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         .get("name", "")
         .startswith("archideal-runtime-secrets-")
     ]
+    controller_tls_external_secrets = [
+        item
+        for item in external_secrets
+        if item.get("metadata", {})
+        .get("name", "")
+        .startswith("dealhost-runtime-controller-tls-")
+    ]
     if (
-        len(external_secrets) != 2
+        len(external_secrets) != 4
         or len(runtime_external_secrets) != 1
-        or "archideal-registry-credentials"
-        not in {item["metadata"]["name"] for item in external_secrets}
+        or len(controller_tls_external_secrets) != 1
+        or sum(
+            item["metadata"]["name"] == "archideal-registry-credentials"
+            for item in external_secrets
+        )
+        != 2
     ):
-        fail("Exactly the runtime and registry ExternalSecrets must be rendered.")
+        fail(
+            "Exactly the runtime, runtime-controller TLS and registry "
+            "ExternalSecrets must be rendered."
+        )
     for external_secret in external_secrets:
         name = external_secret["metadata"]["name"]
         spec = external_secret.get("spec", {})
@@ -1635,25 +1661,30 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         ):
             fail(f"ExternalSecret/{name} violates the production CRD contract.")
 
-    registry_external_secret = next(
+    registry_external_secrets = [
         item
         for item in external_secrets
         if item["metadata"]["name"] == "archideal-registry-credentials"
-    )
-    if (
-        registry_external_secret["spec"].get("refreshPolicy") != "Periodic"
-        or registry_external_secret["spec"].get("refreshInterval") != "1h"
-        or registry_external_secret["spec"]["target"]["template"].get("type")
-        != "kubernetes.io/dockerconfigjson"
-    ):
-        fail("The private registry ExternalSecret must be a docker config Secret.")
+    ]
+    for registry_external_secret in registry_external_secrets:
+        if (
+            registry_external_secret["spec"].get("refreshPolicy") != "Periodic"
+            or registry_external_secret["spec"].get("refreshInterval") != "1h"
+            or registry_external_secret["spec"]["target"]["template"].get("type")
+            != "kubernetes.io/dockerconfigjson"
+        ):
+            fail("The private registry ExternalSecret must be a docker config Secret.")
     runtime_external_secret = runtime_external_secrets[0]
+    controller_tls_external_secret = controller_tls_external_secrets[0]
     runtime_release = (
         runtime_external_secret.get("metadata", {})
         .get("labels", {})
         .get("archideal.io/release")
     )
     runtime_secret_name = f"archideal-runtime-secrets-{runtime_release}"
+    controller_tls_secret_name = (
+        f"dealhost-runtime-controller-tls-{runtime_release}"
+    )
     runtime_spec = runtime_external_secret["spec"]
     runtime_target = runtime_spec["target"]
     if (
@@ -1670,6 +1701,36 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     ):
         fail(
             "The runtime ExternalSecret must be CreatedOnce and scoped to exactly one release."
+        )
+    controller_tls_spec = controller_tls_external_secret["spec"]
+    controller_tls_target = controller_tls_spec["target"]
+    controller_tls_release = (
+        controller_tls_external_secret.get("metadata", {})
+        .get("labels", {})
+        .get("archideal.io/release")
+    )
+    controller_tls_keys = {
+        item["secretKey"] for item in controller_tls_spec.get("data", [])
+    }
+    if (
+        controller_tls_release != runtime_release
+        or controller_tls_external_secret["metadata"]["name"]
+        != controller_tls_secret_name
+        or controller_tls_target.get("name") != controller_tls_secret_name
+        or controller_tls_spec.get("refreshPolicy") != "CreatedOnce"
+        or "refreshInterval" in controller_tls_spec
+        or controller_tls_target.get("template", {}).get("type")
+        != "kubernetes.io/tls"
+        or controller_tls_target.get("template", {})
+        .get("metadata", {})
+        .get("labels", {})
+        .get("archideal.io/release")
+        != runtime_release
+        or controller_tls_keys != {"tls.crt", "tls.key", "ca.crt"}
+    ):
+        fail(
+            "The runtime-controller TLS ExternalSecret must be a release-scoped "
+            "CreatedOnce kubernetes.io/tls Secret with certificate, PKCS#8 key and CA."
         )
 
     for owner in pod_owners:
@@ -1704,11 +1765,37 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
                     )
         for volume in pod_spec.get("volumes", []):
             secret_name = volume.get("secret", {}).get("secretName")
-            if secret_name and secret_name != runtime_secret_name:
+            if secret_name and secret_name not in {
+                runtime_secret_name,
+                controller_tls_secret_name,
+            }:
                 fail(
                     f"{owner['metadata']['name']}/{volume['name']}: "
                     "Secret volume is not release-scoped."
                 )
+            if secret_name == controller_tls_secret_name:
+                owner_name = owner.get("metadata", {}).get("name")
+                item_keys = {
+                    item.get("key") for item in volume.get("secret", {}).get("items", [])
+                }
+                expected_keys = (
+                    {"tls.crt", "tls.key", "ca.crt"}
+                    if owner_name == "dealhost-runtime-controller"
+                    else {"ca.crt"}
+                )
+                if (
+                    owner_name
+                    not in {
+                        "dealhost",
+                        "dealhost-runtime-controller",
+                        "dealhost-runtime-worker",
+                    }
+                    or item_keys != expected_keys
+                ):
+                    fail(
+                        f"{owner_name}/{volume['name']}: runtime-controller TLS "
+                        "material is not least-privilege."
+                    )
     secret_keys = {
         item["secretKey"] for item in runtime_external_secret["spec"].get("data", [])
     }
@@ -1721,6 +1808,17 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     )
     if not valkey_remote_key.endswith("/valkey/tls-url"):
         fail("The production Valkey URL must come from the dedicated TLS secret entry.")
+    controller_token_remote_key = (
+        runtime_secret_items.get("dealhost-runtime-controller-token", {})
+        .get("remoteRef", {})
+        .get("key", "")
+    )
+    if not controller_token_remote_key.endswith(
+        "/dealhost/runtime-controller-token"
+    ):
+        fail(
+            "The runtime controller must use its dedicated bearer-token secret entry."
+        )
     scoped_kafka_keys = {
         "kafka-console-username",
         "kafka-console-password",
@@ -1852,6 +1950,14 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         pull_names = {item["name"] for item in account.get("imagePullSecrets", [])}
         if "archideal-registry-credentials" not in pull_names:
             fail(f"{account['metadata']['name']} lacks private GHCR credentials.")
+        expected_automount = (
+            account["metadata"]["name"] == "dealhost-runtime-controller"
+        )
+        if account.get("automountServiceAccountToken") is not expected_automount:
+            fail(
+                f"{account['metadata']['name']} has an unexpected service-account "
+                "token automount policy."
+            )
 
     ingresses = [
         document for document in documents if document.get("kind") == "Ingress"
@@ -1929,7 +2035,8 @@ def main() -> int:
             {
                 entry.name
                 for entry in output.iterdir()
-                if entry.name not in {GENERATED_MARKER, "base", "overlays"}
+            if entry.name
+            not in {GENERATED_MARKER, "base", "overlays", "runtime-apps"}
             }
             if output.is_dir()
             else {output.name}
@@ -1952,7 +2059,7 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    for tree_name in ("base", "overlays"):
+    for tree_name in ("base", "overlays", "runtime-apps"):
         for source in (ROOT / tree_name).rglob("*"):
             if not source.is_file():
                 continue
