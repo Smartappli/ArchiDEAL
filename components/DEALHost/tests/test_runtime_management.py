@@ -222,6 +222,7 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         deploy_operation.finished_at = timezone.now()
         deploy_operation.save()
         deployment.observed_state = RuntimeDeployment.ObservedState.RUNNING
+        deployment.controller_id = "controller-runtime-1"
         deployment.save()
 
         configured = self.client.patch(
@@ -323,6 +324,7 @@ class RuntimeUnavailableApiTests(RuntimeFixtureMixin, APITestCase):
 class FakeRuntimeController:
     def __init__(self, module: Module) -> None:
         self.module = module
+        self.last_log_request: dict[str, object] | None = None
 
     def deploy(self, payload, *, request_id: str) -> RuntimeSnapshot:
         return self.snapshot("running", payload["generation"])
@@ -342,7 +344,21 @@ class FakeRuntimeController:
     def status(self, controller_id, *, request_id: str) -> RuntimeSnapshot:
         return self.snapshot("running", 1)
 
-    def logs(self, controller_id, *, tail: int, request_id: str) -> RuntimeLogs:
+    def logs(
+        self,
+        controller_id,
+        *,
+        component: str,
+        tail: int,
+        since_seconds: int,
+        request_id: str,
+    ) -> RuntimeLogs:
+        self.last_log_request = {
+            "controller_id": controller_id,
+            "component": component,
+            "tail": tail,
+            "since_seconds": since_seconds,
+        }
         return RuntimeLogs(("ready", "request complete"), "cursor-1", False)
 
     def snapshot(self, state: str, generation: int) -> RuntimeSnapshot:
@@ -403,6 +419,15 @@ class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
         self.assertNotIn("ready", str(log_operation.result))
         cached = cache.get(f"dealhost:runtime-log:{log_operation.id}")
         self.assertEqual(cached["content"], "ready\nrequest complete")
+        self.assertEqual(
+            processor.controller.last_log_request,
+            {
+                "controller_id": "controller-runtime-1",
+                "component": "runtime-api",
+                "tail": 2,
+                "since_seconds": 60,
+            },
+        )
 
         detail = self.client.get(reverse("operations-detail", args=[log_operation.id]))
         self.assertEqual(detail.status_code, 200)
