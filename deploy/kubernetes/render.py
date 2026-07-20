@@ -349,7 +349,8 @@ def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) ->
         for route in bootstrap_routes
     ]
     if (
-        len(bootstrap_route_ids) != len(EXPECTED_APISIX_BOOTSTRAP_UPSTREAMS)
+        any(not isinstance(route_id, str) for route_id in bootstrap_route_ids)
+        or len(bootstrap_route_ids) != len(EXPECTED_APISIX_BOOTSTRAP_UPSTREAMS)
         or set(bootstrap_route_ids) != set(EXPECTED_APISIX_BOOTSTRAP_UPSTREAMS)
     ):
         fail(

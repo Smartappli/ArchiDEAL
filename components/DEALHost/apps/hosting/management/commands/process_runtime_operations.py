@@ -67,9 +67,7 @@ class Command(BaseCommand):
             processor.run(once=True, poll_seconds=poll_seconds)
             return
 
-        health = RuntimeWorkerHealth(
-            heartbeat_timeout_seconds=heartbeat_timeout
-        )
+        health = RuntimeWorkerHealth(heartbeat_timeout_seconds=heartbeat_timeout)
         monitor = RuntimeWorkerMonitor(
             bind=metrics_bind,
             port=metrics_port,
