@@ -20,6 +20,7 @@ _RESOURCE_ENDPOINTS = {
         "/apis/autoscaling/v2",
         "horizontalpodautoscalers",
     ),
+    "Lease": ("/apis/coordination.k8s.io/v1", "leases"),
 }
 
 
@@ -115,6 +116,102 @@ class KubernetesClient:
             expected={200, 202, 404},
         )
 
+    async def create_lease(self, resource: dict[str, Any]) -> bool:
+        """Atomically create a Lease, returning false when another holder won."""
+
+        metadata = resource.get("metadata")
+        if resource.get("kind") != "Lease" or not isinstance(metadata, dict):
+            raise ValueError("A Kubernetes Lease resource is required.")
+        name = metadata.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("Kubernetes Lease name is required.")
+        prefix, plural = self._endpoint("Lease")
+        response = await self._request(
+            "POST",
+            self._resource_path(prefix, plural),
+            content=json.dumps(
+                resource,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+            content_type="application/json",
+            expected={201, 409},
+        )
+        return response.status_code == 201
+
+    async def replace_lease(self, resource: dict[str, Any]) -> bool:
+        """Replace a Lease using its resourceVersion as an optimistic CAS."""
+
+        metadata = resource.get("metadata")
+        if resource.get("kind") != "Lease" or not isinstance(metadata, dict):
+            raise ValueError("A Kubernetes Lease resource is required.")
+        name = metadata.get("name")
+        resource_version = metadata.get("resourceVersion")
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(resource_version, str)
+            or not resource_version
+        ):
+            raise ValueError(
+                "Kubernetes Lease name and resourceVersion are required."
+            )
+        prefix, plural = self._endpoint("Lease")
+        response = await self._request(
+            "PUT",
+            self._resource_path(prefix, plural, name),
+            content=json.dumps(
+                resource,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+            content_type="application/json",
+            expected={200, 404, 409},
+        )
+        return response.status_code == 200
+
+    async def release_lease(self, name: str, *, holder_identity: str) -> bool:
+        """Delete only the exact Lease version still owned by this holder."""
+
+        lease = await self.get("Lease", name)
+        if lease is None:
+            return False
+        metadata = lease.get("metadata")
+        spec = lease.get("spec")
+        if not isinstance(metadata, dict) or not isinstance(spec, dict):
+            raise KubernetesApiError("Kubernetes returned an invalid Lease.")
+        if spec.get("holderIdentity") != holder_identity:
+            return False
+        uid = metadata.get("uid")
+        resource_version = metadata.get("resourceVersion")
+        if (
+            not isinstance(uid, str)
+            or not uid
+            or not isinstance(resource_version, str)
+            or not resource_version
+        ):
+            raise KubernetesApiError("Kubernetes returned an invalid Lease identity.")
+        prefix, plural = self._endpoint("Lease")
+        response = await self._request(
+            "DELETE",
+            self._resource_path(prefix, plural, name),
+            content=json.dumps(
+                {
+                    "apiVersion": "v1",
+                    "kind": "DeleteOptions",
+                    "preconditions": {
+                        "uid": uid,
+                        "resourceVersion": resource_version,
+                    },
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+            content_type="application/json",
+            expected={200, 202, 404, 409},
+        )
+        return response.status_code in {200, 202}
+
     async def pod_logs(
         self,
         pod_name: str,
@@ -155,6 +252,9 @@ class KubernetesClient:
             raise KubernetesApiError(
                 "Kubernetes returned an invalid readiness response."
             )
+        # A 404 still proves that the projected credential may read the Lease API
+        # used to serialize mutations.  Do not create a readiness object.
+        await self.get("Lease", "dealhost-runtime-controller-readiness")
 
     def _endpoint(self, kind: str) -> tuple[str, str]:
         try:
@@ -232,19 +332,43 @@ class KubernetesClient:
                 trust_env=False,
                 transport=self.transport,
             ) as client:
-                response = await client.request(
+                async with client.stream(
                     method,
                     path,
                     headers=headers,
                     params=params,
                     content=content,
-                )
+                ) as streamed_response:
+                    declared_length = streamed_response.headers.get("content-length")
+                    if declared_length:
+                        try:
+                            too_large = (
+                                int(declared_length) > MAX_KUBERNETES_RESPONSE_BYTES
+                            )
+                        except ValueError:
+                            too_large = False
+                        if too_large:
+                            raise KubernetesApiError(
+                                "The Kubernetes API response is too large."
+                            )
+                    body = bytearray()
+                    async for chunk in streamed_response.aiter_bytes():
+                        remaining = MAX_KUBERNETES_RESPONSE_BYTES + 1 - len(body)
+                        body.extend(chunk[:remaining])
+                        if len(body) > MAX_KUBERNETES_RESPONSE_BYTES:
+                            raise KubernetesApiError(
+                                "The Kubernetes API response is too large."
+                            )
+                    response = httpx.Response(
+                        streamed_response.status_code,
+                        headers=streamed_response.headers,
+                        content=bytes(body),
+                        request=streamed_response.request,
+                    )
         except httpx.HTTPError as exc:
             raise KubernetesApiError(
                 "The Kubernetes API could not be reached."
             ) from exc
-        if len(response.content) > MAX_KUBERNETES_RESPONSE_BYTES:
-            raise KubernetesApiError("The Kubernetes API response is too large.")
         if response.status_code not in expected:
             raise KubernetesApiError(
                 f"The Kubernetes API rejected {method} {path} (HTTP {response.status_code}).",

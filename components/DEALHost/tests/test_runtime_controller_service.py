@@ -17,11 +17,16 @@ from dealhost.runtime_controller_service.contract import (
     parse_desired_deployment,
     payload_digest,
 )
-from dealhost.runtime_controller_service.kubernetes import KubernetesApiError
+from dealhost.runtime_controller_service.kubernetes import (
+    MAX_KUBERNETES_RESPONSE_BYTES,
+    KubernetesApiError,
+    KubernetesClient,
+)
 from dealhost.runtime_controller_service.resources import (
     COMPONENT_LABEL,
     DEPLOYMENT_LABEL,
     component_name,
+    lease_name,
     state_config_map,
     state_name,
 )
@@ -41,6 +46,10 @@ class FakeKubernetes:
         self.calls: list[tuple[Any, ...]] = []
         self.log_content = "2026-01-01T00:00:00Z first\n2026-01-01T00:00:01Z second"
         self.ready_error = False
+        self._lease_guard = asyncio.Lock()
+        self._lease_serial = 0
+        self.active_lease_holders = 0
+        self.maximum_active_lease_holders = 0
 
     async def apply(self, resource: dict[str, Any]) -> dict[str, Any]:
         copied = deepcopy(resource)
@@ -83,6 +92,61 @@ class FakeKubernetes:
     async def delete(self, kind: str, name: str) -> None:
         self.calls.append(("delete", self.settings.namespace, kind, name))
         self.resources.pop((self.settings.namespace, kind, name), None)
+
+    async def create_lease(self, resource: dict[str, Any]) -> bool:
+        async with self._lease_guard:
+            copied = deepcopy(resource)
+            metadata = copied.setdefault("metadata", {})
+            namespace = metadata.setdefault("namespace", self.settings.namespace)
+            key = (namespace, "Lease", metadata["name"])
+            self.calls.append(("create_lease", namespace, metadata["name"]))
+            if key in self.resources:
+                return False
+            self._lease_serial += 1
+            metadata["uid"] = f"lease-{self._lease_serial}"
+            metadata["resourceVersion"] = str(self._lease_serial)
+            self.resources[key] = copied
+            self.active_lease_holders += 1
+            self.maximum_active_lease_holders = max(
+                self.maximum_active_lease_holders,
+                self.active_lease_holders,
+            )
+            return True
+
+    async def replace_lease(self, resource: dict[str, Any]) -> bool:
+        async with self._lease_guard:
+            copied = deepcopy(resource)
+            metadata = copied["metadata"]
+            namespace = metadata.get("namespace", self.settings.namespace)
+            key = (namespace, "Lease", metadata["name"])
+            self.calls.append(("replace_lease", namespace, metadata["name"]))
+            existing = self.resources.get(key)
+            if (
+                existing is None
+                or existing.get("metadata", {}).get("resourceVersion")
+                != metadata.get("resourceVersion")
+            ):
+                return False
+            self._lease_serial += 1
+            metadata["uid"] = existing["metadata"]["uid"]
+            metadata["resourceVersion"] = str(self._lease_serial)
+            self.resources[key] = copied
+            return True
+
+    async def release_lease(self, name: str, *, holder_identity: str) -> bool:
+        async with self._lease_guard:
+            key = (self.settings.namespace, "Lease", name)
+            self.calls.append(("release_lease", self.settings.namespace, name))
+            existing = self.resources.get(key)
+            if (
+                existing is None
+                or existing.get("spec", {}).get("holderIdentity")
+                != holder_identity
+            ):
+                return False
+            self.resources.pop(key)
+            self.active_lease_holders -= 1
+            return True
 
     async def pod_logs(
         self,
@@ -417,19 +481,6 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_undeploys_both_return_deleted(self) -> None:
         await self.reconciler.deploy(self.desired(), request_id="request-deploy")
         absent = self.desired(generation=2, desired_state="absent")
-        original_observe = self.reconciler.observe
-        both_observing = asyncio.Event()
-        observer_count = 0
-
-        async def synchronized_observe(deployment_id: str):
-            nonlocal observer_count
-            observer_count += 1
-            if observer_count == 2:
-                both_observing.set()
-            await both_observing.wait()
-            return await original_observe(deployment_id)
-
-        self.reconciler.observe = synchronized_observe  # type: ignore[method-assign]
         results = await asyncio.gather(
             self.reconciler.undeploy(
                 DEPLOYMENT_ID,
@@ -443,6 +494,7 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
+        self.assertEqual(self.kubernetes.maximum_active_lease_holders, 1)
         self.assertEqual([result.state for result in results], ["deleted", "deleted"])
         self.assertEqual(
             [result.observed_generation for result in results],
@@ -467,6 +519,73 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(
             (self.settings.namespace, "ConfigMap", state_name(DEPLOYMENT_ID)),
+            self.kubernetes.resources,
+        )
+
+    async def test_deploy_cannot_resume_after_a_newer_undeploy(self) -> None:
+        reconciler_started = asyncio.Event()
+        allow_reconciler_to_continue = asyncio.Event()
+        original_apply = self.kubernetes.apply
+        paused = False
+
+        async def pausing_apply(resource: dict[str, Any]) -> dict[str, Any]:
+            nonlocal paused
+            result = await original_apply(resource)
+            if (
+                not paused
+                and resource.get("kind") == "ConfigMap"
+                and resource.get("metadata", {}).get("name")
+                == state_name(DEPLOYMENT_ID)
+                and resource.get("data", {}).get("phase") == "reconciling"
+            ):
+                paused = True
+                reconciler_started.set()
+                await allow_reconciler_to_continue.wait()
+            return result
+
+        self.kubernetes.apply = pausing_apply  # type: ignore[method-assign]
+        deploy_task = asyncio.create_task(
+            self.reconciler.deploy(
+                self.desired(),
+                request_id="request-old-deploy",
+            )
+        )
+        await asyncio.wait_for(reconciler_started.wait(), timeout=1)
+
+        undeploy_task = asyncio.create_task(
+            self.reconciler.undeploy(
+                DEPLOYMENT_ID,
+                request_id="request-new-delete",
+                desired=self.desired(generation=2, desired_state="absent"),
+            )
+        )
+        await asyncio.sleep(0.05)
+        self.assertFalse(undeploy_task.done())
+
+        allow_reconciler_to_continue.set()
+        deploy_result, undeploy_result = await asyncio.gather(
+            deploy_task,
+            undeploy_task,
+        )
+
+        self.assertEqual(deploy_result.observed_generation, 1)
+        self.assertEqual(undeploy_result.observed_generation, 2)
+        self.assertEqual(undeploy_result.state, "deleted")
+        self.assertEqual(self.kubernetes.maximum_active_lease_holders, 1)
+        self.assertNotIn(
+            (self.settings.namespace, "ConfigMap", state_name(DEPLOYMENT_ID)),
+            self.kubernetes.resources,
+        )
+        self.assertNotIn(
+            (
+                self.settings.namespace,
+                "Deployment",
+                component_name(DEPLOYMENT_ID, "runtime-api"),
+            ),
+            self.kubernetes.resources,
+        )
+        self.assertNotIn(
+            (self.settings.namespace, "Lease", lease_name(DEPLOYMENT_ID)),
             self.kubernetes.resources,
         )
 
