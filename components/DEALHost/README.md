@@ -345,12 +345,26 @@ DEALHOST_RUNTIME_ENABLED=true
 DEALHOST_RUNTIME_CONTROLLER_URL=https://runtime-controller.internal
 DEALHOST_RUNTIME_CONTROLLER_TOKEN=<secret>
 DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS=15
+DEALHOST_RUNTIME_CONTROLLER_CA_FILE=/var/run/runtime-controller-ca/ca.crt
 ```
 
 En production, le web partage uniquement le drapeau d'activation avec le worker. Le
 token du contrôleur et le bundle CA sont montés dans le worker, tandis que les droits
 Kubernetes restent exclusivement attachés au pod runtime-controller dans le namespace
 applicatif isolé.
+
+Les `secret_refs` restent des noms logiques : le contrôleur les résout sous la forme
+`<RUNTIME_CONTROLLER_SECRET_NAME_PREFIX>-<nom-logique>`. Il n'a aucun droit de lecture
+sur les Secrets. Il exige avant mutation une entrée correspondante dans le ConfigMap
+opérateur `dealhost-runtime-secret-catalog`, placé dans un autre namespace et lisible
+en `get` seulement. Chaque entrée JSON fixe le nom résolu et les clés d'environnement
+autorisées, sans contenir de valeur secrète. Le catalogue vide et toute entrée absente
+ou incohérente échouent fermé. Kubernetes signale ensuite un Secret réel absent ou
+une clé manquante dans l'état du rollout, sans que DEALHost lise ou retourne sa valeur.
+
+Le runtime-controller rejette les domaines et tout `network_egress` FQDN tant qu'un
+mécanisme d'application réseau ne les garantit pas. Il ne les ignore jamais
+silencieusement.
 
 ### Gestion complète des tools/apps
 
