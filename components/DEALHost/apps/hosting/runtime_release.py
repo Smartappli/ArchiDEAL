@@ -170,6 +170,10 @@ def runtime_release_for(
     for module in modules:
         if not module.enabled:
             raise RuntimeReleaseNotDeployable(f"Module {module.slug} is disabled.")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", module.slug):
+            raise RuntimeReleaseNotDeployable(
+                f"Module {module.slug} is not a valid runtime component name."
+            )
         if module.deployment_target != module.DeploymentTarget.KUBERNETES:
             raise RuntimeReleaseNotDeployable(
                 f"Module {module.slug} is not declared for Kubernetes."
@@ -287,6 +291,7 @@ def _validate_release_still_matches_application(
         spec = validate_runtime_profile(profile)
         if (
             not module.enabled
+            or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", module.slug)
             or module.deployment_target != module.DeploymentTarget.KUBERNETES
             or snapshot.get("slug") != module.slug
             or snapshot.get("image") != module.image

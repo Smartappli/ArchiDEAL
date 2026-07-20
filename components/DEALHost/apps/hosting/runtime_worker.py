@@ -22,6 +22,7 @@ from .runtime_controller import (
 
 TRANSITIONAL_STATES = {"pending", "reconciling", "deleting"}
 MAX_OPERATION_ATTEMPTS = 5
+MAX_RECONCILIATION_AGE = timedelta(minutes=30)
 LOG_TTL_SECONDS = 300
 
 
@@ -150,7 +151,7 @@ class RuntimeOperationProcessor:
                 )
             elif operation_type == RuntimeOperation.OperationType.UNDEPLOY:
                 snapshot = self.controller.undeploy(
-                    deployment.controller_id,
+                    deployment.controller_id or str(deployment.id),
                     request_id=str(operation.id),
                 )
             else:
@@ -181,26 +182,65 @@ class RuntimeOperationProcessor:
             deployment.save()
             self._apply_components(deployment, snapshot)
 
-            if snapshot.state in TRANSITIONAL_STATES:
+            waiting_for_generation = (
+                snapshot.observed_generation < deployment.generation
+            )
+            if snapshot.state in TRANSITIONAL_STATES or waiting_for_generation:
+                if now - locked_operation.requested_at >= MAX_RECONCILIATION_AGE:
+                    detail = "Runtime reconciliation timed out."
+                    deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
+                    deployment.last_error = detail
+                    deployment.save(update_fields=["observed_state", "last_error", "updated_at"])
+                    locked_operation.status = RuntimeOperation.Status.FAILED
+                    locked_operation.error = {
+                        "code": "runtime_reconciliation_timeout",
+                        "detail": detail,
+                        "retryable": True,
+                    }
+                    locked_operation.progress = {"stage": "failed", "percent": 100}
+                    locked_operation.finished_at = now
+                    locked_operation.next_attempt_at = None
+                    locked_operation.leased_by = ""
+                    locked_operation.lease_token = None
+                    locked_operation.lease_expires_at = None
+                    locked_operation.save()
+                    return
                 locked_operation.status = RuntimeOperation.Status.RUNNING
                 locked_operation.result = {"dispatched": True}
-                locked_operation.progress = {"stage": snapshot.state, "percent": 50}
+                locked_operation.progress = {
+                    "stage": (
+                        snapshot.state
+                        if not waiting_for_generation
+                        else "waiting_for_generation"
+                    ),
+                    "percent": 50,
+                }
                 locked_operation.next_attempt_at = now + timedelta(seconds=2)
                 locked_operation.leased_by = ""
                 locked_operation.lease_token = None
                 locked_operation.lease_expires_at = None
                 locked_operation.save()
                 return
+
+            terminal_error = _terminal_state_error(operation, deployment, snapshot)
             if snapshot.state in {
                 RuntimeDeployment.ObservedState.FAILED,
                 RuntimeDeployment.ObservedState.UNKNOWN,
-            }:
+            } or terminal_error:
                 locked_operation.status = RuntimeOperation.Status.FAILED
                 locked_operation.error = {
                     "code": "runtime_reconciliation_failed",
-                    "detail": snapshot.message or "Runtime reconciliation failed.",
+                    "detail": terminal_error
+                    or snapshot.message
+                    or "Runtime reconciliation failed.",
                     "retryable": True,
                 }
+                if terminal_error:
+                    deployment.observed_state = RuntimeDeployment.ObservedState.FAILED
+                    deployment.last_error = terminal_error
+                    deployment.save(
+                        update_fields=["observed_state", "last_error", "updated_at"]
+                    )
             else:
                 locked_operation.status = RuntimeOperation.Status.SUCCEEDED
                 locked_operation.result = {
@@ -407,3 +447,32 @@ def _apply_snapshot(
     )
     if snapshot.state == RuntimeDeployment.ObservedState.DELETED:
         deployment.deleted_at = timezone.now()
+
+
+def _terminal_state_error(
+    operation: RuntimeOperation,
+    deployment: RuntimeDeployment,
+    snapshot: RuntimeSnapshot,
+) -> str:
+    if snapshot.state in {
+        RuntimeDeployment.ObservedState.FAILED,
+        RuntimeDeployment.ObservedState.UNKNOWN,
+    }:
+        return ""
+    if operation.operation_type == RuntimeOperation.OperationType.UNDEPLOY:
+        expected = {RuntimeDeployment.ObservedState.DELETED}
+    elif deployment.desired_state == RuntimeDeployment.DesiredState.RUNNING:
+        expected = {
+            RuntimeDeployment.ObservedState.RUNNING,
+            RuntimeDeployment.ObservedState.DEGRADED,
+        }
+    elif deployment.desired_state == RuntimeDeployment.DesiredState.STOPPED:
+        expected = {RuntimeDeployment.ObservedState.STOPPED}
+    else:
+        expected = {RuntimeDeployment.ObservedState.DELETED}
+    if snapshot.state in expected:
+        return ""
+    return (
+        f"Runtime controller reported terminal state {snapshot.state} while "
+        f"the desired state is {deployment.desired_state}."
+    )

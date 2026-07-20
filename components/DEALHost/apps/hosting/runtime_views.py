@@ -228,10 +228,15 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             locked.last_error = ""
             locked.save()
             self._sync_component_scaling(locked)
+            operation_type = (
+                RuntimeOperation.OperationType.CONFIGURE
+                if locked.controller_id
+                else RuntimeOperation.OperationType.DEPLOY
+            )
             operation = _create_operation(
                 request,
                 locked,
-                RuntimeOperation.OperationType.CONFIGURE,
+                operation_type,
                 request_hash,
                 payload={"changed_fields": sorted(serializer.validated_data)},
             )
@@ -306,7 +311,17 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             transition_error = _validate_transition(locked, action_name)
             if transition_error is not None:
                 return transition_error
-            operation_type = action_name
+            if not locked.controller_id and action_name != "start":
+                return _problem(
+                    "Retry the deployment before requesting this action.",
+                    code="runtime_identity_unavailable",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            operation_type = (
+                RuntimeOperation.OperationType.DEPLOY
+                if action_name == "start" and not locked.controller_id
+                else action_name
+            )
             payload: dict[str, Any] = {}
             if action_name == "start":
                 locked.desired_state = RuntimeDeployment.DesiredState.RUNNING
@@ -376,6 +391,12 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             precondition = _deployment_precondition(request, locked)
             if precondition is not None:
                 return precondition
+            if not locked.controller_id:
+                return _problem(
+                    "Logs are unavailable until the deployment has a runtime identity.",
+                    code="runtime_identity_unavailable",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
             if not locked.components.filter(
                 module__slug=serializer.validated_data["component"]
             ).exists():
