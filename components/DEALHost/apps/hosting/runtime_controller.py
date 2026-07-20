@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json as json_module
 import re
 from typing import Any
 from urllib.parse import quote
@@ -224,33 +225,42 @@ class RuntimeControllerClient:
                 trust_env=False,
                 verify=self.config.ca_file or True,
             ) as client:
-                response = client.request(
+                with client.stream(
                     method,
                     path,
                     headers=headers,
                     json=json,
                     params=params,
-                )
+                ) as response:
+                    if response.status_code not in expected_statuses:
+                        raise RuntimeControllerError(
+                            "Runtime controller rejected the request "
+                            f"(HTTP {response.status_code}).",
+                            status_code=response.status_code,
+                        )
+                    content_type = (
+                        response.headers.get("content-type", "")
+                        .split(";", 1)[0]
+                        .strip()
+                    )
+                    if content_type != "application/json":
+                        raise RuntimeControllerError(
+                            "Runtime controller returned a non-JSON response."
+                        )
+                    content = bytearray()
+                    for chunk in response.iter_bytes():
+                        if len(content) + len(chunk) > MAX_CONTROLLER_RESPONSE_BYTES:
+                            raise RuntimeControllerError(
+                                "Runtime controller response is too large."
+                            )
+                        content.extend(chunk)
         except httpx.HTTPError as exc:
             raise RuntimeControllerError(
                 "Runtime controller could not be reached.",
             ) from exc
-
-        if response.status_code not in expected_statuses:
-            raise RuntimeControllerError(
-                f"Runtime controller rejected the request (HTTP {response.status_code}).",
-                status_code=response.status_code,
-            )
-        if len(response.content) > MAX_CONTROLLER_RESPONSE_BYTES:
-            raise RuntimeControllerError("Runtime controller response is too large.")
-        content_type = response.headers.get("content-type", "").split(";", 1)[0].strip()
-        if content_type != "application/json":
-            raise RuntimeControllerError(
-                "Runtime controller returned a non-JSON response."
-            )
         try:
-            data = response.json()
-        except ValueError as exc:
+            data = json_module.loads(content)
+        except (UnicodeDecodeError, ValueError) as exc:
             raise RuntimeControllerError(
                 "Runtime controller returned malformed JSON."
             ) from exc

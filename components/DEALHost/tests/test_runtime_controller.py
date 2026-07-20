@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import httpx
@@ -28,17 +29,22 @@ class RecordingHttpClient:
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         return None
 
-    def request(self, method, path, **kwargs):
+    @contextmanager
+    def stream(self, method, path, **kwargs):
         type(self).request_options = {
             "method": method,
             "path": path,
             **kwargs,
         }
-        return type(self).response
+        yield type(self).response
 
 
 class RuntimeControllerClientTests(SimpleTestCase):
     def setUp(self) -> None:
+        RecordingHttpClient.response = httpx.Response(
+            200,
+            json={"lines": ["ready"], "cursor": "cursor-1", "truncated": False},
+        )
         self.config = RuntimeControllerConfig(
             base_url="https://runtime-controller.internal",
             token="controller-test-token",  # nosec B106 - test fixture.
@@ -134,4 +140,21 @@ class RuntimeControllerClientTests(SimpleTestCase):
                     "components": [component, dict(component)],
                 },
                 expected_id="expected-runtime",
+            )
+
+    @patch("apps.hosting.runtime_controller.httpx.Client", RecordingHttpClient)
+    def test_controller_response_limit_is_enforced_while_streaming(self) -> None:
+        RecordingHttpClient.response = httpx.Response(
+            200,
+            content=b"x" * (2 * 1024 * 1024 + 1),
+            headers={"content-type": "application/json"},
+        )
+
+        with self.assertRaisesMessage(
+            RuntimeControllerError,
+            "response is too large",
+        ):
+            RuntimeControllerClient(self.config).status(
+                "controller-runtime-1",
+                request_id="operation-oversized",
             )
