@@ -883,6 +883,87 @@ class ProductionRendererTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("Every APISIX exact upstream", result.stderr)
 
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_runtime_config(
+                Path(directory) / "runtime-upstream-allowlist",
+                {
+                    "APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS": (
+                        "dealhost,dealiot,dealdata-core,dealdata-gps,"
+                        "dealdata-sensor,"
+                        "dealrt-test.archideal-runtime-apps.svc.cluster.local"
+                    ),
+                },
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must not include the runtime-apps namespace", result.stderr)
+
+        def add_runtime_route(documents) -> None:
+            config = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "apisix-bootstrap"
+            )
+            routes = json.loads(config["data"]["routes.json"])
+            routes["routes"].append(
+                {
+                    "id": "archideal-runtime-test",
+                    "uris": ["/runtime-test", "/runtime-test/*"],
+                    "plugins": {
+                        "proxy-rewrite": {
+                            "host": "dealrt-test",
+                            "headers": {
+                                "set": {"X-Forwarded-Proto": "$http_x_forwarded_proto"},
+                                "remove": [
+                                    "Authorization",
+                                    "X-Forwarded-Access-Token",
+                                ],
+                            },
+                        }
+                    },
+                    "upstream": {
+                        "nodes": {
+                            "dealrt-test.archideal-runtime-apps.svc.cluster.local:80": 1
+                        }
+                    },
+                }
+            )
+            config["data"]["routes.json"] = json.dumps(routes)
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-route",
+                "base/configuration.yaml",
+                add_runtime_route,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("runtime routes are forbidden", result.stderr)
+
+        def retarget_interface_to_runtime(documents) -> None:
+            config = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "apisix-bootstrap"
+            )
+            routes = json.loads(config["data"]["routes.json"])
+            interface = next(
+                route
+                for route in routes["routes"]
+                if route["id"] == "archideal-interface"
+            )
+            interface["upstream"]["nodes"] = {
+                "dealrt-test.archideal-runtime-apps.svc.cluster.local:80": 1
+            }
+            config["data"]["routes.json"] = json.dumps(routes)
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "runtime-route-target",
+                "base/configuration.yaml",
+                retarget_interface_to_runtime,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("runtime upstreams are forbidden", result.stderr)
+
     def test_apisix_oidc_header_boundary_and_network_policy_are_render_gates(
         self,
     ) -> None:
@@ -1091,6 +1172,92 @@ class ProductionRendererTests(unittest.TestCase):
         for key, (value, expected) in invalid_values.items():
             with self.subTest(key=key):
                 self.assert_value_rejected(key, value, expected)
+
+        def add_service(service_type: str):
+            def mutate(documents) -> None:
+                documents.append(
+                    {
+                        "apiVersion": "v1",
+                        "kind": "Service",
+                        "metadata": {"name": "runtime-exposure-test"},
+                        "spec": {
+                            "type": service_type,
+                            "selector": {"app": "runtime-test"},
+                            "ports": [{"port": 80, "targetPort": 8080}],
+                        },
+                    }
+                )
+
+            return mutate
+
+        for service_type in ("NodePort", "LoadBalancer"):
+            with (
+                self.subTest(runtime_service_type=service_type),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                result = self.render_with_kubernetes_mutation(
+                    Path(directory) / service_type.casefold(),
+                    "runtime-apps/serviceaccount.yaml",
+                    add_service(service_type),
+                )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("must declare type ClusterIP", result.stderr)
+
+        def add_exposure_kind(kind: str):
+            def mutate(documents) -> None:
+                documents.append(
+                    {
+                        "apiVersion": (
+                            "networking.k8s.io/v1"
+                            if kind == "Ingress"
+                            else "gateway.networking.k8s.io/v1"
+                        ),
+                        "kind": kind,
+                        "metadata": {"name": "runtime-exposure-test"},
+                        "spec": {},
+                    }
+                )
+
+            return mutate
+
+        for kind in ("Ingress", "Gateway"):
+            with (
+                self.subTest(runtime_exposure_kind=kind),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                result = self.render_with_kubernetes_mutation(
+                    Path(directory) / kind.casefold(),
+                    "runtime-apps/serviceaccount.yaml",
+                    add_exposure_kind(kind),
+                )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(f"must not contain {kind}", result.stderr)
+
+        def add_runtime_network_policy(documents) -> None:
+            documents.append(
+                {
+                    "apiVersion": "networking.k8s.io/v1",
+                    "kind": "NetworkPolicy",
+                    "metadata": {
+                        "name": "runtime-apps-allow-ingress",
+                        "namespace": "archideal-runtime-apps",
+                    },
+                    "spec": {
+                        "podSelector": {},
+                        "policyTypes": ["Ingress"],
+                        "ingress": [{}],
+                    },
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "extra-runtime-policy",
+                "runtime-apps/network-policies.yaml",
+                add_runtime_network_policy,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("additional policies are forbidden", result.stderr)
 
     def test_admin_group_must_be_distinct_from_edge_admission(self) -> None:
         self.assert_value_rejected(

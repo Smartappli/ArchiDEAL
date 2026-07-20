@@ -212,9 +212,8 @@ def _is_internal_dns_name(value: str) -> bool:
 
 def _is_runtime_upstream_host(value: str) -> bool:
     labels = value.casefold().split(".")
-    return (
-        RUNTIME_APPS_NAMESPACE in labels
-        or bool(labels and labels[0].startswith("dealrt-"))
+    return RUNTIME_APPS_NAMESPACE in labels or bool(
+        labels and labels[0].startswith("dealrt-")
     )
 
 
@@ -263,9 +262,7 @@ def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) ->
             "APISIX_ROUTE_ALLOWED_UPSTREAM_SUFFIXES must contain only strict DNS "
             "suffixes, never IP addresses or localhost."
         )
-    runtime_sentinel = (
-        f"dealrt-sentinel.{RUNTIME_APPS_NAMESPACE}.svc.cluster.local"
-    )
+    runtime_sentinel = f"dealrt-sentinel.{RUNTIME_APPS_NAMESPACE}.svc.cluster.local"
     if any(_is_runtime_upstream_host(host) for host in hosts) or any(
         runtime_sentinel == suffix or runtime_sentinel.endswith(f".{suffix}")
         for suffix in suffixes
@@ -771,9 +768,7 @@ def validate_runtime_apps_fail_closed(
         if (
             externally_routable_fields & set(spec)
             or not isinstance(ports, list)
-            or any(
-                not isinstance(port, dict) or "nodePort" in port for port in ports
-            )
+            or any(not isinstance(port, dict) or "nodePort" in port for port in ports)
         ):
             fail(
                 "Runtime-app ClusterIP Services must not declare any external or "
@@ -789,8 +784,7 @@ def validate_runtime_apps_fail_closed(
         document
         for document in all_documents
         if document.get("kind") == "NetworkPolicy"
-        and document.get("metadata", {}).get("namespace")
-        == RUNTIME_APPS_NAMESPACE
+        and document.get("metadata", {}).get("namespace") == RUNTIME_APPS_NAMESPACE
     ]
     for policies in (tree_policies, cluster_runtime_policies):
         names = [policy.get("metadata", {}).get("name") for policy in policies]
@@ -803,9 +797,7 @@ def validate_runtime_apps_fail_closed(
                 "and DNS-only baseline; additional policies are forbidden."
             )
 
-    policies_by_name = {
-        policy["metadata"]["name"]: policy for policy in tree_policies
-    }
+    policies_by_name = {policy["metadata"]["name"]: policy for policy in tree_policies}
     expected_default_deny = {
         "podSelector": {},
         "policyTypes": ["Ingress", "Egress"],
@@ -843,11 +835,9 @@ def validate_runtime_apps_fail_closed(
     default_deny = policies_by_name["runtime-apps-default-deny"]
     dns_only = policies_by_name["runtime-apps-allow-dns-egress"]
     if (
-        default_deny.get("metadata", {}).get("namespace")
-        != RUNTIME_APPS_NAMESPACE
+        default_deny.get("metadata", {}).get("namespace") != RUNTIME_APPS_NAMESPACE
         or default_deny.get("spec") != expected_default_deny
-        or dns_only.get("metadata", {}).get("namespace")
-        != RUNTIME_APPS_NAMESPACE
+        or dns_only.get("metadata", {}).get("namespace") != RUNTIME_APPS_NAMESPACE
         or dns_only.get("spec") != expected_dns_only
     ):
         fail(
@@ -1485,8 +1475,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             *pod_spec.get("containers", []),
         ]:
             if any(
-                item.get("configMapRef", {}).get("name")
-                == "dealhost-runtime-worker"
+                item.get("configMapRef", {}).get("name") == "dealhost-runtime-worker"
                 for item in container.get("envFrom", [])
             ):
                 runtime_worker_config_owners.add(owner["metadata"]["name"])
@@ -1522,9 +1511,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         or runtime_controller_pod.get("automountServiceAccountToken") is not True
         or runtime_controller.get("command") != ["granian"]
         or runtime_controller.get("args") != expected_controller_args
-        or runtime_controller_env.get("RUNTIME_CONTROLLER_NAMESPACE", {}).get(
-            "value"
-        )
+        or runtime_controller_env.get("RUNTIME_CONTROLLER_NAMESPACE", {}).get("value")
         != "archideal-runtime-apps"
         or runtime_controller_env.get(
             "RUNTIME_CONTROLLER_WORKLOAD_SERVICE_ACCOUNT", {}
@@ -1561,9 +1548,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "readinessProbe": "/health/ready",
         "livenessProbe": "/health/live",
     }
-    controller_dns_name = (
-        "dealhost-runtime-controller.archideal.svc.cluster.local"
-    )
+    controller_dns_name = "dealhost-runtime-controller.archideal.svc.cluster.local"
     for probe_name, expected_path in controller_probe_paths.items():
         probe = runtime_controller.get(probe_name, {})
         command = probe.get("exec", {}).get("command", [])
@@ -1579,7 +1564,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         }
         if (
             command[:2] != ["python", "-c"]
-            or required_fragments - {fragment for fragment in required_fragments if fragment in script}
+            or required_fragments
+            - {fragment for fragment in required_fragments if fragment in script}
             or probe.get("httpGet")
             or probe.get("tcpSocket")
         ):
@@ -1916,9 +1902,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         if actual_ports != expected_ports:
             fail(f"{policy_name} has an unexpected external dependency port set.")
 
-    controller_ingress = network_policies.get(
-        "dealhost-runtime-controller-ingress", {}
-    )
+    controller_ingress = network_policies.get("dealhost-runtime-controller-ingress", {})
     controller_ingress_sources = {
         name
         for rule in controller_ingress.get("spec", {}).get("ingress", [])
@@ -1959,9 +1943,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "the internal TLS Service path."
         )
 
-    runtime_apps_default_deny = network_policies.get(
-        "runtime-apps-default-deny", {}
-    )
+    runtime_apps_default_deny = network_policies.get("runtime-apps-default-deny", {})
     runtime_apps_dns = network_policies.get("runtime-apps-allow-dns-egress", {})
     runtime_dns_ports = {
         (port.get("protocol"), port.get("port"))
@@ -2061,9 +2043,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         or runtime_controller_service.get("spec", {}).get("ports")
         != [{"name": "https", "port": 8443, "targetPort": "tls"}]
     ):
-        fail(
-            "The runtime controller must be exposed only by its internal TLS Service."
-        )
+        fail("The runtime controller must be exposed only by its internal TLS Service.")
     for name in ("dealdata-core", "dealdata-gps", "dealdata-sensor"):
         metrics_ports = [
             port
@@ -2136,8 +2116,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         if item["metadata"]["name"] == "archideal-registry-credentials"
     ]
     registry_namespaces = {
-        item.get("metadata", {}).get("namespace")
-        for item in registry_external_secrets
+        item.get("metadata", {}).get("namespace") for item in registry_external_secrets
     }
     if registry_namespaces != {None, "archideal-runtime-apps"}:
         fail(
@@ -2160,9 +2139,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         .get("archideal.io/release")
     )
     runtime_secret_name = f"archideal-runtime-secrets-{runtime_release}"
-    controller_tls_secret_name = (
-        f"dealhost-runtime-controller-tls-{runtime_release}"
-    )
+    controller_tls_secret_name = f"dealhost-runtime-controller-tls-{runtime_release}"
     runtime_spec = runtime_external_secret["spec"]
     runtime_target = runtime_spec["target"]
     if (
@@ -2197,8 +2174,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         or controller_tls_target.get("name") != controller_tls_secret_name
         or controller_tls_spec.get("refreshPolicy") != "CreatedOnce"
         or "refreshInterval" in controller_tls_spec
-        or controller_tls_target.get("template", {}).get("type")
-        != "kubernetes.io/tls"
+        or controller_tls_target.get("template", {}).get("type") != "kubernetes.io/tls"
         or controller_tls_target.get("template", {})
         .get("metadata", {})
         .get("labels", {})
@@ -2270,7 +2246,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             if secret_name == controller_tls_secret_name:
                 owner_name = owner.get("metadata", {}).get("name")
                 item_keys = {
-                    item.get("key") for item in volume.get("secret", {}).get("items", [])
+                    item.get("key")
+                    for item in volume.get("secret", {}).get("items", [])
                 }
                 expected_keys = (
                     {"tls.crt", "tls.key", "ca.crt"}
@@ -2306,12 +2283,8 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         .get("remoteRef", {})
         .get("key", "")
     )
-    if not controller_token_remote_key.endswith(
-        "/dealhost/runtime-controller-token"
-    ):
-        fail(
-            "The runtime controller must use its dedicated bearer-token secret entry."
-        )
+    if not controller_token_remote_key.endswith("/dealhost/runtime-controller-token"):
+        fail("The runtime controller must use its dedicated bearer-token secret entry.")
     scoped_kafka_keys = {
         "kafka-console-username",
         "kafka-console-password",
@@ -2457,8 +2430,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             document
             for document in documents
             if document.get("kind") == "Namespace"
-            and document.get("metadata", {}).get("name")
-            == "archideal-runtime-apps"
+            and document.get("metadata", {}).get("name") == "archideal-runtime-apps"
         ),
         None,
     )
@@ -2486,8 +2458,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         (
             account
             for account in service_accounts
-            if account.get("metadata", {}).get("name")
-            == "dealhost-runtime-application"
+            if account.get("metadata", {}).get("name") == "dealhost-runtime-application"
         ),
         None,
     )
@@ -2505,18 +2476,18 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         document
         for document in documents
         if document.get("kind") == "Role"
-        and document.get("metadata", {}).get("name")
-        == "dealhost-runtime-controller"
+        and document.get("metadata", {}).get("name") == "dealhost-runtime-controller"
     ]
     runtime_role_bindings = [
         document
         for document in documents
         if document.get("kind") == "RoleBinding"
-        and document.get("metadata", {}).get("name")
-        == "dealhost-runtime-controller"
+        and document.get("metadata", {}).get("name") == "dealhost-runtime-controller"
     ]
     if len(runtime_roles) != 1 or len(runtime_role_bindings) != 1:
-        fail("The runtime controller requires exactly one namespace-scoped Role binding.")
+        fail(
+            "The runtime controller requires exactly one namespace-scoped Role binding."
+        )
     runtime_role = runtime_roles[0]
     runtime_role_binding = runtime_role_bindings[0]
 
@@ -2564,8 +2535,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         )
     ]
     if (
-        runtime_role.get("metadata", {}).get("namespace")
-        != "archideal-runtime-apps"
+        runtime_role.get("metadata", {}).get("namespace") != "archideal-runtime-apps"
         or actual_runtime_role_rules != expected_runtime_role_rules
         or controller_cluster_bindings
         or runtime_role_binding.get("metadata", {}).get("namespace")
@@ -2613,8 +2583,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     if (
         len(catalog_reader_roles) != 1
         or len(catalog_reader_bindings) != 1
-        or catalog_reader_roles[0].get("metadata", {}).get("namespace")
-        != "archideal"
+        or catalog_reader_roles[0].get("metadata", {}).get("namespace") != "archideal"
         or catalog_reader_roles[0].get("rules") != [expected_catalog_reader_rule]
         or catalog_reader_bindings[0].get("metadata", {}).get("namespace")
         != "archideal"
@@ -2672,13 +2641,14 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         if runtime_secret_catalog
         else {}
     )
-    catalog_data = runtime_secret_catalog.get("data", {}) if runtime_secret_catalog else {}
+    catalog_data = (
+        runtime_secret_catalog.get("data", {}) if runtime_secret_catalog else {}
+    )
     if (
         not runtime_secret_catalog
         or runtime_secret_catalog.get("metadata", {}).get("namespace") != "archideal"
         or runtime_secret_catalog.get("immutable") is not True
-        or catalog_labels.get("app.kubernetes.io/managed-by")
-        != "archideal-operator"
+        or catalog_labels.get("app.kubernetes.io/managed-by") != "archideal-operator"
         or catalog_labels.get("archideal.io/runtime-secret-catalog") != "true"
         or not isinstance(catalog_data, dict)
         or runtime_secret_catalog.get("binaryData")
@@ -2737,8 +2707,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             document
             for document in documents
             if document.get("kind") == "LimitRange"
-            and document.get("metadata", {}).get("name")
-            == "runtime-apps-containers"
+            and document.get("metadata", {}).get("name") == "runtime-apps-containers"
         ),
         None,
     )
@@ -2759,8 +2728,7 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         or not runtime_limit_range
         or runtime_limit_range.get("metadata", {}).get("namespace")
         != "archideal-runtime-apps"
-        or runtime_limit_range.get("spec", {}).get("limits")
-        != expected_runtime_limits
+        or runtime_limit_range.get("spec", {}).get("limits") != expected_runtime_limits
     ):
         fail(
             "Managed applications require the reviewed aggregate ResourceQuota and "
@@ -2843,8 +2811,8 @@ def main() -> int:
             {
                 entry.name
                 for entry in output.iterdir()
-            if entry.name
-            not in {GENERATED_MARKER, "base", "overlays", "runtime-apps"}
+                if entry.name
+                not in {GENERATED_MARKER, "base", "overlays", "runtime-apps"}
             }
             if output.is_dir()
             else {output.name}
