@@ -58,6 +58,7 @@ class RuntimeControllerConfig:
     base_url: str
     token: str
     timeout_seconds: float
+    ca_file: str = ""
 
     @property
     def configured(self) -> bool:
@@ -228,6 +229,7 @@ def runtime_controller_config(
     """
 
     base_url = get_env("DEALHOST_RUNTIME_CONTROLLER_URL", "").strip().rstrip("/")
+    ca_file = get_env("DEALHOST_RUNTIME_CONTROLLER_CA_FILE", "").strip()
     token = get_secret_env(
         "DEALHOST_RUNTIME_CONTROLLER_TOKEN",
         "",
@@ -251,6 +253,7 @@ def runtime_controller_config(
             base_url="",
             token="",
             timeout_seconds=timeout_seconds,
+            ca_file="",
         )
 
     try:
@@ -274,6 +277,20 @@ def runtime_controller_config(
         )
     if require_tls and parsed.scheme.lower() != "https":
         raise RuntimeError("DEALHOST_RUNTIME_CONTROLLER_URL must use HTTPS in production.")
+    if ca_file:
+        ca_path = Path(ca_file)
+        if parsed.scheme.lower() != "https":
+            raise RuntimeError(
+                "DEALHOST_RUNTIME_CONTROLLER_CA_FILE requires an HTTPS controller URL."
+            )
+        if not ca_path.is_absolute() or not ca_path.is_file():
+            raise RuntimeError(
+                "DEALHOST_RUNTIME_CONTROLLER_CA_FILE must reference an existing absolute file."
+            )
+    elif require_tls:
+        raise RuntimeError(
+            "DEALHOST_RUNTIME_CONTROLLER_CA_FILE is required for the production controller."
+        )
     if _is_placeholder(token):
         raise RuntimeError(
             "DEALHOST_RUNTIME_CONTROLLER_TOKEN must be configured when the runtime "
@@ -283,6 +300,7 @@ def runtime_controller_config(
         base_url=base_url,
         token=token,
         timeout_seconds=timeout_seconds,
+        ca_file=ca_file,
     )
 
 

@@ -217,6 +217,7 @@ class RuntimeControllerClient:
                 follow_redirects=False,
                 timeout=self.config.timeout_seconds,
                 trust_env=False,
+                verify=self.config.ca_file or True,
             ) as client:
                 response = client.request(
                     method,

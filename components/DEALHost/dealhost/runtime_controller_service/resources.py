@@ -18,12 +18,18 @@ def state_name(deployment_id: str) -> str:
 
 
 def component_name(deployment_id: str, slug: str, *, suffix: str = "") -> str:
-    identity = hashlib.sha256(deployment_id.encode()).hexdigest()[:12]
-    slug_hash = hashlib.sha256(slug.encode()).hexdigest()[:6]
+    identity = hashlib.sha256(deployment_id.encode()).hexdigest()[:20]
+    slug_hash = hashlib.sha256(slug.encode()).hexdigest()[:8]
     reserved = len("dealrt---") + len(identity) + len(slug_hash) + len(suffix)
     available = 63 - reserved
     trimmed = slug[:available].rstrip("-")
     return f"dealrt-{identity}-{trimmed}-{slug_hash}{suffix}"
+
+
+def resolved_secret_name(settings: ControllerSettings, logical_name: str) -> str:
+    """Resolve an opaque control-plane reference without accepting Kubernetes names."""
+
+    return f"{settings.secret_name_prefix}-{logical_name}"
 
 
 def selector(deployment_id: str, component: str | None = None) -> str:
@@ -144,7 +150,10 @@ def deployment_resource(
             {
                 "name": key,
                 "valueFrom": {
-                    "secretKeyRef": {"name": secret_name, "key": key}
+                    "secretKeyRef": {
+                        "name": resolved_secret_name(settings, secret_name),
+                        "key": key,
+                    }
                 },
             }
         )

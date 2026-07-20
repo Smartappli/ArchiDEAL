@@ -34,7 +34,10 @@ spec:
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-ec"]
           args:
-            - python manage.py check --deploy && python manage.py migrate --noinput
+            - >-
+              python manage.py check --deploy &&
+              python manage.py migrate --noinput &&
+              python manage.py provision_runtime_environment
           envFrom:
             - configMapRef:
                 name: archideal-runtime

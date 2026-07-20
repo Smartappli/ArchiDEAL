@@ -1194,11 +1194,21 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
     if (
         migration_env.get("DJANGO_SETTINGS_MODULE", {}).get("value")
         != "dealhost.settings.migration"
+        or migration_container.get("command") != ["/bin/sh", "-ec"]
+        or migration_container.get("args")
+        != [
+            "python manage.py check --deploy && "
+            "python manage.py migrate --noinput && "
+            "python manage.py provision_runtime_environment"
+        ]
         or set(migration_env)
         != {"DJANGO_SETTINGS_MODULE", "DEALHOST_DATABASE_PASSWORD"}
         or migration_password_ref.get("key") != "dealhost-database-password"
     ):
-        fail("DEALHost migrations must receive only their PostgreSQL credential.")
+        fail(
+            "DEALHost migrations must provision the production runtime environment "
+            "with only their PostgreSQL credential."
+        )
     dealhost_probe_paths = {
         "startupProbe": "/api/gateway/health/live/",
         "readinessProbe": "/api/gateway/health/ready/",
@@ -1242,16 +1252,30 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         "DEALHOST_OIDC_READ_GROUPS",
         "DEALHOST_OIDC_ADMIN_GROUPS",
         "DEALHOST_RUNTIME_ENABLED",
-        "DEALHOST_RUNTIME_CONTROLLER_URL",
-        "DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS",
-        "DEALHOST_RUNTIME_CONTROLLER_CA_FILE",
         "DJANGO_CSRF_TRUSTED_ORIGINS",
         "DEALHOST_SCRIPT_NAME",
     }
     if not required_dealhost_config <= runtime_config.keys():
         fail("DEALHost native production database/OIDC configuration is incomplete.")
-    expected_runtime_controller_config = {
-        "DEALHOST_RUNTIME_ENABLED": "true",
+    if runtime_config.get("DEALHOST_RUNTIME_ENABLED") != "true":
+        fail("DEALHost runtime operation management must be enabled in production.")
+    controller_client_keys = {
+        "DEALHOST_RUNTIME_CONTROLLER_URL",
+        "DEALHOST_RUNTIME_CONTROLLER_TIMEOUT_SECONDS",
+        "DEALHOST_RUNTIME_CONTROLLER_CA_FILE",
+    }
+    if controller_client_keys & runtime_config.keys():
+        fail(
+            "Runtime-controller client configuration must not be exposed through "
+            "the shared application ConfigMap."
+        )
+    runtime_worker_config = next(
+        document
+        for document in documents
+        if document.get("kind") == "ConfigMap"
+        and document.get("metadata", {}).get("name") == "dealhost-runtime-worker"
+    )["data"]
+    expected_runtime_worker_config = {
         "DEALHOST_RUNTIME_CONTROLLER_URL": (
             "https://dealhost-runtime-controller.archideal.svc.cluster.local:8443"
         ),
@@ -1260,11 +1284,26 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "/var/run/runtime-controller-ca/ca.crt"
         ),
     }
-    if expected_runtime_controller_config.items() - runtime_config.items():
+    if runtime_worker_config != expected_runtime_worker_config:
         fail(
-            "DEALHost runtime management must use the internal TLS controller and "
-            "its mounted private CA."
+            "The runtime worker must use its dedicated internal TLS-controller "
+            "ConfigMap and mounted private CA."
         )
+    runtime_worker_config_owners: set[str] = set()
+    for owner in pod_owners:
+        pod_spec = owner["spec"]["template"]["spec"]
+        for container in [
+            *pod_spec.get("initContainers", []),
+            *pod_spec.get("containers", []),
+        ]:
+            if any(
+                item.get("configMapRef", {}).get("name")
+                == "dealhost-runtime-worker"
+                for item in container.get("envFrom", [])
+            ):
+                runtime_worker_config_owners.add(owner["metadata"]["name"])
+    if runtime_worker_config_owners != {"dealhost-runtime-worker"}:
+        fail("Only the runtime worker may receive controller client configuration.")
 
     runtime_controller_pod = workloads["dealhost-runtime-controller"]["spec"][
         "template"
@@ -1307,6 +1346,14 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "value"
         )
         != "archideal-registry-credentials"
+        or runtime_controller_env.get("RUNTIME_CONTROLLER_SECRET_NAME_PREFIX", {}).get(
+            "value"
+        )
+        != "dealapp"
+        or runtime_controller_env.get("RUNTIME_CONTROLLER_SECRET_CATALOG_NAME", {}).get(
+            "value"
+        )
+        != "dealhost-runtime-secret-catalog"
         or runtime_controller_env.get("RUNTIME_CONTROLLER_AUTH_TOKEN", {})
         .get("valueFrom", {})
         .get("secretKeyRef", {})
@@ -1317,20 +1364,37 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "The runtime-controller Deployment must use its isolated identity, "
             "namespace, TLS listener and bearer credential."
         )
-    readiness_command = (
-        runtime_controller.get("readinessProbe", {}).get("exec", {}).get("command", [])
+    controller_probe_paths = {
+        "startupProbe": "/health/live",
+        "readinessProbe": "/health/ready",
+        "livenessProbe": "/health/live",
+    }
+    controller_dns_name = (
+        "dealhost-runtime-controller.archideal.svc.cluster.local"
     )
-    if (
-        len(readiness_command) != 3
-        or readiness_command[:2] != ["python", "-c"]
-        or "ssl.create_default_context" not in readiness_command[2]
-        or "dealhost-runtime-controller.archideal.svc.cluster.local"
-        not in readiness_command[2]
-    ):
-        fail(
-            "The runtime-controller readiness probe must verify its private CA and "
-            "service DNS certificate identity."
-        )
+    for probe_name, expected_path in controller_probe_paths.items():
+        probe = runtime_controller.get(probe_name, {})
+        command = probe.get("exec", {}).get("command", [])
+        script = command[2] if len(command) == 3 else ""
+        required_fragments = {
+            "ssl.create_default_context",
+            "/var/run/runtime-controller-tls/ca.crt",
+            "socket.create_connection(('127.0.0.1', 8081)",
+            f"server_hostname='{controller_dns_name}'",
+            f"GET {expected_path} HTTP/1.1",
+            "response.status",
+            "status == 200",
+        }
+        if (
+            command[:2] != ["python", "-c"]
+            or required_fragments - {fragment for fragment in required_fragments if fragment in script}
+            or probe.get("httpGet")
+            or probe.get("tcpSocket")
+        ):
+            fail(
+                f"The runtime-controller {probe_name} must perform a CA/SAN-verified "
+                f"HTTPS GET {expected_path} and require HTTP 200."
+            )
 
     runtime_worker_pod = workloads["dealhost-runtime-worker"]["spec"]["template"][
         "spec"
@@ -1349,7 +1413,10 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         or runtime_worker.get("args")
         != ["python", "manage.py", "process_runtime_operations"]
         or runtime_worker.get("envFrom")
-        != [{"configMapRef": {"name": "archideal-runtime"}}]
+        != [
+            {"configMapRef": {"name": "archideal-runtime"}},
+            {"configMapRef": {"name": "dealhost-runtime-worker"}},
+        ]
         or runtime_worker_env.get("DJANGO_SETTINGS_MODULE", {}).get("value")
         != "dealhost.settings.runtime_worker"
         or worker_secret_keys
@@ -1365,14 +1432,22 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
             "and only DB, cache and controller credentials."
         )
 
-    dealhost_controller_token = (
-        dealhost_env.get("DEALHOST_RUNTIME_CONTROLLER_TOKEN", {})
-        .get("valueFrom", {})
-        .get("secretKeyRef", {})
-        .get("key")
-    )
-    if dealhost_controller_token != "dealhost-runtime-controller-token":
-        fail("DEALHost must read the runtime-controller token from ExternalSecret.")
+    dealhost_pod = workloads["dealhost"]["spec"]["template"]["spec"]
+    dealhost_volume_names = {
+        volume.get("name") for volume in dealhost_pod.get("volumes", [])
+    }
+    dealhost_mount_paths = {
+        mount.get("mountPath") for mount in dealhost.get("volumeMounts", [])
+    }
+    if (
+        "DEALHOST_RUNTIME_CONTROLLER_TOKEN" in dealhost_env
+        or "runtime-controller-ca" in dealhost_volume_names
+        or "/var/run/runtime-controller-ca" in dealhost_mount_paths
+    ):
+        fail(
+            "The DEALHost web workload must not receive the controller token, URL "
+            "or private CA; operations are processed by the isolated worker."
+        )
     required_dealdata_oidc_config = {
         "DEALDATA_OIDC_INTROSPECTION_URL",
         "DEALDATA_OIDC_ISSUER",
@@ -2013,7 +2088,6 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
                 if (
                     owner_name
                     not in {
-                        "dealhost",
                         "dealhost-runtime-controller",
                         "dealhost-runtime-worker",
                     }

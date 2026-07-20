@@ -86,12 +86,29 @@ spec:
               value: dealhost-runtime-application
             - name: RUNTIME_CONTROLLER_IMAGE_PULL_SECRET
               value: archideal-registry-credentials
+            - name: RUNTIME_CONTROLLER_SECRET_NAME_PREFIX
+              value: dealapp
+            - name: RUNTIME_CONTROLLER_SECRET_CATALOG_NAME
+              value: dealhost-runtime-secret-catalog
           ports:
             - name: tls
               containerPort: 8081
           startupProbe:
-            tcpSocket:
-              port: tls
+            exec:
+              command:
+                - python
+                - -c
+                - >-
+                  import http.client, socket, ssl;
+                  context = ssl.create_default_context(cafile='/var/run/runtime-controller-tls/ca.crt');
+                  raw = socket.create_connection(('127.0.0.1', 8081), timeout=2);
+                  tls = context.wrap_socket(raw, server_hostname='dealhost-runtime-controller.archideal.svc.cluster.local');
+                  tls.sendall(b'GET /health/live HTTP/1.1\r\nHost: dealhost-runtime-controller.archideal.svc.cluster.local\r\nConnection: close\r\n\r\n');
+                  response = http.client.HTTPResponse(tls);
+                  response.begin();
+                  status = response.status;
+                  response.close();
+                  raise SystemExit(0 if status == 200 else 1)
             periodSeconds: 5
             failureThreshold: 30
             timeoutSeconds: 2
@@ -101,17 +118,35 @@ spec:
                 - python
                 - -c
                 - >-
-                  import socket, ssl;
+                  import http.client, socket, ssl;
                   context = ssl.create_default_context(cafile='/var/run/runtime-controller-tls/ca.crt');
                   raw = socket.create_connection(('127.0.0.1', 8081), timeout=2);
                   tls = context.wrap_socket(raw, server_hostname='dealhost-runtime-controller.archideal.svc.cluster.local');
-                  tls.close()
+                  tls.sendall(b'GET /health/ready HTTP/1.1\r\nHost: dealhost-runtime-controller.archideal.svc.cluster.local\r\nConnection: close\r\n\r\n');
+                  response = http.client.HTTPResponse(tls);
+                  response.begin();
+                  status = response.status;
+                  response.close();
+                  raise SystemExit(0 if status == 200 else 1)
             periodSeconds: 10
             failureThreshold: 3
             timeoutSeconds: 2
           livenessProbe:
-            tcpSocket:
-              port: tls
+            exec:
+              command:
+                - python
+                - -c
+                - >-
+                  import http.client, socket, ssl;
+                  context = ssl.create_default_context(cafile='/var/run/runtime-controller-tls/ca.crt');
+                  raw = socket.create_connection(('127.0.0.1', 8081), timeout=2);
+                  tls = context.wrap_socket(raw, server_hostname='dealhost-runtime-controller.archideal.svc.cluster.local');
+                  tls.sendall(b'GET /health/live HTTP/1.1\r\nHost: dealhost-runtime-controller.archideal.svc.cluster.local\r\nConnection: close\r\n\r\n');
+                  response = http.client.HTTPResponse(tls);
+                  response.begin();
+                  status = response.status;
+                  response.close();
+                  raise SystemExit(0 if status == 200 else 1)
             periodSeconds: 20
             failureThreshold: 3
             timeoutSeconds: 2
@@ -212,6 +247,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: archideal-runtime
+            - configMapRef:
+                name: dealhost-runtime-worker
           env:
             - name: RUN_MIGRATIONS
               value: "0"

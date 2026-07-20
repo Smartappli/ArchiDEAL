@@ -63,11 +63,17 @@ class KubernetesClient:
             expected={200, 201},
         )
 
-    async def get(self, kind: str, name: str) -> dict[str, Any] | None:
+    async def get(
+        self,
+        kind: str,
+        name: str,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, Any] | None:
         prefix, plural = self._endpoint(kind)
         response = await self._request(
             "GET",
-            self._resource_path(prefix, plural, name),
+            self._resource_path(prefix, plural, name, namespace=namespace),
             expected={200, 404},
         )
         if response.status_code == 404:
@@ -133,15 +139,36 @@ class KubernetesClient:
             raise KubernetesApiError("Kubernetes returned an invalid log response.")
         return response.text
 
+    async def ready(self) -> None:
+        """Exercise the mounted token and namespace-scoped RBAC."""
+
+        prefix, plural = self._endpoint("ConfigMap")
+        payload = await self._request_json(
+            "GET",
+            self._resource_path(prefix, plural),
+            params={"limit": "1"},
+            expected={200},
+        )
+        if not isinstance(payload.get("items"), list):
+            raise KubernetesApiError("Kubernetes returned an invalid readiness response.")
+
     def _endpoint(self, kind: str) -> tuple[str, str]:
         try:
             return _RESOURCE_ENDPOINTS[kind]
         except KeyError as exc:
             raise ValueError(f"Unsupported Kubernetes kind: {kind}") from exc
 
-    def _resource_path(self, prefix: str, plural: str, name: str = "") -> str:
+    def _resource_path(
+        self,
+        prefix: str,
+        plural: str,
+        name: str = "",
+        *,
+        namespace: str | None = None,
+    ) -> str:
+        resource_namespace = namespace or self.settings.namespace
         base = (
-            f"{prefix}/namespaces/{quote(self.settings.namespace, safe='')}/"
+            f"{prefix}/namespaces/{quote(resource_namespace, safe='')}/"
             f"{quote(plural, safe='')}"
         )
         return f"{base}/{quote(name, safe='')}" if name else base
@@ -231,4 +258,3 @@ class KubernetesClient:
         if not isinstance(payload, dict):
             raise KubernetesApiError("Kubernetes returned an invalid response.")
         return payload
-

@@ -26,6 +26,9 @@ class ControllerSettings:
     allowed_image_prefixes: tuple[str, ...]
     workload_service_account: str
     image_pull_secret: str
+    secret_name_prefix: str
+    secret_catalog_name: str
+    secret_catalog_namespace: str
     max_replicas: int = 10
     request_timeout_seconds: float = 15.0
 
@@ -102,6 +105,18 @@ class ControllerSettings:
                 "RUNTIME_CONTROLLER_IMAGE_PULL_SECRET",
                 "archideal-registry-credentials",
             ).strip(),
+            secret_name_prefix=os.getenv(
+                "RUNTIME_CONTROLLER_SECRET_NAME_PREFIX",
+                "dealapp",
+            ).strip(),
+            secret_catalog_name=os.getenv(
+                "RUNTIME_CONTROLLER_SECRET_CATALOG_NAME",
+                "dealhost-runtime-secret-catalog",
+            ).strip(),
+            secret_catalog_namespace=os.getenv(
+                "RUNTIME_CONTROLLER_SECRET_CATALOG_NAMESPACE",
+                "archideal",
+            ).strip(),
             max_replicas=maximum,
             request_timeout_seconds=timeout,
         )
@@ -117,6 +132,7 @@ class ControllerSettings:
             ("environment", self.environment),
             ("namespace", self.namespace),
             ("workload service account", self.workload_service_account),
+            ("secret catalog namespace", self.secret_catalog_namespace),
         ):
             if not _DNS_LABEL.fullmatch(value):
                 raise ControllerConfigurationError(
@@ -125,6 +141,14 @@ class ControllerSettings:
         if self.image_pull_secret and not _DNS_LABEL.fullmatch(self.image_pull_secret):
             raise ControllerConfigurationError(
                 "RUNTIME_CONTROLLER_IMAGE_PULL_SECRET must be a canonical DNS label."
+            )
+        if not _DNS_LABEL.fullmatch(self.secret_name_prefix):
+            raise ControllerConfigurationError(
+                "RUNTIME_CONTROLLER_SECRET_NAME_PREFIX must be a canonical DNS label."
+            )
+        if not _DNS_LABEL.fullmatch(self.secret_catalog_name):
+            raise ControllerConfigurationError(
+                "RUNTIME_CONTROLLER_SECRET_CATALOG_NAME must be a canonical DNS label."
             )
         try:
             parsed = urlsplit(self.kubernetes_url)
@@ -172,4 +196,3 @@ class ControllerSettings:
                     raise ControllerConfigurationError(
                         f"The mounted {label} file is missing or is not absolute."
                     )
-

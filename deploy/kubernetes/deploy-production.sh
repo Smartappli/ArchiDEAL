@@ -109,7 +109,7 @@ case "${timeout: -1}" in
   h) timeout_seconds="$((10#$timeout_value * 3600))" ;;
 esac
 
-for executable in python git kubectl cosign; do
+for executable in python git kubectl cosign openssl; do
   if ! command -v "$executable" >/dev/null 2>&1; then
     printf 'Missing required executable: %s\n' "$executable" >&2
     exit 2
@@ -705,6 +705,7 @@ runtime_controller_tls_secret_version="$(
 runtime_config_versions="$(
   "${kubectl_ns[@]}" get \
     configmap/archideal-runtime \
+    configmap/dealhost-runtime-worker \
     configmap/apisix-production-config \
     configmap/apisix-bootstrap \
     -o jsonpath='{range .items[*]}{.metadata.name}:{.metadata.resourceVersion}{"\\n"}{end}'
