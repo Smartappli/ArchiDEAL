@@ -150,8 +150,7 @@ class RuntimeOperationProcessor:
                 # response was lost, retry the idempotent DELETE with the immutable
                 # desired payload instead of turning the deployment into failed.
                 if (
-                    operation.operation_type
-                    != RuntimeOperation.OperationType.UNDEPLOY
+                    operation.operation_type != RuntimeOperation.OperationType.UNDEPLOY
                     or exc.status_code != 404
                 ):
                     raise

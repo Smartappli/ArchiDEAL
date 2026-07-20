@@ -201,6 +201,8 @@ class RuntimeReconciler:
         current = await self._state(deployment_id)
         if desired is not None and desired.desired_state != "absent":
             raise ContractError("DELETE requires absent desired state.")
+        if desired is not None and desired.deployment_id != deployment_id:
+            raise ContractError("DELETE payload identifier does not match its path.")
         if current is None:
             if desired is None:
                 return RuntimeResult(deployment_id, "deleted", "", 0, ())
@@ -208,10 +210,6 @@ class RuntimeReconciler:
         else:
             current_desired = self._desired_from_state(current)
             if desired is not None:
-                if desired.deployment_id != deployment_id:
-                    raise ContractError(
-                        "DELETE payload identifier does not match its path."
-                    )
                 if desired.generation < current_desired.generation:
                     raise RuntimeConflict("The requested runtime generation is stale.")
                 if desired.release_digest != current_desired.release_digest:
@@ -600,16 +598,6 @@ class RuntimeReconciler:
         if phase not in {"reconciling", "active", "stopped", "deleting", "deleted"}:
             raise RuntimeConflict("The runtime state phase is invalid.")
         return phase
-
-    @staticmethod
-    def _last_request_id(state: dict[str, Any]) -> str:
-        annotations = state.get("metadata", {}).get("annotations", {})
-        value = (
-            annotations.get("archideal.io/last-request-id")
-            if isinstance(annotations, dict)
-            else ""
-        )
-        return value if isinstance(value, str) and value else "controller-reconcile"
 
     @staticmethod
     def _pod_phase(pod: dict[str, Any]) -> str:

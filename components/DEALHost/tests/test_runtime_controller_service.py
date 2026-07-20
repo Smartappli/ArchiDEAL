@@ -446,6 +446,20 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             self.kubernetes.resources,
         )
 
+    async def test_missing_delete_state_still_rejects_a_payload_path_mismatch(
+        self,
+    ) -> None:
+        with self.assertRaises(ContractError):
+            await self.reconciler.undeploy(
+                "d117a390-b572-48dd-b31b-9ea20b9a4e38",
+                request_id="request-mismatched-delete",
+                desired=self.desired(generation=2, desired_state="absent"),
+            )
+
+        self.assertFalse(
+            any(call[0] in {"apply", "delete"} for call in self.kubernetes.calls)
+        )
+
     async def test_logs_are_scoped_to_component_and_window(self) -> None:
         await self.reconciler.deploy(self.desired(), request_id="request-0009")
         pod_name = "runtime-api-pod"
@@ -515,6 +529,14 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
                 metrics.text,
             )
             self.assertNotIn(self.settings.auth_token, metrics.text)
+            unknown_method = await client.request("BREW", "/unbounded-path")
+            self.assertEqual(unknown_method.status_code, 401)
+            bounded_metrics = await client.get("/metrics")
+            self.assertIn(
+                'dealhost_runtime_controller_requests_total{method="OTHER",route="unknown",status="401"} 1',
+                bounded_metrics.text,
+            )
+            self.assertNotIn("BREW", bounded_metrics.text)
             self.kubernetes.ready_error = True
             unavailable = await client.get("/health/ready")
             self.assertEqual(unavailable.status_code, 503)

@@ -1040,6 +1040,43 @@ class ProductionRendererTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("apisix-egress NetworkPolicy", result.stderr)
 
+        def allow_apisix_to_runtime_apps(documents) -> None:
+            policy = next(
+                document
+                for document in documents
+                if document.get("metadata", {}).get("name") == "apisix-egress"
+            )
+            policy["spec"]["egress"].append(
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {
+                                    "kubernetes.io/metadata.name": (
+                                        "archideal-runtime-apps"
+                                    )
+                                }
+                            },
+                            "podSelector": {
+                                "matchLabels": {
+                                    "app.kubernetes.io/name": "dealrt-test"
+                                }
+                            },
+                        }
+                    ],
+                    "ports": [{"protocol": "TCP", "port": 80}],
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "apisix-runtime-egress",
+                "base/network-policies.yaml",
+                allow_apisix_to_runtime_apps,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("must not select the runtime-apps namespace", result.stderr)
+
     def test_dependency_ports_must_match_network_policies(self) -> None:
         invalid_values = {
             "KAFKA_BOOTSTRAP_SERVERS": (

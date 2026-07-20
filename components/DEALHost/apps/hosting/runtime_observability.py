@@ -105,12 +105,16 @@ def collect_runtime_worker_snapshot(
         RuntimeOperation.Status.QUEUED: 0.0,
         RuntimeOperation.Status.RUNNING: 0.0,
     }
-    operation_counts: list[tuple[str, str, int]] = []
+    operation_counts: dict[tuple[str, str], int] = {}
     active_controller_failures = 0
     for row in rows:
         status = str(row["status"])
         total = int(row["total"])
-        operation_counts.append((status, str(row["operation_type"]), total))
+        operation_type = str(row["operation_type"])
+        if operation_type not in RuntimeOperation.OperationType.values:
+            operation_type = "unknown"
+        operation_key = (status, operation_type)
+        operation_counts[operation_key] = operation_counts.get(operation_key, 0) + total
         queue_depths[status] = queue_depths.get(status, 0) + total
         if status in oldest_ages and row["oldest"] is not None:
             age = max((now - row["oldest"]).total_seconds(), 0.0)
@@ -121,15 +125,23 @@ def collect_runtime_worker_snapshot(
         }:
             active_controller_failures += int(row["controller_failure_count"] or 0)
 
+    deployment_counts: dict[str, int] = {}
+    for row in deployment_rows:
+        state = str(row["observed_state"])
+        if state not in RuntimeDeployment.ObservedState.values:
+            state = "unknown"
+        deployment_counts[state] = deployment_counts.get(state, 0) + int(row["total"])
+
     return RuntimeWorkerSnapshot(
-        operation_counts=tuple(operation_counts),
+        operation_counts=tuple(
+            (status, operation_type, total)
+            for (status, operation_type), total in sorted(operation_counts.items())
+        ),
         queue_depths=queue_depths,
         oldest_ages=oldest_ages,
         stale_leases=stale_leases,
         active_controller_failures=active_controller_failures,
-        deployment_counts=tuple(
-            (str(row["observed_state"]), int(row["total"])) for row in deployment_rows
-        ),
+        deployment_counts=tuple(sorted(deployment_counts.items())),
     )
 
 

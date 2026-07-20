@@ -236,6 +236,42 @@ def _network_policy_pod_names(peer: dict) -> set[str]:
     return names
 
 
+def _network_policy_peer_targets_runtime(peer: dict) -> bool:
+    namespace_selector = peer.get("namespaceSelector", {})
+    namespace_labels = namespace_selector.get("matchLabels", {})
+    if namespace_labels.get("kubernetes.io/metadata.name") == RUNTIME_APPS_NAMESPACE:
+        return True
+    for expression in namespace_selector.get("matchExpressions", []):
+        if (
+            expression.get("key") == "kubernetes.io/metadata.name"
+            and expression.get("operator") == "In"
+            and RUNTIME_APPS_NAMESPACE in expression.get("values", [])
+        ):
+            return True
+
+    pod_selector = peer.get("podSelector", {})
+    match_labels = pod_selector.get("matchLabels", {})
+    if (
+        match_labels.get("app.kubernetes.io/managed-by")
+        == "dealhost-runtime-controller"
+        or match_labels.get("app.kubernetes.io/part-of") == "archideal-runtime"
+        or any(
+            isinstance(value, str) and value.startswith("dealrt-")
+            for value in match_labels.values()
+        )
+    ):
+        return True
+    for expression in pod_selector.get("matchExpressions", []):
+        values = expression.get("values", [])
+        if expression.get("key") == "archideal.io/runtime-deployment" or any(
+            isinstance(value, str)
+            and (value.startswith("dealrt-") or value == "archideal-runtime")
+            for value in values
+        ):
+            return True
+    return False
+
+
 def validate_apisix_route_policy(runtime_config: dict, documents: list[dict]) -> None:
     hosts = _config_csv(runtime_config, "APISIX_ROUTE_ALLOWED_UPSTREAM_HOSTS")
     raw_suffixes = _config_csv(
@@ -1996,6 +2032,15 @@ def validate_runtime_contracts(documents: list[dict]) -> None:
         for rule in apisix_policy["spec"].get("egress", [])
         for port in rule.get("ports", [])
     }
+    if any(
+        _network_policy_peer_targets_runtime(peer)
+        for rule in apisix_policy["spec"].get("egress", [])
+        for peer in rule.get("to", [])
+    ):
+        fail(
+            "APISIX egress must not select the runtime-apps namespace or runtime "
+            "pods while runtime exposure is unsupported."
+        )
     if not {443, 2379} <= apisix_egress_ports:
         fail("APISIX NetworkPolicy must allow OTLP HTTPS/443 and etcd TLS/2379.")
 

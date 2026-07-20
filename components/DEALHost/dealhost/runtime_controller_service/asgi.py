@@ -63,7 +63,11 @@ class RuntimeControllerApplication:
             if message.get("type") == "http.response.start" and not response_observed:
                 response_observed = True
                 self.metrics.observe_request(
-                    method=method,
+                    method=(
+                        method
+                        if method in {"GET", "POST", "PUT", "DELETE"}
+                        else "OTHER"
+                    ),
                     route=_route_label(path),
                     status=int(message["status"]),
                     duration_seconds=time.monotonic() - started_at,

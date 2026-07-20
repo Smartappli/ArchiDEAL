@@ -667,9 +667,7 @@ class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
         operation.status = RuntimeOperation.Status.RUNNING
         operation.result = {"dispatched": True}
         operation.next_attempt_at = timezone.now()
-        operation.save(
-            update_fields=["status", "result", "next_attempt_at"]
-        )
+        operation.save(update_fields=["status", "result", "next_attempt_at"])
 
         self.assertTrue(processor.process_next())
 
