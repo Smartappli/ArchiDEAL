@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from dataclasses import replace
+import gzip
 import json
 from pathlib import Path
 import tempfile
@@ -22,6 +24,7 @@ from dealhost.runtime_controller_service.kubernetes import (
     KubernetesApiError,
     KubernetesClient,
 )
+from dealhost.runtime_controller_service.lease import RuntimeBusy
 from dealhost.runtime_controller_service.resources import (
     COMPONENT_LABEL,
     DEPLOYMENT_LABEL,
@@ -106,11 +109,7 @@ class FakeKubernetes:
             metadata["uid"] = f"lease-{self._lease_serial}"
             metadata["resourceVersion"] = str(self._lease_serial)
             self.resources[key] = copied
-            self.active_lease_holders += 1
-            self.maximum_active_lease_holders = max(
-                self.maximum_active_lease_holders,
-                self.active_lease_holders,
-            )
+            self._observe_lease_count()
             return True
 
     async def replace_lease(self, resource: dict[str, Any]) -> bool:
@@ -121,16 +120,15 @@ class FakeKubernetes:
             key = (namespace, "Lease", metadata["name"])
             self.calls.append(("replace_lease", namespace, metadata["name"]))
             existing = self.resources.get(key)
-            if (
-                existing is None
-                or existing.get("metadata", {}).get("resourceVersion")
-                != metadata.get("resourceVersion")
-            ):
+            if existing is None or existing.get("metadata", {}).get(
+                "resourceVersion"
+            ) != metadata.get("resourceVersion"):
                 return False
             self._lease_serial += 1
             metadata["uid"] = existing["metadata"]["uid"]
             metadata["resourceVersion"] = str(self._lease_serial)
             self.resources[key] = copied
+            self._observe_lease_count()
             return True
 
     async def release_lease(self, name: str, *, holder_identity: str) -> bool:
@@ -140,13 +138,21 @@ class FakeKubernetes:
             existing = self.resources.get(key)
             if (
                 existing is None
-                or existing.get("spec", {}).get("holderIdentity")
-                != holder_identity
+                or existing.get("spec", {}).get("holderIdentity") != holder_identity
             ):
                 return False
             self.resources.pop(key)
-            self.active_lease_holders -= 1
+            self._observe_lease_count()
             return True
+
+    def _observe_lease_count(self) -> None:
+        self.active_lease_holders = sum(
+            resource_kind == "Lease" for _, resource_kind, _ in self.resources
+        )
+        self.maximum_active_lease_holders = max(
+            self.maximum_active_lease_holders,
+            self.active_lease_holders,
+        )
 
     async def pod_logs(
         self,
@@ -272,6 +278,111 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             self.settings,
             allow_absent=allow_absent,
         )
+
+    async def test_kubernetes_lease_client_uses_cas_and_conditional_release(
+        self,
+    ) -> None:
+        name = lease_name(DEPLOYMENT_ID)
+        holder = "holder-1"
+        stored_lease = {
+            "apiVersion": "coordination.k8s.io/v1",
+            "kind": "Lease",
+            "metadata": {
+                "name": name,
+                "namespace": self.settings.namespace,
+                "uid": "lease-uid",
+                "resourceVersion": "7",
+            },
+            "spec": {"holderIdentity": holder},
+        }
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.method == "POST":
+                return httpx.Response(201, json=stored_lease)
+            if request.method == "PUT":
+                return httpx.Response(409, json={"kind": "Status"})
+            if request.method == "GET":
+                return httpx.Response(200, json=stored_lease)
+            if request.method == "DELETE":
+                return httpx.Response(200, json={"kind": "Status"})
+            raise AssertionError(request.method)
+
+        client = KubernetesClient(
+            self.settings,
+            transport=httpx.MockTransport(handler),
+        )
+        create_payload = deepcopy(stored_lease)
+        create_payload["metadata"].pop("uid")
+        create_payload["metadata"].pop("resourceVersion")
+        self.assertTrue(await client.create_lease(create_payload))
+        self.assertFalse(await client.replace_lease(stored_lease))
+        self.assertFalse(
+            await client.release_lease(name, holder_identity="another-holder")
+        )
+        self.assertTrue(await client.release_lease(name, holder_identity=holder))
+
+        collection_path = (
+            f"/apis/coordination.k8s.io/v1/namespaces/{self.settings.namespace}/leases"
+        )
+        self.assertEqual(requests[0].url.path, collection_path)
+        self.assertEqual(requests[1].url.path, f"{collection_path}/{name}")
+        delete_options = json.loads(requests[-1].content)
+        self.assertEqual(
+            delete_options["preconditions"],
+            {"uid": "lease-uid", "resourceVersion": "7"},
+        )
+        self.assertTrue(
+            all(
+                request.headers["authorization"] == "Bearer projected-kubernetes-token"
+                for request in requests
+            )
+        )
+
+    async def test_kubernetes_lease_client_surfaces_api_errors(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(403, json={"kind": "Status"})
+
+        client = KubernetesClient(
+            self.settings,
+            transport=httpx.MockTransport(handler),
+        )
+        resource = {
+            "apiVersion": "coordination.k8s.io/v1",
+            "kind": "Lease",
+            "metadata": {
+                "name": lease_name(DEPLOYMENT_ID),
+                "namespace": self.settings.namespace,
+            },
+            "spec": {"holderIdentity": "holder-1"},
+        }
+        with self.assertRaises(KubernetesApiError) as raised:
+            await client.create_lease(resource)
+
+        self.assertEqual(raised.exception.status_code, 403)
+
+    async def test_kubernetes_response_limit_applies_before_decoded_buffering(
+        self,
+    ) -> None:
+        compressed = gzip.compress(b"x" * (MAX_KUBERNETES_RESPONSE_BYTES + 1))
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                headers={
+                    "Content-Type": "application/json",
+                    "Content-Encoding": "gzip",
+                },
+                content=compressed,
+            )
+
+        client = KubernetesClient(
+            self.settings,
+            transport=httpx.MockTransport(handler),
+        )
+        with self.assertRaisesRegex(KubernetesApiError, "too large"):
+            await client.get("ConfigMap", "oversized")
 
     async def test_fixed_deployment_reconciles_hardened_stateless_resources(
         self,
@@ -456,6 +567,80 @@ class RuntimeControllerServiceTests(unittest.IsolatedAsyncioTestCase):
             sum(call[0] == "apply" for call in self.kubernetes.calls),
             apply_count,
         )
+
+    async def test_expired_mutation_lease_is_taken_over(self) -> None:
+        name = lease_name(DEPLOYMENT_ID)
+        self.kubernetes.resources[(self.settings.namespace, "Lease", name)] = {
+            "apiVersion": "coordination.k8s.io/v1",
+            "kind": "Lease",
+            "metadata": {
+                "name": name,
+                "namespace": self.settings.namespace,
+                "uid": "abandoned-lease",
+                "resourceVersion": "1",
+                "labels": {
+                    "app.kubernetes.io/managed-by": "dealhost-runtime-controller",
+                    DEPLOYMENT_LABEL: DEPLOYMENT_ID,
+                },
+            },
+            "spec": {
+                "holderIdentity": "dead-controller",
+                "leaseDurationSeconds": 10,
+                "acquireTime": "2000-01-01T00:00:00.000000Z",
+                "renewTime": "2000-01-01T00:00:00.000000Z",
+                "leaseTransitions": 4,
+            },
+        }
+
+        result = await self.reconciler.deploy(
+            self.desired(),
+            request_id="request-expired-lease",
+        )
+
+        self.assertEqual(result.observed_generation, 1)
+        self.assertTrue(
+            any(call[0] == "replace_lease" for call in self.kubernetes.calls)
+        )
+        self.assertNotIn(
+            (self.settings.namespace, "Lease", name),
+            self.kubernetes.resources,
+        )
+
+    async def test_mutation_lease_wait_is_bounded_and_retryable(self) -> None:
+        name = lease_name(DEPLOYMENT_ID)
+        self.kubernetes.resources[(self.settings.namespace, "Lease", name)] = {
+            "apiVersion": "coordination.k8s.io/v1",
+            "kind": "Lease",
+            "metadata": {
+                "name": name,
+                "namespace": self.settings.namespace,
+                "uid": "active-lease",
+                "resourceVersion": "1",
+                "labels": {
+                    "app.kubernetes.io/managed-by": "dealhost-runtime-controller",
+                    DEPLOYMENT_LABEL: DEPLOYMENT_ID,
+                },
+            },
+            "spec": {
+                "holderIdentity": "another-controller",
+                "leaseDurationSeconds": 30,
+                "acquireTime": "2999-01-01T00:00:00.000000Z",
+                "renewTime": "2999-01-01T00:00:00.000000Z",
+                "leaseTransitions": 0,
+            },
+        }
+        settings = replace(self.settings, lease_acquire_timeout_seconds=0.1)
+        reconciler = RuntimeReconciler(settings, self.kubernetes)
+
+        with self.assertRaises(RuntimeBusy) as raised:
+            await reconciler.deploy(
+                self.desired(),
+                request_id="request-contended",
+            )
+
+        self.assertEqual(raised.exception.status_code, 429)
+        self.assertEqual(raised.exception.code, "runtime_busy")
+        self.assertFalse(any(call[0] == "apply" for call in self.kubernetes.calls))
 
     async def test_undeploy_keeps_stable_result_without_retaining_a_tombstone(
         self,

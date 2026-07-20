@@ -68,8 +68,8 @@ secure_file() {
     printf 'Cannot inspect %s permissions: %s\n' "$description" "$path" >&2
     return 1
   }
-  if [[ "$owner" != "$(id -u)" || ! "$mode" =~ ^[0-7]?[0-7]00$ ]]; then
-    printf '%s must be owned by uid %s and inaccessible to group/other (mode 0600).\n' \
+  if [[ "$owner" != "$(id -u)" || ! "$mode" =~ ^0?[4567]00$ ]]; then
+    printf '%s must be owned by uid %s, owner-readable and inaccessible to group/other.\n' \
       "$description" "$(id -u)" >&2
     return 1
   fi
@@ -169,7 +169,8 @@ if [[ "$ARCHIDEAL_FORCE_REDEPLOY" != "0" && "$ARCHIDEAL_FORCE_REDEPLOY" != "1" ]
   log ERROR 'ARCHIDEAL_FORCE_REDEPLOY must be 0 or 1.'
   exit "$EXIT_USAGE"
 fi
-if [[ ! "$ARCHIDEAL_HEALTH_URL" =~ ^https?://[^/@[:space:]]+(:[0-9]+)?(/[^[:space:]]*)?$ ]]; then
+if [[ ! "$ARCHIDEAL_HEALTH_URL" =~ ^https?://[^/@[:space:]]+(:[0-9]+)?(/[^[:space:]]*)?$ || \
+      "$ARCHIDEAL_HEALTH_URL" == *"?"* || "$ARCHIDEAL_HEALTH_URL" == *"#"* ]]; then
   log ERROR 'ARCHIDEAL_HEALTH_URL must be an HTTP(S) URL without credentials.'
   exit "$EXIT_USAGE"
 fi
@@ -243,14 +244,15 @@ if [[ "$dry_run" == "true" ]]; then
 fi
 
 log INFO 'Fetching the configured branch without force-updating any local ref.'
-git fetch --prune "$ARCHIDEAL_REMOTE" \
-  "refs/heads/$ARCHIDEAL_BRANCH:refs/remotes/$ARCHIDEAL_REMOTE/$ARCHIDEAL_BRANCH"
-
-if git show-ref --verify --quiet "refs/heads/$ARCHIDEAL_BRANCH"; then
-  git switch "$ARCHIDEAL_BRANCH" >/dev/null
-else
-  git switch --create "$ARCHIDEAL_BRANCH" \
-    --track "$ARCHIDEAL_REMOTE/$ARCHIDEAL_BRANCH" >/dev/null
+current_branch="$(git branch --show-current)"
+if [[ "$current_branch" != "$ARCHIDEAL_BRANCH" ]]; then
+  log ERROR 'The checkout is not on ARCHIDEAL_BRANCH; refusing to switch an active deployment automatically.'
+  exit "$EXIT_UNSAFE_REPOSITORY"
+fi
+if ! git fetch --prune "$ARCHIDEAL_REMOTE" \
+  "refs/heads/$ARCHIDEAL_BRANCH:refs/remotes/$ARCHIDEAL_REMOTE/$ARCHIDEAL_BRANCH"; then
+  log ERROR 'The configured branch could not be fetched without rewriting remote-tracking history.'
+  exit "$EXIT_UNSAFE_REPOSITORY"
 fi
 
 if [[ -n "$(git status --porcelain=v1 --untracked-files=all)" ]]; then

@@ -822,6 +822,64 @@ def validate_runtime_apps_fail_closed(
             "Only the reviewed runtime-apps tree may target the managed-application "
             "namespace; namespace transforms in other kustomizations are forbidden."
         )
+    expected_platform_kustomizations = [
+        {
+            "apiVersion": "kustomize.config.k8s.io/v1beta1",
+            "kind": "Kustomization",
+            "namespace": "archideal",
+            "resources": [
+                "namespace.yaml",
+                "serviceaccounts.yaml",
+                "runtime-controller-rbac.yaml",
+                "configuration.yaml",
+                "services.yaml",
+                "workloads.yaml",
+                "runtime-management.yaml",
+                "consumers.yaml",
+                "private-network-preflight.yaml",
+                "preflight.yaml",
+                "jobs.yaml",
+                "bootstrap.yaml",
+                "availability.yaml",
+                "autoscaling.yaml",
+                "network-policies.yaml",
+                "observability.yaml",
+            ],
+        },
+        {
+            "apiVersion": "kustomize.config.k8s.io/v1beta1",
+            "kind": "Kustomization",
+            "namespace": "archideal",
+            "resources": [
+                "../../base",
+                "external-secrets.yaml",
+                "ingress.yaml",
+                "platform-contract.yaml",
+                "synthetic-smoke.yaml",
+            ],
+            "labels": [
+                {
+                    "includeSelectors": False,
+                    "pairs": {"archideal.io/environment": "production"},
+                }
+            ],
+        },
+    ]
+    platform_kustomizations = [
+        document
+        for document in all_documents
+        if document.get("kind") == "Kustomization"
+        and document != expected_kustomization
+    ]
+    if len(platform_kustomizations) != len(expected_platform_kustomizations) or any(
+        expected not in platform_kustomizations
+        for expected in expected_platform_kustomizations
+    ):
+        fail(
+            "Base and production kustomizations must remain exact; cross-tree "
+            "runtime-apps resources, patches, components, generators and "
+            "replacements are forbidden."
+        )
 
     expected_namespace = {
         "apiVersion": "v1",
@@ -983,6 +1041,81 @@ def validate_runtime_apps_fail_closed(
         fail(
             "Runtime-apps must keep an exact deny-all ingress/egress policy and "
             "the reviewed DNS-only egress exception."
+        )
+
+    expected_runtime_inventory = {
+        (
+            "kustomize.config.k8s.io/v1beta1",
+            "Kustomization",
+            None,
+            None,
+        ),
+        ("v1", "Namespace", RUNTIME_APPS_NAMESPACE, None),
+        (
+            "networking.k8s.io/v1",
+            "NetworkPolicy",
+            "runtime-apps-default-deny",
+            RUNTIME_APPS_NAMESPACE,
+        ),
+        (
+            "networking.k8s.io/v1",
+            "NetworkPolicy",
+            "runtime-apps-allow-dns-egress",
+            RUNTIME_APPS_NAMESPACE,
+        ),
+        (
+            "rbac.authorization.k8s.io/v1",
+            "Role",
+            "dealhost-runtime-controller",
+            RUNTIME_APPS_NAMESPACE,
+        ),
+        (
+            "rbac.authorization.k8s.io/v1",
+            "RoleBinding",
+            "dealhost-runtime-controller",
+            RUNTIME_APPS_NAMESPACE,
+        ),
+        (
+            "external-secrets.io/v1",
+            "ExternalSecret",
+            "archideal-registry-credentials",
+            RUNTIME_APPS_NAMESPACE,
+        ),
+        (
+            "v1",
+            "ResourceQuota",
+            "runtime-apps-capacity",
+            RUNTIME_APPS_NAMESPACE,
+        ),
+        (
+            "v1",
+            "LimitRange",
+            "runtime-apps-containers",
+            RUNTIME_APPS_NAMESPACE,
+        ),
+        (
+            "v1",
+            "ServiceAccount",
+            "dealhost-runtime-application",
+            RUNTIME_APPS_NAMESPACE,
+        ),
+    }
+    runtime_inventory = [
+        (
+            document.get("apiVersion"),
+            document.get("kind"),
+            document.get("metadata", {}).get("name"),
+            document.get("metadata", {}).get("namespace"),
+        )
+        for document in runtime_documents
+    ]
+    if (
+        len(runtime_inventory) != len(expected_runtime_inventory)
+        or set(runtime_inventory) != expected_runtime_inventory
+    ):
+        fail(
+            "Runtime-apps must contain exactly the reviewed static resource "
+            "inventory; additional CRDs or workload/exposure resources are forbidden."
         )
 
 
@@ -2020,7 +2153,7 @@ def validate_runtime_contracts(documents: list[dict], values: dict[str, str]) ->
         document
         for document in documents
         if document.get("kind") == "NetworkPolicy"
-        and document.get("metadata", {}).get("namespace") in {None, "archideal"}
+        and document.get("metadata", {}).get("namespace") != RUNTIME_APPS_NAMESPACE
     ]
     expected_shared_policy_specs = {
         "default-deny": {
@@ -2118,12 +2251,18 @@ def validate_runtime_contracts(documents: list[dict], values: dict[str, str]) ->
             workload_name,
             direction,
         ), allowed_names in sensitive_policy_allowlist.items():
+            workload_labels = (
+                workloads.get(workload_name, {})
+                .get("spec", {})
+                .get("template", {})
+                .get("metadata", {})
+                .get("labels", {})
+            )
+            if not isinstance(workload_labels, dict) or not workload_labels:
+                fail(f"Missing pod labels for sensitive workload {workload_name}.")
             if (
                 direction in policy_types
-                and _label_selector_matches(
-                    selector,
-                    {"app.kubernetes.io/name": workload_name},
-                )
+                and _label_selector_matches(selector, workload_labels)
                 and policy_name not in allowed_names
             ):
                 fail(
@@ -3140,6 +3279,7 @@ def validate_runtime_contracts(documents: list[dict], values: dict[str, str]) ->
         "services": "50",
         "configmaps": "100",
         "secrets": "100",
+        "count/leases.coordination.k8s.io": "100",
     }
     runtime_limit_range = next(
         (

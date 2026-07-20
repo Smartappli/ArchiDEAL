@@ -1285,6 +1285,42 @@ class ProductionRendererTests(unittest.TestCase):
             self.assertIn("Unreviewed NetworkPolicy", result.stderr)
             self.assertIn("additive policies are forbidden", result.stderr)
 
+        def add_sensitive_policy_with_misleading_namespace(documents) -> None:
+            documents.append(
+                {
+                    "apiVersion": "networking.k8s.io/v1",
+                    "kind": "NetworkPolicy",
+                    "metadata": {
+                        "name": "unreviewed-worker-egress-other-namespace",
+                        "namespace": "unrelated-before-kustomize",
+                    },
+                    "spec": {
+                        "podSelector": {
+                            "matchLabels": {
+                                "app.kubernetes.io/name": "dealhost-runtime-worker"
+                            }
+                        },
+                        "policyTypes": ["Egress"],
+                        "egress": [
+                            {
+                                "to": [{}],
+                                "ports": [{"protocol": "TCP", "port": 443}],
+                            }
+                        ],
+                    },
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "additive-policy-misleading-namespace",
+                "base/network-policies.yaml",
+                add_sensitive_policy_with_misleading_namespace,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("Unreviewed NetworkPolicy", result.stderr)
+        self.assertIn("additive policies are forbidden", result.stderr)
+
     def test_dependency_ports_must_match_network_policies(self) -> None:
         invalid_values = {
             "KAFKA_BOOTSTRAP_SERVERS": (
@@ -1562,6 +1598,23 @@ class ProductionRendererTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("namespace transforms in other kustomizations", result.stderr)
+
+        def import_runtime_tree_from_production_overlay(documents) -> None:
+            kustomization = next(
+                document
+                for document in documents
+                if document.get("kind") == "Kustomization"
+            )
+            kustomization["resources"].append("../../runtime-apps")
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.render_with_kubernetes_mutation(
+                Path(directory) / "production-imports-runtime-tree",
+                "overlays/production/kustomization.yaml",
+                import_runtime_tree_from_production_overlay,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("cross-tree runtime-apps resources", result.stderr)
 
         def add_unreviewed_runtime_namespace_label(documents) -> None:
             namespace = next(

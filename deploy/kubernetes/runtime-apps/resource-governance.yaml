@@ -15,6 +15,7 @@ spec:
     services: "50"
     configmaps: "100"
     secrets: "100"
+    count/leases.coordination.k8s.io: "100"
 ---
 apiVersion: v1
 kind: LimitRange

@@ -10,8 +10,9 @@ Kubernetes signée décrite dans [`docs/deployment.md`](../../docs/deployment.md
 À chaque exécution, le script :
 
 1. prend un verrou non bloquant pour empêcher deux mises à jour concurrentes ;
-2. refuse un dépôt contenant des modifications suivies ou non suivies et n'exécute jamais
-   `stash`, `reset --hard` ou un pull forcé ;
+2. refuse un dépôt contenant des modifications suivies ou non suivies, ainsi qu'un checkout qui
+   n'est pas déjà sur la branche configurée, et n'exécute jamais `stash`, `reset --hard` ou un
+   changement automatique de branche ;
 3. récupère la branche distante puis n'accepte qu'une avance rapide ;
 4. exécute la validation du monorepo et `docker compose config --quiet` ;
 5. construit les images applicatives avec un tag dérivé du commit, démarre le Compose existant,
@@ -30,6 +31,10 @@ Le VPS doit disposer de Git, Docker Engine, Docker Compose v2, Bash, `flock`, `t
 et PyYAML. Utilisez un compte de service non privilégié membre du groupe Docker, un dépôt qui lui
 appartient et une clé Git de déploiement en lecture seule. Pré-enregistrez la clé d'hôte SSH ; ne
 placez jamais de jeton dans l'URL du remote, la crontab ou les arguments du script.
+
+Le checkout doit être placé à l'avance sur `ARCHIDEAL_BRANCH` (`git switch main` avec la
+configuration d'exemple). Cette contrainte permet d'identifier sans ambiguïté le commit réellement
+déployé et d'y revenir en cas d'échec.
 
 Exemple, en adaptant l'utilisateur et les chemins :
 

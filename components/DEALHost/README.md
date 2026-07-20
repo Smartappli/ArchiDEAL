@@ -372,6 +372,14 @@ token du contrôleur et le bundle CA sont montés dans le worker, tandis que les
 Kubernetes restent exclusivement attachés au pod runtime-controller dans le namespace
 applicatif isolé.
 
+Les mutations `deploy`, `action` et `undeploy` sont sérialisées par déploiement avec
+un `Lease` Kubernetes. Le contrôleur renouvelle le verrou pendant toute la mutation,
+ne reprend un verrou abandonné qu'après son expiration et le libère avec des
+préconditions Kubernetes. `RUNTIME_CONTROLLER_LEASE_DURATION_SECONDS` vaut 30 par
+défaut et `RUNTIME_CONTROLLER_LEASE_ACQUIRE_TIMEOUT_SECONDS` borne l'attente à 10
+secondes; une contention plus longue retourne `429 runtime_busy` pour être retentée
+par le worker. Les lectures d'état et de logs restent hors verrou.
+
 Les `secret_refs` restent des noms logiques : le contrôleur les résout sous la forme
 `<RUNTIME_CONTROLLER_SECRET_NAME_PREFIX>-<nom-logique>`. Il n'a aucun droit de lecture
 sur les Secrets. Il exige avant mutation une entrée correspondante dans le ConfigMap

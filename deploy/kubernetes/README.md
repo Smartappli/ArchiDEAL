@@ -188,12 +188,15 @@ to clear an alert.
 The internal controller is a separate HA Deployment and the only platform Pod with an automounted
 Kubernetes token. A RoleBinding grants its ServiceAccount an exact namespaced Role in
 `archideal-runtime-apps`; it can reconcile Deployments, Services, application ConfigMaps and HPAs
-and read Pod status/logs, but it has no Secret, NetworkPolicy or cluster-wide permission. Managed
+and read Pod status/logs. It also owns namespaced Kubernetes Leases that serialize each
+deployment's mutations across controller replicas; abandoned locks expire, active locks renew,
+and contended requests return a retryable response. It has no Secret, NetworkPolicy or
+cluster-wide permission. Managed
 Pods use the static tokenless `dealhost-runtime-application` ServiceAccount and the independently
 reconciled registry pull Secret. The namespace enforces the restricted Pod Security Standard,
 default-deny ingress/egress with DNS as its only baseline, an aggregate ceiling of 100 Pods, 20/40
 requested/limited CPU, 40/80 GiB requested/limited memory, 50 Services, 100 ConfigMaps and 100
-Secrets, plus reviewed per-container defaults and maxima. Application egress remains unsupported
+Secrets, and 100 coordination Leases, plus reviewed per-container defaults and maxima. Application egress remains unsupported
 until an explicit policy contract is implemented; a requested egress profile fails closed.
 
 Runtime Secret values are provisioned out of band under deterministic names prefixed `dealapp-`.

@@ -706,6 +706,14 @@ class TransientStatusRuntimeController(StaleRuntimeController):
         raise RuntimeControllerError("Temporary controller failure.", status_code=503)
 
 
+class BusyRuntimeController(FakeRuntimeController):
+    def deploy(self, payload, *, request_id: str) -> RuntimeSnapshot:
+        raise RuntimeControllerError(
+            "Another runtime mutation is still in progress.",
+            status_code=429,
+        )
+
+
 class MissingDeletedStateRuntimeController(FakeRuntimeController):
     def __init__(self, module: Module) -> None:
         super().__init__(module)
@@ -807,6 +815,27 @@ class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(operation.attempts, 2)
         self.assertEqual(operation.controller_failures, 1)
         self.assertEqual(operation.status, RuntimeOperation.Status.QUEUED)
+
+    def test_worker_requeues_a_contended_controller_mutation(self) -> None:
+        created = self.queue_deployment(key="runtime-controller-busy")
+        processor = RuntimeOperationProcessor(
+            worker_id="busy-worker",
+            controller=BusyRuntimeController(self.module),
+        )
+
+        self.assertTrue(processor.process_next())
+
+        operation = RuntimeOperation.objects.get(pk=created.data["operation"]["id"])
+        deployment = operation.deployment
+        deployment.refresh_from_db()
+        self.assertEqual(operation.status, RuntimeOperation.Status.QUEUED)
+        self.assertEqual(operation.controller_failures, 1)
+        self.assertEqual(operation.progress, {"stage": "retrying", "percent": None})
+        self.assertIsNotNone(operation.next_attempt_at)
+        self.assertNotEqual(
+            deployment.observed_state,
+            RuntimeDeployment.ObservedState.FAILED,
+        )
 
     def test_undeploy_retries_delete_when_terminal_state_was_already_reclaimed(
         self,

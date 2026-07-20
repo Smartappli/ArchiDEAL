@@ -299,6 +299,8 @@ class DeploymentLeaseManager:
 
     @staticmethod
     def _timestamp(value: datetime) -> str:
-        return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace(
-            "+00:00", "Z"
+        return (
+            value.astimezone(timezone.utc)
+            .isoformat(timespec="microseconds")
+            .replace("+00:00", "Z")
         )

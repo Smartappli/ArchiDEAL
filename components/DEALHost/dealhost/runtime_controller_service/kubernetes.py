@@ -153,9 +153,7 @@ class KubernetesClient:
             or not isinstance(resource_version, str)
             or not resource_version
         ):
-            raise ValueError(
-                "Kubernetes Lease name and resourceVersion are required."
-            )
+            raise ValueError("Kubernetes Lease name and resourceVersion are required.")
         prefix, plural = self._endpoint("Lease")
         response = await self._request(
             "PUT",
@@ -361,7 +359,11 @@ class KubernetesClient:
                             )
                     response = httpx.Response(
                         streamed_response.status_code,
-                        headers=streamed_response.headers,
+                        headers={
+                            key: value
+                            for key, value in streamed_response.headers.items()
+                            if key.lower() not in {"content-encoding", "content-length"}
+                        },
                         content=bytes(body),
                         request=streamed_response.request,
                     )
