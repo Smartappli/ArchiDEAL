@@ -17,6 +17,18 @@ RENDERER = ROOT / "deploy/kubernetes/render.py"
 EXAMPLE_VALUES = ROOT / "deploy/kubernetes/values.example.yaml"
 
 
+def bash_executable() -> str | None:
+    """Prefer Git Bash on Windows, where System32/bash.exe may be a WSL shim."""
+
+    if os.name == "nt":
+        git = shutil.which("git")
+        if git:
+            candidate = Path(git).resolve().parents[1] / "bin" / "bash.exe"
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which("bash")
+
+
 class ProductionRendererTests(unittest.TestCase):
     def render(
         self,
@@ -1071,8 +1083,12 @@ class ProductionRendererTests(unittest.TestCase):
     def test_ordered_deployer_is_executable_and_sequences_promotion(self) -> None:
         deployer = ROOT / "deploy/kubernetes/deploy-production.sh"
         self.assertTrue(os.access(deployer, os.X_OK))
+        bash = bash_executable()
+        self.assertIsNotNone(
+            bash, "A Bash interpreter is required for shell syntax checks."
+        )
         result = subprocess.run(
-            ["bash", "-n", str(deployer)],
+            [bash, "-n", str(deployer)],
             cwd=ROOT,
             check=False,
             capture_output=True,
@@ -1240,8 +1256,12 @@ class ProductionRendererTests(unittest.TestCase):
     def test_operator_production_smoke_runs_fresh_mqtt_and_database_gate(self) -> None:
         smoke = ROOT / "deploy/kubernetes/smoke-production.sh"
         self.assertTrue(os.access(smoke, os.X_OK))
+        bash = bash_executable()
+        self.assertIsNotNone(
+            bash, "A Bash interpreter is required for shell syntax checks."
+        )
         result = subprocess.run(
-            ["bash", "-n", str(smoke)],
+            [bash, "-n", str(smoke)],
             cwd=ROOT,
             check=False,
             capture_output=True,

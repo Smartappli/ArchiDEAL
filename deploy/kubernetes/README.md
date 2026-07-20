@@ -196,6 +196,12 @@ replacement through the operator procedure; never put a Secret value in it. Actu
 objects are detected by the managed Pod rollout and remain unavailable without expanding controller
 RBAC.
 
+Synchronize RuntimeEnvironment allowlists with the catalog's logical keys: pass repeated
+`--allowed-secret-ref <logical-name>` options to replace the allowlist exactly, or
+`--clear-allowed-secret-refs` to empty it explicitly. Never pass the physical `dealapp-` prefix to
+that command. Running the provisioning command without either option creates a new environment
+with an empty allowlist and preserves an existing environment's reviewed allowlist.
+
 The controller listener uses a release-scoped `kubernetes.io/tls` Secret populated from
 `pki/dealhost-runtime-controller-tls.crt`,
 `pki/dealhost-runtime-controller-tls.pkcs8.key` and
