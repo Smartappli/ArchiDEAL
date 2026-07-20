@@ -29,9 +29,7 @@ RUNTIME_SECRET_KEY_PATTERN = re.compile(
     r"(?:PASSWORD|PASSWD|TOKEN|SECRET|PRIVATE|CREDENTIAL|API_KEY|ACCESS_KEY)",
     re.IGNORECASE,
 )
-RUNTIME_SECRET_REFERENCE_PATTERN = re.compile(
-    r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
-)
+RUNTIME_SECRET_REFERENCE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 class ModuleSummarySerializer(serializers.ModelSerializer):
@@ -162,7 +160,9 @@ class HostedApplicationSerializer(serializers.ModelSerializer):
         ]
 
 
-def _runtime_profile_rules(application: HostedApplication) -> dict[str, dict[str, set[str]]]:
+def _runtime_profile_rules(
+    application: HostedApplication,
+) -> dict[str, dict[str, set[str]]]:
     rules: dict[str, dict[str, set[str]]] = {}
     for module in application.modules.all():
         try:
@@ -269,18 +269,23 @@ def validate_runtime_scaling(
     application: HostedApplication,
 ) -> dict[str, dict[str, int | str]]:
     if not isinstance(value, dict):
-        raise serializers.ValidationError("Scaling must be a JSON object keyed by module slug.")
+        raise serializers.ValidationError(
+            "Scaling must be a JSON object keyed by module slug."
+        )
     module_slugs = {module.slug for module in application.modules.all()}
     unknown_slugs = sorted(set(value) - module_slugs)
     if unknown_slugs:
         raise serializers.ValidationError(
-            "Scaling contains modules outside the application: " + ", ".join(unknown_slugs)
+            "Scaling contains modules outside the application: "
+            + ", ".join(unknown_slugs)
         )
     normalized: dict[str, dict[str, int | str]] = {}
     for module_slug in sorted(module_slugs):
         raw_policy = value.get(module_slug, {"mode": "fixed", "replicas": 1})
         if not isinstance(raw_policy, dict):
-            raise serializers.ValidationError(f"Scaling for {module_slug} must be an object.")
+            raise serializers.ValidationError(
+                f"Scaling for {module_slug} must be an object."
+            )
         mode = raw_policy.get("mode")
         if mode == "fixed":
             if set(raw_policy) - {"mode", "replicas"}:
@@ -288,7 +293,11 @@ def validate_runtime_scaling(
                     f"Scaling for {module_slug} contains unsupported fixed-mode fields."
                 )
             replicas = raw_policy.get("replicas")
-            if not isinstance(replicas, int) or isinstance(replicas, bool) or not 1 <= replicas <= 50:
+            if (
+                not isinstance(replicas, int)
+                or isinstance(replicas, bool)
+                or not 1 <= replicas <= 50
+            ):
                 raise serializers.ValidationError(
                     f"Fixed replicas for {module_slug} must be between 1 and 50."
                 )
@@ -309,11 +318,17 @@ def validate_runtime_scaling(
             maximum = raw_policy.get("max_replicas")
             target = raw_policy.get("target_cpu_utilization", 70)
             values = (minimum, maximum, target)
-            if any(not isinstance(item, int) or isinstance(item, bool) for item in values):
+            if any(
+                not isinstance(item, int) or isinstance(item, bool) for item in values
+            ):
                 raise serializers.ValidationError(
                     f"Autoscaling values for {module_slug} must be integers."
                 )
-            assert isinstance(minimum, int) and isinstance(maximum, int) and isinstance(target, int)
+            assert (
+                isinstance(minimum, int)
+                and isinstance(maximum, int)
+                and isinstance(target, int)
+            )
             if not 1 <= minimum <= maximum <= 50 or not 10 <= target <= 90:
                 raise serializers.ValidationError(
                     f"Autoscaling for {module_slug} must use 1-50 replicas and a 10-90 CPU target."
@@ -483,7 +498,9 @@ class RuntimeDeploymentCreateSerializer(serializers.Serializer):
             )
         version = str(attrs.get("version") or application.current_version).strip()
         if not re.fullmatch(SEMVER_PATTERN, version):
-            raise serializers.ValidationError({"version": "A semantic version is required."})
+            raise serializers.ValidationError(
+                {"version": "A semantic version is required."}
+            )
         if not application.versions.filter(version=version).exists():
             raise serializers.ValidationError(
                 {"version": "Only published application versions can be deployed."}
@@ -522,13 +539,13 @@ class RuntimeDeploymentUpdateSerializer(serializers.Serializer):
 
     def validate_secret_refs(self, value: object) -> dict[str, dict[str, str]]:
         deployment = self.context["deployment"]
-        return validate_runtime_secret_references(value, application=deployment.application)
+        return validate_runtime_secret_references(
+            value, application=deployment.application
+        )
 
 
 class RuntimeActionSerializer(serializers.Serializer):
-    action = serializers.ChoiceField(
-        choices=["start", "stop", "restart", "scale"]
-    )
+    action = serializers.ChoiceField(choices=["start", "stop", "restart", "scale"])
     component = serializers.SlugField(required=False)
     replicas = serializers.IntegerField(min_value=1, max_value=50, required=False)
 

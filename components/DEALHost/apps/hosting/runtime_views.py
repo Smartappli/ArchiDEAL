@@ -8,7 +8,6 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.shortcuts import get_object_or_404
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -89,7 +88,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             queryset = queryset.filter(environment_id=environment)
         if observed_state:
             queryset = queryset.filter(observed_state=observed_state)
-        return queryset.order_by("application__name", "environment__name", "-created_at")
+        return queryset.order_by(
+            "application__name", "environment__name", "-created_at"
+        )
 
     def list(self, request: Request) -> Response:
         page = self.paginate_queryset(self.get_queryset())
@@ -234,7 +235,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                 request_hash,
                 payload={"changed_fields": sorted(serializer.validated_data)},
             )
-        return _mutation_response(self._fresh(locked.pk), operation, status.HTTP_202_ACCEPTED)
+        return _mutation_response(
+            self._fresh(locked.pk), operation, status.HTTP_202_ACCEPTED
+        )
 
     update = partial_update
 
@@ -274,7 +277,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                 request_hash,
                 payload={},
             )
-        return _mutation_response(self._fresh(locked.pk), operation, status.HTTP_202_ACCEPTED)
+        return _mutation_response(
+            self._fresh(locked.pk), operation, status.HTTP_202_ACCEPTED
+        )
 
     @action(detail=True, methods=["post"], url_path="actions")
     def actions(self, request: Request, pk: str | None = None) -> Response:
@@ -310,9 +315,11 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
             elif action_name == "scale":
                 component_slug = serializer.validated_data["component"]
                 replicas = serializer.validated_data["replicas"]
-                component = locked.components.select_related("module").filter(
-                    module__slug=component_slug
-                ).first()
+                component = (
+                    locked.components.select_related("module")
+                    .filter(module__slug=component_slug)
+                    .first()
+                )
                 if component is None:
                     return _problem(
                         "The requested component is not part of the deployment.",
@@ -337,7 +344,9 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                 request_hash,
                 payload=payload,
             )
-        return _mutation_response(self._fresh(locked.pk), operation, status.HTTP_202_ACCEPTED)
+        return _mutation_response(
+            self._fresh(locked.pk), operation, status.HTTP_202_ACCEPTED
+        )
 
     @action(detail=True, methods=["get"], url_path="operations")
     def operations(self, request: Request, pk: str | None = None) -> Response:
@@ -376,8 +385,14 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
             capabilities = locked.environment.capabilities
-            log_limits = capabilities.get("logs", {}) if isinstance(capabilities, dict) else {}
-            maximum = log_limits.get("max_lines", 1000) if isinstance(log_limits, dict) else 1000
+            log_limits = (
+                capabilities.get("logs", {}) if isinstance(capabilities, dict) else {}
+            )
+            maximum = (
+                log_limits.get("max_lines", 1000)
+                if isinstance(log_limits, dict)
+                else 1000
+            )
             if serializer.validated_data["tail_lines"] > maximum:
                 return _problem(
                     "The requested log tail exceeds the environment limit.",
@@ -423,11 +438,15 @@ class RuntimeDeploymentViewSet(viewsets.GenericViewSet):
         return response
 
     def _locked_deployment(self, deployment_id) -> RuntimeDeployment:
-        return RuntimeDeployment.objects.select_for_update().select_related(
-            "application",
-            "release__application_version",
-            "environment",
-        ).get(pk=deployment_id)
+        return (
+            RuntimeDeployment.objects.select_for_update()
+            .select_related(
+                "application",
+                "release__application_version",
+                "environment",
+            )
+            .get(pk=deployment_id)
+        )
 
     def _fresh(self, deployment_id) -> RuntimeDeployment:
         return self.get_queryset().get(pk=deployment_id)

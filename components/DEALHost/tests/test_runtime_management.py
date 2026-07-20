@@ -116,9 +116,7 @@ class RuntimeFixtureMixin:
             "environment": self.environment.slug,
             "version": self.version.version,
             "configuration": {"runtime-api": {"FEATURE_FLAG": "enabled"}},
-            "secret_refs": {
-                "runtime-api": {"DATABASE_PASSWORD": "runtime-database"}
-            },
+            "secret_refs": {"runtime-api": {"DATABASE_PASSWORD": "runtime-database"}},
             "scaling": {"runtime-api": {"mode": "fixed", "replicas": 2}},
         }
 
@@ -134,7 +132,9 @@ class RuntimeFixtureMixin:
 
 @override_settings(RUNTIME_CONTROLLER=ENABLED_CONTROLLER, RUNTIME_ENABLED=True)
 class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
-    def test_lists_allowlisted_environments_and_queues_an_idempotent_deploy(self) -> None:
+    def test_lists_allowlisted_environments_and_queues_an_idempotent_deploy(
+        self,
+    ) -> None:
         environments = self.client.get(reverse("runtime-environments-list"))
         self.assertEqual(environments.status_code, 200)
         self.assertEqual(environments.data["results"][0]["slug"], "production")
@@ -155,7 +155,9 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         replay = self.queue_deployment()
         self.assertEqual(replay.status_code, 200)
         self.assertEqual(replay["Idempotent-Replay"], "true")
-        self.assertEqual(replay.data["operation"]["id"], created.data["operation"]["id"])
+        self.assertEqual(
+            replay.data["operation"]["id"], created.data["operation"]["id"]
+        )
         self.assertEqual(RuntimeDeployment.objects.count(), 1)
         self.assertEqual(RuntimeOperation.objects.count(), 1)
 
@@ -173,9 +175,7 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         created = self.queue_deployment(key="runtime-shared-key")
         self.assertEqual(created.status_code, 202)
         changed_payload = self.deployment_payload()
-        changed_payload["scaling"] = {
-            "runtime-api": {"mode": "fixed", "replicas": 4}
-        }
+        changed_payload["scaling"] = {"runtime-api": {"mode": "fixed", "replicas": 4}}
         conflict = self.client.post(
             reverse("deployments-list"),
             changed_payload,
@@ -261,7 +261,9 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         self.assertEqual(stopped.status_code, 202)
         self.assertEqual(stopped.data["deployment"]["desired_state"], "stopped")
 
-        stop_operation = RuntimeOperation.objects.get(pk=stopped.data["operation"]["id"])
+        stop_operation = RuntimeOperation.objects.get(
+            pk=stopped.data["operation"]["id"]
+        )
         stop_operation.status = RuntimeOperation.Status.SUCCEEDED
         stop_operation.finished_at = timezone.now()
         stop_operation.save()
@@ -300,7 +302,9 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
             password="irrelevant",  # nosec B106 - test-only fixture.
         )
         self.client.force_authenticate(reader)
-        self.assertEqual(self.client.get(reverse("runtime-environments-list")).status_code, 403)
+        self.assertEqual(
+            self.client.get(reverse("runtime-environments-list")).status_code, 403
+        )
         self.assertEqual(self.client.get(reverse("deployments-list")).status_code, 403)
 
 
@@ -326,7 +330,9 @@ class FakeRuntimeController:
     def update(self, controller_id, payload, *, request_id: str) -> RuntimeSnapshot:
         return self.snapshot("running", payload["generation"])
 
-    def action(self, controller_id, action_name, payload, *, request_id: str) -> RuntimeSnapshot:
+    def action(
+        self, controller_id, action_name, payload, *, request_id: str
+    ) -> RuntimeSnapshot:
         state = "stopped" if action_name == "stop" else "running"
         return self.snapshot(state, payload["generation"])
 
@@ -377,7 +383,9 @@ class RuntimeWorkerTests(RuntimeFixtureMixin, APITestCase):
         deployment = operation.deployment
         deployment.refresh_from_db()
         self.assertEqual(operation.status, RuntimeOperation.Status.SUCCEEDED)
-        self.assertEqual(deployment.observed_state, RuntimeDeployment.ObservedState.RUNNING)
+        self.assertEqual(
+            deployment.observed_state, RuntimeDeployment.ObservedState.RUNNING
+        )
         self.assertEqual(deployment.controller_id, "controller-runtime-1")
         self.assertEqual(deployment.components.get().ready_replicas, 2)
 

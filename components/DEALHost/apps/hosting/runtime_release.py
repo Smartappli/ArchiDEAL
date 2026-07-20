@@ -98,7 +98,10 @@ def validate_runtime_profile(profile: ModuleRuntimeProfile) -> dict[str, Any]:
         )
     for group in ("requests", "limits"):
         resource_values = resources[group]
-        if not isinstance(resource_values, dict) or set(resource_values) != {"cpu", "memory"}:
+        if not isinstance(resource_values, dict) or set(resource_values) != {
+            "cpu",
+            "memory",
+        }:
             raise RuntimeReleaseNotDeployable(
                 f"Runtime profile for {profile.module.slug} has incomplete resources."
             )
@@ -157,7 +160,9 @@ def runtime_release_for(
         _validate_environment_policy(existing.manifest, environment)
         return existing
 
-    modules = list(application.modules.select_related("runtime_profile").order_by("slug"))
+    modules = list(
+        application.modules.select_related("runtime_profile").order_by("slug")
+    )
     if not modules:
         raise RuntimeReleaseNotDeployable("The application has no deployable modules.")
     manifest_modules: list[dict[str, Any]] = []

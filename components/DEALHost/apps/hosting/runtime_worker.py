@@ -42,11 +42,15 @@ class RuntimeOperationProcessor:
         if claimed is None:
             return False
         operation_id, lease_token = claimed
-        operation = RuntimeOperation.objects.select_related(
-            "deployment__application",
-            "deployment__release__application_version",
-            "deployment__environment",
-        ).prefetch_related("deployment__components__module").get(pk=operation_id)
+        operation = (
+            RuntimeOperation.objects.select_related(
+                "deployment__application",
+                "deployment__release__application_version",
+                "deployment__environment",
+            )
+            .prefetch_related("deployment__components__module")
+            .get(pk=operation_id)
+        )
         try:
             self._execute(operation, lease_token)
         except (RuntimeControllerUnavailable, RuntimeControllerError) as exc:
@@ -159,12 +163,16 @@ class RuntimeOperationProcessor:
     ) -> None:
         now = timezone.now()
         with transaction.atomic():
-            locked_operation = RuntimeOperation.objects.select_for_update().get(pk=operation.pk)
+            locked_operation = RuntimeOperation.objects.select_for_update().get(
+                pk=operation.pk
+            )
             if locked_operation.lease_token != lease_token:
                 return
-            deployment = RuntimeDeployment.objects.select_for_update().select_related(
-                "release__application_version"
-            ).get(pk=locked_operation.deployment_id)
+            deployment = (
+                RuntimeDeployment.objects.select_for_update()
+                .select_related("release__application_version")
+                .get(pk=locked_operation.deployment_id)
+            )
             _apply_snapshot(deployment, snapshot)
             deployment.revision += 1
             deployment.last_reconciled_at = now
@@ -245,7 +253,9 @@ class RuntimeOperationProcessor:
         now = timezone.now()
         maximum_bytes = 262_144
         capabilities = operation.deployment.environment.capabilities
-        if isinstance(capabilities, dict) and isinstance(capabilities.get("logs"), dict):
+        if isinstance(capabilities, dict) and isinstance(
+            capabilities.get("logs"), dict
+        ):
             configured = capabilities["logs"].get("max_bytes", maximum_bytes)
             if isinstance(configured, int) and not isinstance(configured, bool):
                 maximum_bytes = min(max(configured, 1), 262_144)
@@ -303,7 +313,7 @@ class RuntimeOperationProcessor:
                 locked.status = RuntimeOperation.Status.QUEUED
                 locked.progress = {"stage": "retrying", "percent": None}
                 locked.next_attempt_at = timezone.now() + timedelta(
-                    seconds=min(2 ** locked.attempts, 60)
+                    seconds=min(2**locked.attempts, 60)
                 )
                 locked.leased_by = ""
                 locked.lease_token = None
@@ -381,9 +391,7 @@ def _apply_snapshot(
     deployment.observed_state = snapshot.state
     deployment.observed_generation = snapshot.observed_generation
     deployment.last_error = (
-        snapshot.message
-        if snapshot.state in {"degraded", "failed", "unknown"}
-        else ""
+        snapshot.message if snapshot.state in {"degraded", "failed", "unknown"} else ""
     )
     if snapshot.state == RuntimeDeployment.ObservedState.DELETED:
         deployment.deleted_at = timezone.now()

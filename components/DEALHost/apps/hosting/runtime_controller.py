@@ -142,7 +142,9 @@ class RuntimeControllerClient:
         )
         raw_lines = data.get("lines")
         if not isinstance(raw_lines, list) or len(raw_lines) > tail:
-            raise RuntimeControllerError("Runtime controller returned an invalid log response.")
+            raise RuntimeControllerError(
+                "Runtime controller returned an invalid log response."
+            )
         lines: list[str] = []
         total = 0
         for value in raw_lines:
@@ -153,14 +155,20 @@ class RuntimeControllerClient:
             line = value.replace("\x00", "")[:16_384]
             total += len(line)
             if total > 1_000_000:
-                raise RuntimeControllerError("Runtime controller log response is too large.")
+                raise RuntimeControllerError(
+                    "Runtime controller log response is too large."
+                )
             lines.append(line)
         cursor = data.get("cursor", "")
         if not isinstance(cursor, str) or len(cursor) > 500:
-            raise RuntimeControllerError("Runtime controller returned an invalid log cursor.")
+            raise RuntimeControllerError(
+                "Runtime controller returned an invalid log cursor."
+            )
         truncated = data.get("truncated", False)
         if not isinstance(truncated, bool):
-            raise RuntimeControllerError("Runtime controller returned an invalid log response.")
+            raise RuntimeControllerError(
+                "Runtime controller returned an invalid log response."
+            )
         return RuntimeLogs(tuple(lines), cursor, truncated)
 
     def _request(
@@ -208,7 +216,9 @@ class RuntimeControllerClient:
             raise RuntimeControllerError("Runtime controller response is too large.")
         content_type = response.headers.get("content-type", "").split(";", 1)[0].strip()
         if content_type != "application/json":
-            raise RuntimeControllerError("Runtime controller returned a non-JSON response.")
+            raise RuntimeControllerError(
+                "Runtime controller returned a non-JSON response."
+            )
         try:
             data = response.json()
         except ValueError as exc:
@@ -216,7 +226,9 @@ class RuntimeControllerClient:
                 "Runtime controller returned malformed JSON."
             ) from exc
         if not isinstance(data, dict):
-            raise RuntimeControllerError("Runtime controller returned an invalid response.")
+            raise RuntimeControllerError(
+                "Runtime controller returned an invalid response."
+            )
         return data
 
 
@@ -247,11 +259,15 @@ def _snapshot(
         or len(controller_id) > 128
         or (require_id and controller_id == fallback_id == "")
     ):
-        raise RuntimeControllerError("Runtime controller omitted its deployment identifier.")
+        raise RuntimeControllerError(
+            "Runtime controller omitted its deployment identifier."
+        )
     if state not in ALLOWED_RUNTIME_STATES:
         raise RuntimeControllerError("Runtime controller returned an invalid state.")
     if not isinstance(message, str):
-        raise RuntimeControllerError("Runtime controller returned an invalid status message.")
+        raise RuntimeControllerError(
+            "Runtime controller returned an invalid status message."
+        )
     message = " ".join(message.split())[:500]
     if (
         not isinstance(observed_generation, int)
@@ -263,7 +279,9 @@ def _snapshot(
         )
     if not isinstance(components, list) or len(components) > 100:
         raise RuntimeControllerError("Runtime controller returned invalid components.")
-    validated_components = tuple(_component_snapshot(component) for component in components)
+    validated_components = tuple(
+        _component_snapshot(component) for component in components
+    )
     return RuntimeSnapshot(
         controller_id=controller_id,
         state=state,

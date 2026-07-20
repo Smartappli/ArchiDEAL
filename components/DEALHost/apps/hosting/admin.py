@@ -117,7 +117,12 @@ class RuntimeReleaseAdmin(admin.ModelAdmin):
         "application_version__version",
         "manifest_digest",
     )
-    readonly_fields = ("application_version", "manifest", "manifest_digest", "created_at")
+    readonly_fields = (
+        "application_version",
+        "manifest",
+        "manifest_digest",
+        "created_at",
+    )
 
 
 class RuntimeComponentInline(admin.TabularInline):
