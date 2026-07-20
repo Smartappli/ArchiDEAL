@@ -219,6 +219,19 @@ class RuntimeManagementApiTests(RuntimeFixtureMixin, APITestCase):
         )
         self.assertEqual(traversal.status_code, 400)
 
+        payload = self.deployment_payload()
+        payload["secret_refs"] = {
+            "runtime-api": {"DATABASE_PASSWORD": "unapproved-database"}
+        }
+        unapproved = self.client.post(
+            reverse("deployments-list"),
+            payload,
+            format="json",
+            HTTP_IF_MATCH=f'"{self.application.revision}"',
+            HTTP_IDEMPOTENCY_KEY="runtime-secret-unapproved",
+        )
+        self.assertEqual(unapproved.status_code, 400)
+
     def test_queues_config_actions_logs_and_soft_undeploy_with_etags(self) -> None:
         created = self.queue_deployment()
         deployment_id = created.data["deployment"]["id"]
