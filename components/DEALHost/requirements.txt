@@ -1,5 +1,5 @@
 # Python >=3.12
-Django>=6.0.4,<6.1
+Django>=6.0.7,<6.1
 djangorestframework>=3.16,<4.0
 httpx>=0.28.1,<0.29
 python-dotenv>=1.2.2,<2.0
