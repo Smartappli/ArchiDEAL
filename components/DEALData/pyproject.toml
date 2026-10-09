@@ -3,7 +3,7 @@ name = "dealdata"
 version = "0.1.0"
 requires-python = ">=3.14.6"
 dependencies = [
-    "Django[argon2]==6.0.7",
+    "Django[argon2]==6.0.8",
     "django-filter==25.2",
     "django-health-check[psutil]==4.4.3",
     "django-valkey[lz4]==0.4.1",
