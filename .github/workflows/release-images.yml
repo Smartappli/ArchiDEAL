@@ -253,7 +253,7 @@ jobs:
             > "release-${{ matrix.name }}.json"
 
       - name: Upload image evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-fragment-${{ matrix.name }}
           path: |
@@ -502,7 +502,7 @@ jobs:
             }' > "release-${{ matrix.name }}.json"
 
       - name: Upload upstream evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-fragment-${{ matrix.name }}
           path: |
@@ -598,7 +598,7 @@ jobs:
           tar -czf release-evidence.tar.gz -C release-package .
 
       - name: Upload signed release manifest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: archideal-release-${{ github.sha }}
           path: |
