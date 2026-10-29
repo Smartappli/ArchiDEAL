@@ -1,5 +1,5 @@
 # Stage 1: Build with all dependencies
-FROM python:3.14-alpine@sha256:601e99e090cb08c2784a42395487709500bc39930307fe72f3f11a8f3c430762 AS builder
+FROM python:3.14-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2 AS builder
 
 ARG APP_HOME=/app
 WORKDIR ${APP_HOME}
@@ -19,7 +19,7 @@ RUN apk add --no-cache --virtual .lz4-build-deps build-base linux-headers lz4-de
  && apk del .lz4-build-deps
 
 # Stage 2: Lightweight runtime image
-FROM python:3.14-alpine@sha256:601e99e090cb08c2784a42395487709500bc39930307fe72f3f11a8f3c430762 AS runtime
+FROM python:3.14-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2 AS runtime
 
 ARG APP_HOME=/app
 WORKDIR ${APP_HOME}
