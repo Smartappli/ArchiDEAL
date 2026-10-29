@@ -1845,7 +1845,7 @@ services:
       - orchestration_net
 
   apicurio-registry-ui:
-    image: apicurio/apicurio-registry-ui:3.3.0
+    image: apicurio/apicurio-registry-ui:3.3.3
     container_name: apicurio-registry-ui
     hostname: apicurio-registry-ui
     restart: unless-stopped
